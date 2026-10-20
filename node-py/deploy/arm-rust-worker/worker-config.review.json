@@ -1,0 +1,102 @@
+{
+  "$schema": "./worker-config.review.schema.json",
+  "schema_version": 1,
+  "status": "review-only",
+  "deployable": false,
+  "worker_release": {
+    "source_commit": "cfdc8d30d0eb663ebd86f287701417cf880070c4",
+    "local_candidate_path": "/tmp/taskenv-arm-worker-service-candidate-cfdc8d30-20261013",
+    "content_sha256": "5e795a4f7ec6ed608543437014a4bd2bb9c3764c0932d1e5d33cf0649450623c",
+    "regular_files": 262,
+    "staged_on_guest": false
+  },
+  "handler": {
+    "id": "benchday.compilation.rust-check.aarch64.v1",
+    "source_commit": "0acf9314db3a9c703b307829fb02135c7a31e622",
+    "candidate_path": "/tmp/taskenv-arm-rust-handler-candidate-0acf9314",
+    "release_digest": "a0f96feed8d7c4fb0febccdbc2dc9dd1eb0abc0f9887191fa34c18ab2ab7624d",
+    "archive_sha256": "18faf52e39430338e5aa6026446d876f7cd7118d449270ed947a4579c6864199",
+    "activated": false
+  },
+  "worker": {
+    "id": "xc-mac-studio-harmony-rust",
+    "guest": "xc-mac-studio-harmony",
+    "physical_host_id": "xc-mac-studio",
+    "platform": "linux",
+    "architecture": "aarch64",
+    "handler_ids": ["benchday.compilation.rust-check.aarch64.v1"],
+    "compilation_classes": ["rust"],
+    "capacity_bytes": null,
+    "automatic_environment_selection": false
+  },
+  "storage": {
+    "workspace_bytes": 8589934592,
+    "workspace_path": null,
+    "environment_volume_bytes": 17179869184,
+    "environment_root": null,
+    "environment_max_bytes": 16106127360,
+    "store_reserve_bytes": 1073741824,
+    "quota_helper": null,
+    "project_id_range": null,
+    "separate_filesystem_required": true
+  },
+  "runtime_inputs": {
+    "authority_url": null,
+    "worker_token_included": false,
+    "state_dir": null,
+    "workspace": null,
+    "handler_release_store": null,
+    "python_executable": "/usr/bin/python3",
+    "rust_toolchain_path": "/home/ubuntu.guest/.cargo/bin",
+    "task_environment_profile_id": "benchday-linux-rust-dev-v1",
+    "task_environment_profile_definition": null
+  },
+  "toolchains": {
+    "x86_64": {
+      "host": "zz-joe",
+      "rustc_release": "1.98.1",
+      "rustc_commit": "48a229ceaefd4985c50990b14116b6d856af0985",
+      "rustc_date": "2026-09-01",
+      "llvm": "22.1.8",
+      "cargo_release": "1.98.1",
+      "cargo_commit": "797e8a9bca276c1c9f9f738d2a20f484fa4eea9d",
+      "cargo_date": "2026-08-05",
+      "rustup_has_arm_version": false
+    },
+    "aarch64": {
+      "guest_home": "/home/ubuntu.guest",
+      "rustc_path": "/home/ubuntu.guest/.cargo/bin/rustc",
+      "cargo_path": "/home/ubuntu.guest/.cargo/bin/cargo",
+      "rustc_release": "1.99.0",
+      "rustc_commit": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4",
+      "rustc_date": "2026-09-28",
+      "llvm": "23.1.1",
+      "cargo_release": "1.99.0",
+      "cargo_commit": "5f94df4789f005f9a352888e8355ffc645b7ed0e",
+      "cargo_date": "2026-08-27"
+    },
+    "exact_match": false
+  },
+  "unit": {
+    "name": "livestack-workload-worker-xc-mac-studio-harmony-rust.service",
+    "source_path": "node-py/deploy/arm-rust-worker/livestack-workload-worker-xc-mac-studio-harmony-rust.service",
+    "target_path": "%h/.config/systemd/user/livestack-workload-worker-xc-mac-studio-harmony-rust.service",
+    "release_target_path": "%h/.local/share/livestack-workload-releases/livestack-cfdc8d30",
+    "config_target_path": "%h/.config/livestack-workloads/worker-xc-mac-studio-harmony-rust.json",
+    "installed": false,
+    "manifest_id": null,
+    "manifest_digest": null
+  },
+  "gates": {
+    "active_authority_release": "c2930611",
+    "min_authority_value": "c2930611",
+    "min_authority_runtime_enforced": false,
+    "verifier_digest": null,
+    "capture_size_bytes": null,
+    "capture_cap_bytes": null,
+    "controller_mode": "observe-only",
+    "controller_live_readback": "2026-10-14T00:10Z: rollout status mode=observe, spec generation 8, reconciler applied=[]; xc-mac-studio-harmony is registered, connected, idle, eligible, has no ARM Rust handler, and has unit_state=undeclared",
+    "target_cleanup_readback": null,
+    "abi_sequence_permitted": false
+  }
+}

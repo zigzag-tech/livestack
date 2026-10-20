@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARM Rust worker deployment review inputs",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "status",
+    "deployable",
+    "worker_release",
+    "handler",
+    "worker",
+    "storage",
+    "runtime_inputs",
+    "toolchains",
+    "unit",
+    "gates"
+  ],
+  "properties": {
+    "$schema": {"const": "./worker-config.review.schema.json"},
+    "schema_version": {"const": 1},
+    "status": {"const": "review-only"},
+    "deployable": {"const": false},
+    "worker_release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_commit", "local_candidate_path", "content_sha256", "regular_files", "staged_on_guest"],
+      "properties": {
+        "source_commit": {"const": "cfdc8d30d0eb663ebd86f287701417cf880070c4"},
+        "local_candidate_path": {"const": "/tmp/taskenv-arm-worker-service-candidate-cfdc8d30-20261013"},
+        "content_sha256": {"const": "5e795a4f7ec6ed608543437014a4bd2bb9c3764c0932d1e5d33cf0649450623c"},
+        "regular_files": {"const": 262},
+        "staged_on_guest": {"const": false}
+      }
+    },
+    "handler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source_commit", "candidate_path", "release_digest", "archive_sha256", "activated"],
+      "properties": {
+        "id": {"const": "benchday.compilation.rust-check.aarch64.v1"},
+        "source_commit": {"const": "0acf9314db3a9c703b307829fb02135c7a31e622"},
+        "candidate_path": {"const": "/tmp/taskenv-arm-rust-handler-candidate-0acf9314"},
+        "release_digest": {"const": "a0f96feed8d7c4fb0febccdbc2dc9dd1eb0abc0f9887191fa34c18ab2ab7624d"},
+        "archive_sha256": {"const": "18faf52e39430338e5aa6026446d876f7cd7118d449270ed947a4579c6864199"},
+        "activated": {"const": false}
+      }
+    },
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "guest", "physical_host_id", "platform", "architecture", "handler_ids", "compilation_classes", "capacity_bytes", "automatic_environment_selection"],
+      "properties": {
+        "id": {"const": "xc-mac-studio-harmony-rust"},
+        "guest": {"const": "xc-mac-studio-harmony"},
+        "physical_host_id": {"const": "xc-mac-studio"},
+        "platform": {"const": "linux"},
+        "architecture": {"const": "aarch64"},
+        "handler_ids": {"const": ["benchday.compilation.rust-check.aarch64.v1"]},
+        "compilation_classes": {"const": ["rust"]},
+        "capacity_bytes": {"type": ["integer", "null"], "minimum": 1},
+        "automatic_environment_selection": {"const": false}
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workspace_bytes", "workspace_path", "environment_volume_bytes", "environment_root", "environment_max_bytes", "store_reserve_bytes", "quota_helper", "project_id_range", "separate_filesystem_required"],
+      "properties": {
+        "workspace_bytes": {"const": 8589934592},
+        "workspace_path": {"type": ["string", "null"]},
+        "environment_volume_bytes": {"const": 17179869184},
+        "environment_root": {"type": ["string", "null"]},
+        "environment_max_bytes": {"const": 16106127360},
+        "store_reserve_bytes": {"const": 1073741824},
+        "quota_helper": {"type": ["string", "null"]},
+        "project_id_range": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["min", "max"],
+              "properties": {
+                "min": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+                "max": {"type": "integer", "minimum": 1, "maximum": 2147483647}
+              }
+            }
+          ]
+        },
+        "separate_filesystem_required": {"const": true}
+      }
+    },
+    "runtime_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority_url", "worker_token_included", "state_dir", "workspace", "handler_release_store", "python_executable", "rust_toolchain_path", "task_environment_profile_id", "task_environment_profile_definition"],
+      "properties": {
+        "authority_url": {"type": ["string", "null"]},
+        "worker_token_included": {"const": false},
+        "state_dir": {"type": ["string", "null"]},
+        "workspace": {"type": ["string", "null"]},
+        "handler_release_store": {"type": ["string", "null"]},
+        "python_executable": {"const": "/usr/bin/python3"},
+        "rust_toolchain_path": {"const": "/home/ubuntu.guest/.cargo/bin"},
+        "task_environment_profile_id": {"const": "benchday-linux-rust-dev-v1"},
+        "task_environment_profile_definition": {"type": ["object", "null"]}
+      }
+    },
+    "toolchains": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x86_64", "aarch64", "exact_match"],
+      "properties": {
+        "x86_64": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["host", "rustc_release", "rustc_commit", "rustc_date", "llvm", "cargo_release", "cargo_commit", "cargo_date", "rustup_has_arm_version"],
+          "properties": {
+            "host": {"const": "zz-joe"},
+            "rustc_release": {"const": "1.98.1"},
+            "rustc_commit": {"const": "48a229ceaefd4985c50990b14116b6d856af0985"},
+            "rustc_date": {"const": "2026-09-01"},
+            "llvm": {"const": "22.1.8"},
+            "cargo_release": {"const": "1.98.1"},
+            "cargo_commit": {"const": "797e8a9bca276c1c9f9f738d2a20f484fa4eea9d"},
+            "cargo_date": {"const": "2026-08-05"},
+            "rustup_has_arm_version": {"const": false}
+          }
+        },
+        "aarch64": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["guest_home", "rustc_path", "cargo_path", "rustc_release", "rustc_commit", "rustc_date", "llvm", "cargo_release", "cargo_commit", "cargo_date"],
+          "properties": {
+            "guest_home": {"const": "/home/ubuntu.guest"},
+            "rustc_path": {"const": "/home/ubuntu.guest/.cargo/bin/rustc"},
+            "cargo_path": {"const": "/home/ubuntu.guest/.cargo/bin/cargo"},
+            "rustc_release": {"const": "1.99.0"},
+            "rustc_commit": {"const": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"},
+            "rustc_date": {"const": "2026-09-28"},
+            "llvm": {"const": "23.1.1"},
+            "cargo_release": {"const": "1.99.0"},
+            "cargo_commit": {"const": "5f94df4789f005f9a352888e8355ffc645b7ed0e"},
+            "cargo_date": {"const": "2026-08-27"}
+          }
+        },
+        "exact_match": {"const": false}
+      }
+    },
+    "unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "source_path", "target_path", "release_target_path", "config_target_path", "installed", "manifest_id", "manifest_digest"],
+      "properties": {
+        "name": {"const": "livestack-workload-worker-xc-mac-studio-harmony-rust.service"},
+        "source_path": {"const": "node-py/deploy/arm-rust-worker/livestack-workload-worker-xc-mac-studio-harmony-rust.service"},
+        "target_path": {"const": "%h/.config/systemd/user/livestack-workload-worker-xc-mac-studio-harmony-rust.service"},
+        "release_target_path": {"const": "%h/.local/share/livestack-workload-releases/livestack-cfdc8d30"},
+        "config_target_path": {"const": "%h/.config/livestack-workloads/worker-xc-mac-studio-harmony-rust.json"},
+        "installed": {"const": false},
+        "manifest_id": {"type": ["string", "null"]},
+        "manifest_digest": {"type": ["string", "null"]}
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["active_authority_release", "min_authority_value", "min_authority_runtime_enforced", "verifier_digest", "capture_size_bytes", "capture_cap_bytes", "controller_mode", "controller_live_readback", "target_cleanup_readback", "abi_sequence_permitted"],
+      "properties": {
+        "active_authority_release": {"const": "c2930611"},
+        "min_authority_value": {"const": "c2930611"},
+        "min_authority_runtime_enforced": {"const": false},
+        "verifier_digest": {"type": ["string", "null"]},
+        "capture_size_bytes": {"type": ["integer", "null"], "minimum": 0},
+        "capture_cap_bytes": {"type": ["integer", "null"], "minimum": 1},
+        "controller_mode": {"const": "observe-only"},
+        "controller_live_readback": {"type": ["string", "null"]},
+        "target_cleanup_readback": {"type": ["string", "null"]},
+        "abi_sequence_permitted": {"const": false}
+      }
+    }
+  }
+}

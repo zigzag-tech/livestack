@@ -1,5 +1,83 @@
 # Tasks
 
+Latest release/canary correction (2026-10-11): all five daemon 3448 builds are
+owner-confirmed terminal succeeded; the artifact-read 404 is fixed and the
+full 47 MB artifact plus foreign-404 control passed. 3448 is no longer a hold.
+The owner later confirmed root retry 3450 succeeded on all five targets and
+completed publication under train `20261011T033118Z-90012`. This supersedes the
+earlier Windows3-running note (plan `78d0358d-8ad1-4395-96e6-dbd374144caa`,
+graph `graph-target-v1-e9a7050f7c833d9de10a0211`, waiter 31405); 3450 is no
+longer an active build or worker-drain hold. The earlier Workload API response
+for Windows3 lacked graph metadata and is not evidence for this terminal
+correction. The separate task-E2E guard
+was satisfied for its exact named canary by the 05:57Z read (attempt ended,
+handle parked, no writer); keep fresh attempt/cleanup readback as a required
+guard for every later target-worker action. Controller remains observe-only
+with no actions applied. The current worker handler directories match all 17
+reported digests, but the registered unit remains stale. Two local worker
+lifecycle tests passed with a home-directory pytest base; this is fixture
+evidence, not installed-handler acceptance. See
+`evidence/release-status-correction-20261011.md`,
+`evidence/live-acceptance-recheck-20261011-0442utc.md`, and
+`evidence/local-compatibility-fixtures-20261011.md`. Fresh 05:20 UTC readback found e2e-1 still running image job
+`7e8ebe2e123f40eb84f2f7a1df314098`, e2e-2 running coalesced full job
+`8d28eb3940d34c7faefb4549f797dcbf`, e2e-3/e2e-4 idle without task-E2E, and
+worker 5 claim-disabled. ZZOPS independently confirms the full train remains
+dispatched. Workload `get` returned 404 for the full job, but both roster and
+ZZOPS report it running; do not infer terminal state. The named canary remains
+parked at generation 18 with no writer. See
+`evidence/live-runtime-readback-20261011-0520utc.md`.
+
+Current task-E2E readback (2026-10-11 05:59 UTC) supersedes the 05:20 roster:
+the named canary job is terminal succeeded, its attempt is ended, and its
+handle remains parked at generation 18 with no writer. Worker 1 is idle and
+advertises the task-E2E handler but its unit is behind; worker 2 still owns the
+dispatched full/coalesced job, worker 3 runs image work, worker 4 lacks the task
+handler, and worker 5 is claim-disabled. No new task-E2E request was submitted.
+Re-read attempt and cleanup state before any later target-worker action. See
+`evidence/live-runtime-readback-20261011-0559utc.md`.
+
+Post-activation readback (2026-10-11T02:01:38Z): authority c2930611 and its
+narrow environment capability are verified, and the one-check task-E2E canary
+passed with the same handle parked at generation 18. Current controller report
+6096 remains observe-only with no applied actions; its unit is based on
+be1d8a42, worker 1 is behind, and workers 2–5 are unknown. Only workers 1 and 2
+advertise task-E2E. The disposable release-script rollback branch drill passed;
+live rollback, broad worker/SDK rollout, and compiler/ABI invalidation remain
+open. Automatic selection stays disabled. Details:
+evidence/post-activation-readback-20261011-0156utc.md and
+evidence/rollback-script-disposable-20261011.md.
+The latest worker/identity recheck is in
+evidence/live-rollout-recheck-20261011-0201utc.md.
+
+Worker rollout handoff (read-only, 2026-10-11T02:54Z): the registered
+`unit-f38a7baa` still targets the `zz-joe-e2e` set from stale release
+`be1d8a42`. A current 258-file worker package was prepared from
+`2109995bcaa9551ad5bf6e0fd1a61d1b4744bd38` and verified byte-identical to the
+existing immutable `livestack-23419ff0` on zz-joe (SHA-256
+`93fcb848aed039930378494811f662a694800e4da2af476c00cd88dee73e2f54`). The
+fresh controller report remains observe-only, generation 6201, and worker 1 is
+running/behind; no drain, restart, or unit write was performed. At that time the
+operator's five-target daemon release 3448 was reported as a hold. This snapshot
+is superseded by the latest correction above: 3448 is terminal and no longer a
+build or drain hold. No alternate ABI Rust worker is enrolled; Linux ARM64 is
+the minimum next enrollment, but no host is verified. Tasks 3.2 and 4.4 remain
+open. See
+`evidence/worker-rollout-handoff-20261011-0254utc.md`.
+
+Fresh controller check (2026-10-11T02:59Z): report generation 6211 remains
+observe-only at spec generation 2 with `applied=[]`; `unit-f38a7baa` is still
+the target and worker 1 is behind while workers 2–5 are unknown. The roster
+read at 02:59:54Z showed the five Rust worker slots ready and idle; the active
+workload list still had daemon Linux release job `e46fc37dabf2448cb150b0e1aa4727ab`
+running. This pre-correction snapshot is superseded by the owner-confirmed
+terminal 3448 status above; 3448 is no longer a hold. The independent
+task-E2E attempt/cleanup guard remains per-attempt and requires a fresh read
+before any later target-worker action. No worker action was taken. Local
+toolchain/ABI fixtures passed 2/2; private worker lifecycle checks could not run
+because lappy's user systemd manager is degraded. See
+`evidence/local-compatibility-fixtures-20261011.md`.
+
 Current live recheck (2026-10-10 10:35 UTC): the authority now runs
 `livestack-486cf6e5`, including the source-upload capacity preflight. The
 Benchday source bundle was accepted as job `44e6910403f14abeb8bf7042a4dcb96e`,
@@ -98,6 +176,13 @@ Validation update (2026-10-03): On zz-joe at Livestack source `c881e2d1`, `test_
   `evidence/live-purpose-boundary-20261010.md`.
 - [x] 3.3 Separate retained disk from attempt runtime and implement park only after supervised cleanup; verify real descendant, container/socket, cancellation and lease-expiry controls leave no compute claim when parked. Ledger: cleanup pending/confirmed and resources released. The cancellation integration `test_cancel_running_job_reconciles_before_readvertising_capacity` passed on zz-joe: its task-environment handler spawned a child inside the systemd cgroup; after cancellation the cgroup was empty or gone, environment state was `rebuild_required`, no local replica was advertised, and no cleanup attempt remained. The current candidate rootless integration `test_lease_expiry_cleans_rootless_container_before_releasing_task_environment` passed 1/1 in 13.96 s on zz-joe against a private HTTP/SQLite authority; it verified the system-manager unit/cgroup, container PID and socket teardown, retained build-cache disk, no replica advertisement and zero running/cleanup claims. The private worker success controls also confirm parking after attempt cleanup. This closes implementation-level cancellation, lease-expiry and retained-disk cleanup; installed-worker capability/cleanup readback remains task 4.4.
 - [x] 3.4 Reconcile worker/authority restart and stale generation writes, using new private reconstruction when the old replica is uncertain; verify old-result fencing and returning-worker cleanup with real processes. Ledger: fence/generation/rebuild reason. On zz-joe at source `c5446860` plus the cleanup changes, the focused cleanup/reuse controls passed 3/3 (`test_stale_replica_cleanup_yields_to_writer_and_preserves_a_newer_marker`, `test_returning_worker_gets_generation_scoped_cleanup_for_stale_replicas`, and `test_worker_reuses_task_environment_across_captured_source_edits`; 87 deselected). The latter used two systemd-backed worker identities with separate environment roots and a private HTTP/SQLite authority: the replacement worker committed generation 3, then the returning worker received exact generation-2 cleanup; its stale directory disappeared while the replacement replica/registry remained. These host identities share zz-joe, so independent-machine connectivity was not exercised. Prior `test_worker_and_authority_restart_rebuild_unconfirmed_task_environment` evidence at `dd9cae9` verifies partial-cache reconstruction after both restarts and rejects a late old-boot completion with HTTP 409.
+- Current-worktree lifecycle recheck (2026-10-11): the restart/stale-completion,
+  running-job cancellation, and scope-close descendant controls passed 3/3 in
+  16.81 s against a disposable local authority and worker. The late stale
+  completion returned HTTP 409; both cancellation tests verified cleanup before
+  capacity was released. This reinforces fixture coverage but adds no live
+  installed-worker evidence. See
+  `evidence/disposable-worker-receipt-cleanup-20261011.md`.
 - [x] 3.5 Enforce metadata/replica/byte/age bounds and bounded batched sweeps; verify active protection, idle/absolute expiry, unset-window refusal, deletion failure charges, eviction/recreation and host drain/deprovision independence. Ledger: each eviction/refusal/degraded sweep outcome. Local fixture controls pass for active-writer protection, idle eviction/recreation, absolute expiry despite recent reuse, deletion-failure quota charging/retry, and a lowered 32-entry sweep over 64 environments with a second pass; attempts to raise the cap are refused (`test_task_environments.py`: 5 targeted controls). Authority-level disabled-retention capability/admission refusal also passes (`test_workload_environments.py -k expiry_recreates`: 1 passed). The added `test_parked_environment_does_not_block_host_deprovision` passes 1/1 locally: a parked `TaskEnvironmentStore` replica survives the real `HostBroker.leases_on`, `_drain_blocked`, and `fleet_ops_api.deprovision` path, including provider teardown. The listed implementation controls complete this item; live admitted-worker policy readback remains under task 4.4.
 - [x] 3.6 Preserve a parked prior generation while a newer writer on the same physical host evaluates reuse, while retaining stale cleanup on relocation. `test_registration_preserves_parked_generation_for_same_host_writer` passes both same-host preservation and different-host cleanup cases (2/2); against the prior authority code, the same-host case returned stale cleanup and failed. A worker-level systemd integration could not run on this host because its per-user systemd manager is degraded; the authority regression directly verifies cleanup instructions and registry retention. Ledger: no local bytes are deleted before same-host reuse is evaluated; relocation still returns exact cleanup identity.
 - [x] 3.7 Compact idle project-quota reservations to measured use plus the fixed cushion, restore available execution quota on reuse, and verify legacy parked replicas can release reservations without losing files. Ledger: before/after hard limits, measured bytes, and preserved file digests under concurrent writer checks. The quota regression preserves saved-file digests across compaction/resume under a competing writer, admits a fifth environment, and restores the 32 GiB execution quota. Live zz-joe receipts show hard reservations compacted from about 124 GiB total to 9.88 GiB while retaining all four legacy parked environments; a real Rust handle expanded to 32 GiB for work and compacted after cleanup, then reused both Cargo caches. See `evidence/task-environment-quota-compaction-20261010.md`.
@@ -136,7 +221,7 @@ invalidation remain open. Queue time was 327.719 s. See
   Benchday's focused `RustSubmissionTest.test_phase_timing_write_failure_propagates_before_compilation` passed 1/1 against Livestack worktree `8bd2c43`: a forced timing-file write failure aborts before compiler subprocess launch and leaves no receipt. This local negative control does not satisfy the admitted compilation positive control or ledger-join requirement.
 - [x] 4.2 Add real integration/state-machine coverage for exclusive authorized writer, no parked compute and stale-generation exclusion; run the glob-discovered relevant checks on an admitted build/test host. Ledger: retain test evidence/failed controls, no production probes presented as tests. On zz-joe, the glob-discovered private-authority/environment suite and selected systemd worker lifecycle controls passed 34/34 (`tests/test_*environment*.py tests/test_workload_worker*.py -k 'environment or cancel_running_job or authority_outage_longer_than_the_lease'`, Livestack source `f86a8f78`). This covered exclusive writers, affinity waits without attempts/compute claims, stale-generation fencing, cancellation/lease cleanup, and a real systemd worker reuse attempt; it did not use the live Harmony authority or claim rollout completion.
 - [x] 4.3 Update `HARMONY.md`, workload CLI/API examples and `_plans/durable-workloads.md` with the implemented task workflow and full-E2E/publishing exclusion; execute the documented CLI sequence against disposable services. Disposable CLI coverage executes stable-key and handle submission, explicit opt-out, job/environment inspection and existing response IDs; focused suite: 91 passed, 6 skipped. Ledger: no new durable state; examples preserve existing observation/result IDs.
-- [ ] 4.4 Roll authority, supported development/task-E2E workers and consumer SDK via normal release/drain procedures; verify actual capability, quota, cleanup and forbidden-purpose readback before instruction/default activation. The authority's current authenticated capability endpoint reports environment policy version 1: Flutter, Rust, and task-E2E are allowed; full-E2E, dependency, commerce, and release/publishing handlers are forbidden. Rust job `36de28bc5bc14f02a6cf9bcfc7deb716` is accepted against the parked handle but still queued without an attempt. Workers 1, 3, and 4 lack the Rust environment profile, worker 2 is busy, and worker 5 is claim-disabled. This corrects the earlier observation that environment policy was disabled, but does not identify the authority's immutable release digest or prove cleanup/rollback. The release provenance, broad worker/SDK rollout, admitted compiler acceptance, and rollback readback remain open. See `evidence/live-capability-readback-20261009.md`. Follow-up at 16:42 UTC supersedes the earlier queued readback for job 36de28bc5bc14f02a6cf9bcfc7deb716: it succeeded and returned its handle parked at generation 7. Current-source job bbbe018da9c2400c9a1774d39028feeb remains queued without attempts; workers 1/3/4 lack the Rust profile, worker 2 is busy, and worker 5 is draining. Broad worker/SDK rollout, cleanup/rollback proof and installed decision-ledger readback remain open. See evidence/admitted-rust-resume-20261009.md. Follow-up at 16:50 UTC: live rollout status remains mode observe, with no changes applied. The zz-joe-e2e set requires two claimers but only zz-joe-e2e-2 reports benchday.e2e.task.v1; canary_not_representative blocks rollout acceptance. Keep defaults disabled. The configured caller received 403 from the admin-only status endpoint, so the live decision-ledger status is not certified. See evidence/live-rollout-observation-20261009.md. Stable-path follow-up: The stable-path worker release 377bb4e4 is now active on zz-joe-e2e-2 and passed two admitted Rust checks with the environment parked at generation 10. The other eligible worker profiles, authority/SDK rollout provenance, rollback readback, and representative task-E2E canary remain open; see evidence/cargo-cache-stable-path-repeat-20261009.md. Current readback 2026-10-09: the authority service is active on release d55c4c13, and workers 1 and 2 advertise all three task profiles; worker 1 was drained, updated and re-enabled. Observe mode remains in place and automatic selection is disabled. Consumer-default activation, authority/worker rollout provenance and rollback proof remain open. See evidence/rollout-recheck-20261009.md. Fresh 2026-10-10 04:17 UTC readback: policy v1 still allows Flutter/Rust/task-E2E and forbids full E2E/release; Rust and Flutter handles are parked; authority remains on d55c4c13 with 486cf6e5 staged. Three unrelated ZZOPS trains are active, so the abort-mode drain was not retried. See evidence/live-recheck-20261010-0417utc.md. Follow-up 2026-10-10 04:21 UTC: the streams assertion reached terminal failure outside this change scope; two unrelated trains remain active (client-performance admission and full-suite completion). No cancellation, fence hold, or deploy was attempted. See `evidence/live-recheck-20261010-0417utc.md`. Candidate freshness update: Livestack main advanced to `24c34f8d` affecting workload HTTP/result manifests; staged `livestack-486cf6e5` is now stale and must be refreshed/rechecked before deployment. Worker-release follow-up: built current worker candidate from origin/main `e498c8284f77848f1a0c97c6228e585b5266d6e0` (258 files, content hash `8917b440ac5c11055a46f396ed75d290df5e12de2c508faa5bb5ab83534cbba3`). Read-only comparison against zz-joe release `livestack-377bb4e4` found 12 candidate-only files and 6 changed files; every deployed version matches current origin history, no hand edits. This did not deploy it or refresh the separate authority candidate. See `evidence/worker-release-candidate-20261010.md`. Live recheck 2026-10-10 19:21 UTC directly confirmed the authority refuses environment-bound full-E2E and release requests with 403 and creates no job. Rollout remains observe-only; worker 1 is behind, workers 2–5 are unknown, and task-E2E runs are queued behind active work. Provenance, representative canary, rollback readback, and default activation remain open. See `evidence/live-purpose-boundary-20261010.md`. The same local run passed scope-close cancellation of running and queued descendants; this fixture does not prove cleanup on the installed handler. Candidate refresh 2026-10-10 19:31 UTC: release candidate from `origin/main` b7f3151e passed static, boot, worker-registration, and job-round-trip checks using the currently deployed dependency set. It remains a local candidate; the active authority and task workers were not changed. Idle-window rollout, live post-rollout readback, canary, and rollback proof remain open. See `evidence/authority-candidate-precheck-20261010.md`. Latest task-specific canary attempt (2026-10-10): Benchday job 8151336bd90b41cc9c9126c93981a7b4 selected one check and failed before source materialization on both task-E2E workers because the worker-host storage budget was exhausted; its environment is generation 15, rebuild_required, with zero bytes. This is no canary result and no rollout readback. See evidence/live-purpose-boundary-20261010.md.
+- [ ] 4.4 Roll authority, supported development/task-E2E workers and consumer SDK via normal release/drain procedures; verify actual capability, quota, cleanup and forbidden-purpose readback before instruction/default activation. The authority's current authenticated capability endpoint reports environment policy version 1: Flutter, Rust, and task-E2E are allowed; full-E2E, dependency, commerce, and release/publishing handlers are forbidden. Rust job `36de28bc5bc14f02a6cf9bcfc7deb716` is accepted against the parked handle but still queued without an attempt. Workers 1, 3, and 4 lack the Rust environment profile, worker 2 is busy, and worker 5 is claim-disabled. This corrects the earlier observation that environment policy was disabled, but does not identify the authority's immutable release digest or prove cleanup/rollback. The release provenance, broad worker/SDK rollout, admitted compiler acceptance, and rollback readback remain open. See `evidence/live-capability-readback-20261009.md`. Follow-up at 16:42 UTC supersedes the earlier queued readback for job 36de28bc5bc14f02a6cf9bcfc7deb716: it succeeded and returned its handle parked at generation 7. Current-source job bbbe018da9c2400c9a1774d39028feeb remains queued without attempts; workers 1/3/4 lack the Rust profile, worker 2 is busy, and worker 5 is draining. Broad worker/SDK rollout, cleanup/rollback proof and installed decision-ledger readback remain open. See evidence/admitted-rust-resume-20261009.md. Follow-up at 16:50 UTC: live rollout status remains mode observe, with no changes applied. The zz-joe-e2e set requires two claimers but only zz-joe-e2e-2 reports benchday.e2e.task.v1; canary_not_representative blocks rollout acceptance. Keep defaults disabled. The configured caller received 403 from the admin-only status endpoint, so the live decision-ledger status is not certified. See evidence/live-rollout-observation-20261009.md. Stable-path follow-up: The stable-path worker release 377bb4e4 is now active on zz-joe-e2e-2 and passed two admitted Rust checks with the environment parked at generation 10. The other eligible worker profiles, authority/SDK rollout provenance, rollback readback, and representative task-E2E canary remain open; see evidence/cargo-cache-stable-path-repeat-20261009.md. Current readback 2026-10-09: the authority service is active on release d55c4c13, and workers 1 and 2 advertise all three task profiles; worker 1 was drained, updated and re-enabled. Observe mode remains in place and automatic selection is disabled. Consumer-default activation, authority/worker rollout provenance and rollback proof remain open. See evidence/rollout-recheck-20261009.md. Fresh 2026-10-10 04:17 UTC readback: policy v1 still allows Flutter/Rust/task-E2E and forbids full E2E/release; Rust and Flutter handles are parked; authority remains on d55c4c13 with 486cf6e5 staged. Three unrelated ZZOPS trains are active, so the abort-mode drain was not retried. See evidence/live-recheck-20261010-0417utc.md. Follow-up 2026-10-10 04:21 UTC: the streams assertion reached terminal failure outside this change scope; two unrelated trains remain active (client-performance admission and full-suite completion). No cancellation, fence hold, or deploy was attempted. See `evidence/live-recheck-20261010-0417utc.md`. Candidate freshness update: Livestack main advanced to `24c34f8d` affecting workload HTTP/result manifests; staged `livestack-486cf6e5` is now stale and must be refreshed/rechecked before deployment. Worker-release follow-up: built current worker candidate from origin/main `e498c8284f77848f1a0c97c6228e585b5266d6e0` (258 files, content hash `8917b440ac5c11055a46f396ed75d290df5e12de2c508faa5bb5ab83534cbba3`). Read-only comparison against zz-joe release `livestack-377bb4e4` found 12 candidate-only files and 6 changed files; every deployed version matches current origin history, no hand edits. This did not deploy it or refresh the separate authority candidate. See `evidence/worker-release-candidate-20261010.md`. Live recheck 2026-10-10 19:21 UTC directly confirmed the authority refuses environment-bound full-E2E and release requests with 403 and creates no job. Rollout remains observe-only; worker 1 is behind, workers 2–5 are unknown, and task-E2E runs are queued behind active work. Provenance, representative canary, rollback readback, and default activation remain open. See `evidence/live-purpose-boundary-20261010.md`. The same local run passed scope-close cancellation of running and queued descendants; this fixture does not prove cleanup on the installed handler. Candidate refresh 2026-10-10 19:31 UTC: release candidate from `origin/main` b7f3151e passed static, boot, worker-registration, and job-round-trip checks using the currently deployed dependency set. It remains a local candidate; the active authority and task workers were not changed. Idle-window rollout, live post-rollout readback, canary, and rollback proof remain open. See `evidence/authority-candidate-precheck-20261010.md`. Latest task-specific canary attempt (2026-10-10): Benchday job 8151336bd90b41cc9c9126c93981a7b4 selected one check and failed before source materialization on both task-E2E workers because the worker-host storage budget was exhausted; its environment is generation 15, rebuild_required, with zero bytes. This is no canary result and no rollout readback. See evidence/live-purpose-boundary-20261010.md. Authority activation follow-up (2026-10-11): operator-verified activation of release c2930611 passed static, boot, worker-registration, job-round-trip and backup-integrity checks; the exact live release path was confirmed and 22/22 workers became ready after 6 seconds. ZZOPS abort drain had no stragglers, both app holds were released normally with force=false, and accepted work was preserved. No worker/spec/quota/default change was made. This closes only the authority activation step; current capability, per-worker quota/cleanup, SDK rollout, representative canary, rollback proof and full live readback remain open. See evidence/authority-activation-20261011.md. Post-activation live readback (2026-10-11): capability v1 allows Flutter/Rust/task-E2E and forbids full/dependency E2E, commerce and release/publishing; only Joe workers 1/2 advertise task-E2E. Registry generation 72 has the task handler default installed on both without activation failures. The rollout stays observe-only with worker 1 behind and 2–5 unknown. The exact one-check canary is running on the existing handle; capability, actual per-handle quota/cleanup, representative canary, broad worker/SDK rollout and rollback proof remain open. See evidence/authority-activation-20261011.md. Terminal canary readback, 2026-10-11: the exact one-check task-E2E request passed and tore down cleanly; the existing handle parked at generation 18, 16/16 cache components were reused, the attempt unit is inactive, and the kernel project quota shrank from 32 GiB in flight to 2,834,337,792 retained bytes. The fixture also reported a 150,346 ms startupBudget against 60,000 ms. Broader worker/SDK rollout and rollback exercise remain open; see evidence/authority-activation-20261011.md.
 
   Live refresh (2026-10-08): the authority now runs `livestack-c76585e7` with the three development/task-E2E handlers eligible and full-E2E, dependency and publishing handlers forbidden. Worker 2's installed config reports all three profiles and quota bounds, and its handler roster includes Flutter, Rust and task-E2E. The first actual Flutter environment job failed before source materialization (`record byte limit exceeded`, 0 bytes) because the source manifest exceeded the generic 64 KiB encoder bound although the manifest itself permits 16 MiB. Fix `cbeafb06` hashes the raw bounded manifest bytes; the >64 KiB regression and full `test_task_environments.py` passed (20/20). Its immutable worker release was built and verified identical after staging on zz-joe. It is not active: worker 2 is executing shared ZZOPS completion job `fe333995f6ee4ef4a798b8b453142b89` and currently remains claim-enabled; it has not been restarted for this release. Live successful compiler/task-E2E runs, cleanup receipts, restart-safe rollout, and multi-worker readback remain open.
 
@@ -841,3 +926,153 @@ changed files. The observe-only target unit `f38a7baa` also names the older
 `be1d8a42` release and must be rebuilt. Joe workers were idle, but a separate
 ZZOPS admission remained active on `xc-win-1-wsl-2`; no authority restart or
 other live change was made. See `evidence/rollout-recheck-20261011.md`.
+
+## Owner-approved implementation addendum: ARM Rust enrollment (2026-10-11)
+
+These open criteria refine tasks 3.2 and 4.4. The owner approved code
+preparation and reviewable installation artifacts on 2026-10-11. Source changes
+remain pending supported writer admission; worker provisioning, enrollment, and
+activation remain operator-owned. No worker, authority, registry, quota,
+policy, or automatic-selection state has been changed.
+
+Separate human gate before the related worker-unit manifest can be built: the
+declarative rollout is observe-only and has no stage/activate executor, enforce
+mode, or automated rollback. The verifier is unset; proposed `min_authority`
+`c295e76a` has not been validated against active authority `c2930611`, and the
+current unit code only validates/stores the field without enforcing it. Capture
+size/cap are inherited from a stale unit rather than remeasured. A human must
+decide whether this change requires an authority-minimum enforcement contract
+and what verifier contract applies. Then rebuild and read back exact candidate
+inputs/digest. Do not guess these fields or treat them as ARM capability
+evidence. See `evidence/rollout-unit-field-audit-20261011.md`.
+
+- [x] 3.2a Prepare the distinct `benchday.compilation.rust-check.aarch64.v1`
+  handler release for Linux/aarch64; preserve the current x86_64 ID/default.
+  The code-owned handler validates the real `rustc -vV` host triple and the
+  installed target before Cargo. The separate candidate contains only this ARM
+  Rust handler and has verified release/archive digests. The authority and
+  worker `[rust]` permission mapping is still an operator enrollment gate under
+  4.4b; it has not been installed or activated. See
+  `evidence/arm-rust-handler-candidate-20261013.md` and the companion
+  Benchday repository's `openspec/changes/reuse-task-environments/evidence/arm-handler-implementation-20261013.md`.
+- [ ] 3.2b Use bounded receipts to compare the exact rustc release/commit/date/
+  LLVM and Cargo version/commit across x86 and ARM. Run one parked handle
+  x86_64 → aarch64 → aarch64 → x86_64 with identical source/lockfile/options;
+  verify incompatible-cache invalidation, same-ABI reuse, and cleanup. The
+  current x86 receipt has only a toolchain digest and the ARM guest reports Rust
+  1.99.0, so matching versions remain unproven until bounded outputs from both
+  real toolchains match exactly. Read-only probe 2026-10-13: the ARM guest
+  reports rustc 1.99.0 commit
+  `b940084d7eb6a299eb4bfeb8e34901bc051e7ac4`, dated 2026-09-28, LLVM 23.1.1,
+  and Cargo 1.99.0 commit `5f94df4789f005f9a352888e8355ffc645b7ed0e`, dated
+  2026-08-27. The `zz-joe` host login shell reports rustc 1.98.1 commit
+  `48a229ceaefd4985c50990b14116b6d856af0985`, LLVM 22.1.8, and Cargo 1.98.1
+  commit `797e8a9bca276c1c9f9f738d2a20f484fa4eea9d`; this is not an admitted
+  worker receipt. Fresh explicit-path guest reads confirm rustc/Cargo 1.99.0,
+  host `aarch64-unknown-linux-gnu`, and the ARM target installed under
+  `/home/ubuntu.guest/.cargo/bin`; that directory is not on the login PATH.
+  The versions differ, so no ABI sequence was started. Later x86-only job
+  `bb324151d575451c8952d0cdc8bb002c` succeeded, but its installed handler
+  emitted only a toolchain digest. The active handler digest and missing ARM
+  worker route are recorded in `evidence/continuation-recheck-20261013.md`.
+  See also the paired Benchday evidence
+  `evidence/rust-build-mode-probe-20261011.md`. Read-only follow-up on
+  2026-10-17 confirms the ARM worker-specific `rustc -vV` / `cargo -Vv` output
+  is 1.98.1 with the same exact commits, dates and LLVM version as direct
+  `zz-joe` host output; the ARM guest default remains 1.99.0. The x86 result is
+  still a host-shell readback, not a selected admitted-worker receipt. Keep
+  this task open until the admitted same-handle four-step sequence completes.
+- [x] 4.4a Complete the additive Mac ARM host/storage preparation. Daemon 3450
+  is terminal success on all five targets and publication completed under
+  train `20261011T033118Z-90012`; preserve its artifacts without restart or
+  duplication, but it is no longer a blocker. When the operator activates the
+  reviewed plan, add worker
+  `xc-mac-studio-harmony-rust` as an alias of physical host
+  `xc-mac-studio`. Daemon 3448 is terminal and no longer a build/drain hold.
+  Before any target-worker action, separately obtain a fresh task-E2E
+  active-attempt and cleanup readback; the 3448 status does not clear that
+  guard. Provision an 8 GiB workspace plus a separate 16 GiB `prjquota`
+  environment volume with a 15 GiB maximum and 1 GiB reserve; install the
+  quota helper/config and pass its positive control. Fresh read-only probe
+  2026-10-13 confirms `xc-mac-studio-harmony` is Running on the non-default
+  Lima home, with 8 CPUs and 16 GiB RAM; the guest reports `aarch64`, and its
+  root filesystem is ext4 without `prjquota`. Fresh read-only `lsblk` and
+  `findmnt` at 23:54 UTC still show only the 95 GiB root disk, boot partitions,
+  and Lima metadata ISO; no separate 16 GiB environment volume is attached. No
+  VM or worker state was changed. Owner readback on 2026-10-17 supersedes that
+  observation: the 8 GiB workspace and separate 16 GiB `prjquota` environment
+  volume are mounted; quota helper and `EDQUOT` positive control pass. The
+  ARM-only principal is enrolled under physical host `xc-mac-studio`, IDLE,
+  running, and claim-disabled. See
+  `evidence/arm-worker-enrollment-owner-readback-20261017.md`.
+- [ ] 4.4b Provide and review a separate schema-validated worker config and
+  systemd user-unit template. Keep the existing broad Mac worker untouched;
+  give the new identity only the ARM Rust-check handler, do not add host
+  capacity, and keep task-environment automatic selection disabled. Current
+  review candidate recheck: `/tmp/taskenv-arm-worker-service-candidate-cfdc8d30-20261013`,
+  source `cfdc8d30d0eb663ebd86f287701417cf880070c4`, 262 hashed files,
+  content SHA-256
+  `5e795a4f7ec6ed608543437014a4bd2bb9c3764c0932d1e5d33cf0649450623c`.
+  `worker-config.review.json` validates against its Draft 2020-12 schema, and
+  `systemd-analyze verify` accepts the separate unit template. The config is
+  still review-only (`deployable=false`); the final private runtime config and
+  immutable unit manifest ID/digest remain absent. Config/schema/unit hashes
+  are recorded in `evidence/continuation-recheck-20261013.md`. Read-only
+  readback on 2026-10-17 confirms the service is active, its config is mode
+  `0600`, the loaded unit has no drop-ins, and the installed unit file SHA-256
+  is `ab4eaa2aebaeef8fe9dcddb01fa82f2237a395db390a674c794ecdbe5a0a213a`.
+  `ExecStart` uses interpreter release `30a89636…`; `PYTHONPATH` selects code
+  release `livestack-cfdc8d30`. The separate immutable manifest ID/digest and
+  review tying those paths to `min_authority` remain absent, so keep this task
+  open. Full bounded readback is in
+  `evidence/arm-worker-enrollment-owner-readback-20261017.md`.
+- [ ] 4.4c Resolve the unit-input and rollout gates before enabling the already
+  enrolled ARM worker. Owner decision: set `min_authority` metadata to the
+  verified active release `c2930611`; current unit code does not compare this
+  field, and no runtime-enforcement claim is made. Do not use stale
+  `c295e76a`. Require a non-null verifier reported by the root helper, remeasure
+  capture size/cap from the current candidate, and record
+  the immutable candidate unit manifest ID/digest. For this ARM change, keep the
+  controller observe-only and make no automated install/rollback claim. Fresh
+  rollout readback at 23:54 UTC is generation 14419/spec generation 8, mode
+  `observe`, with only `observed_only` actions; `xc-mac-studio-harmony` remains
+  undeclared and absent from the rollout spec. Existing unit manifests contain
+  stale `min_authority: c295e76a` metadata, which the current unit code does not
+  enforce. The review candidate and its schema now set `min_authority` to
+  `c2930611` while explicitly recording runtime enforcement as false. Do not
+  treat a report, stored `min_authority`
+  string, or config file as enrollment or deployment. The claims API supports
+  expiring drain/enable for an enrolled worker, but no reviewed second-worker
+  unit installer has been prepared. Keep the new principal claim-disabled until
+  the worker config, service unit, handler digest, quota, and fresh cleanup
+  readbacks are reviewed. Tie any `min_authority` value to verified active
+  authority `c2930611`; do not reuse the unvalidated `c295e76a` value or describe
+  the field as runtime-enforced. Read back the rollback path before any live
+  service action. Owner update 2026-10-17: the worker is now enrolled and its
+  unit is running; handler release `a0f96fee` is active at registry generation
+  149. The authority compilation-policy reload/readback, ARM caller grants,
+  exact unit manifest/min-authority readback, and same-handle ABI sequence are
+  still open. The worker claim remains OFF. See
+  `evidence/arm-worker-enrollment-owner-readback-20261017.md`.
+
+## ARM enrollment continuation — 2026-10-17
+
+The owner-reported enrollment, quota, toolchain, handler-registry and claim
+state, plus the independent local tests and remaining gates, are recorded in
+`evidence/arm-worker-enrollment-owner-readback-20261017.md`. This closes only
+task 4.4a. Tasks 3.2b, 4.4b, and 4.4c remain open; full rollout and live
+same-handle acceptance are not complete.
+
+## ARM current unit-input readback — 2026-10-18
+
+Fresh read-only guest inspection confirms the ARM service is active, has no
+drop-ins, and has unit-file SHA-256
+`ab4eaa2aebaeef8fe9dcddb01fa82f2237a395db390a674c794ecdbe5a0a213a`. The
+installed Livestack code release under `livestack-cfdc8d30` recomputes to its
+recorded 262-file content digest; the active ARM handler manifest and release
+digests are also recorded. This exposes a template mismatch: the tracked unit
+is historical and differs from the loaded interpreter path and restart policy.
+No deployment-unit manifest was returned, and verifier/capture inputs remain
+unknown; this does not close 4.4b. No job, service, claim, policy, or rollout
+setting was changed. See
+`evidence/arm-worker-current-input-readback-20261018.md`.

@@ -1,0 +1,22 @@
+# Historical review template only; it is not the currently loaded unit.
+# The installed unit's SHA-256 and loaded runtime paths are in
+# openspec/changes/reuse-task-environments/evidence/arm-worker-enrollment-owner-readback-20261017.md.
+# Do not install or replace it while the immutable manifest and owner gates are open.
+# Candidate worker release: cfdc8d30 / 5e795a4f7ec6ed608543437014a4bd2bb9c3764c0932d1e5d33cf0649450623c.
+[Unit]
+Description=Livestack ARM Rust task worker (xc-mac-studio-harmony-rust)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/livestack-workload-releases/livestack-cfdc8d30/node-py
+Environment=PYTHONPATH=%h/.local/share/livestack-workload-releases/livestack-cfdc8d30/node-py
+ExecStart=/usr/bin/python3 -m livestack_node.workloads.worker_service --config %h/.config/livestack-workloads/worker-xc-mac-studio-harmony-rust.json
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
