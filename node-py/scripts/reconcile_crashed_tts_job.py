@@ -58,7 +58,9 @@ def observe(args, receipt):
             and props.get("Result") == "core-dump" and props.get("ExecMainStatus") == "6"
             and props.get("InvocationID") == args.invocation_id, "Exact failed native incarnation required")
     journal = command(["journalctl", "--user", "-u", args.unit, "--no-pager", "-o", "json",
-                       "--since", "@" + str(int(receipt["acceptedAt"]))])
+                       "--since", "@" + str(int(receipt["acceptedAt"])), "-n", "64",
+                       "--grep", "CUDA error", "_PID=" + str(old["pid"]),
+                       "_SYSTEMD_INVOCATION_ID=" + args.invocation_id])
     require(len(journal.encode()) <= 8 * 1024 * 1024, "Bounded journal required")
     entries = [json.loads(line) for line in journal.splitlines()]
     witnesses = [entry for entry in entries
