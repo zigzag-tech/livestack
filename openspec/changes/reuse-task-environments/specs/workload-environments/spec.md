@@ -101,6 +101,29 @@ Worker reports SHALL reconcile physical-host replica rows only for profiles decl
 - **THEN** the authority reconciles rows for the profiles in that report and preserves rows for every omitted profile
 - **AND** it refuses a replica entry whose profile is absent from the reporting worker's profile inventory
 
+### Requirement: Rust handler architecture and physical-host identity are independently enforced
+
+Rust handler releases SHALL bind to an exact Linux architecture and the `rust` compilation class. A Rust handler SHALL validate the real `rustc -vV` host triple and installed target before compilation; worker labels alone SHALL NOT authorize execution. The x86_64 handler/default SHALL remain compatible with existing requests. The aarch64 handler SHALL have its own exact handler ID and SHALL be selected explicitly by the caller. A second worker identity on an existing physical host SHALL resolve to that same host for resource admission, quota, and environment placement; it SHALL NOT create or imply additional host capacity. The ARM worker permission intersection SHALL contain only the ARM Rust-check handler and class `rust`.
+
+#### Scenario: The caller keeps the existing x86 route
+- **WHEN** a Rust request omits an architecture selector
+- **THEN** it retains the existing x86_64 handler ID and default release
+- **AND** no ARM worker or release can receive it by relabeling
+
+#### Scenario: The caller explicitly selects aarch64
+- **WHEN** the Rust caller selects `aarch64`
+- **THEN** placement requires Linux, `aarch64-unknown-linux-gnu`, and the distinct ARM Rust-check handler
+- **AND** the handler release advertises only compilation class `rust`
+
+#### Scenario: The ARM toolchain host does not match its handler
+- **WHEN** the worker advertises aarch64 but `rustc -vV` reports a different host triple or the expected target is not installed
+- **THEN** the handler fails before Cargo starts with a named infrastructure result
+
+#### Scenario: A second worker runs inside an existing physical host
+- **WHEN** an ARM worker identity is enrolled under an existing physical-host alias
+- **THEN** placement resolves it to the existing host resource budget and environment host ID
+- **AND** the new identity adds no physical-host row or capacity
+
 ### Requirement: Retained state cannot change executed source or artifact freshness
 
 Workers SHALL execute the complete verified captured input of each job, including deletions, modes, symlinks and external dependencies. They SHALL preserve only declared compatible cache/output state and SHALL reset runtime/test state. Compatibility SHALL cover actual platform/toolchain/ABI, dependency and build-recipe identities. Unknown, corrupt or interrupted retained state SHALL cause a named rebuild/refusal. Important source/output data SHALL remain recoverable independently of environment caches.
@@ -112,6 +135,12 @@ Workers SHALL execute the complete verified captured input of each job, includin
 #### Scenario: The native toolchain changes
 - **WHEN** a retained target is incompatible with the admitted worker's toolchain/ABI
 - **THEN** it is invalidated before use and the outcome states why rebuilding occurred
+
+#### Scenario: The Rust host ABI changes while compiler versions match
+- **WHEN** a parked Rust environment moves from x86_64 to aarch64 with the same source, lockfile, build mode, rustc release/commit/LLVM version, and Cargo version/commit
+- **THEN** ABI-bound native cache components are invalidated before compilation
+- **AND** an unchanged aarch64 repeat may reuse only components whose compatibility identity matches
+- **AND** returning to x86_64 cannot reuse aarch64-native artifacts
 
 #### Scenario: A test passes after a previous test failure
 - **WHEN** compatible compilation state is retained across the two jobs
