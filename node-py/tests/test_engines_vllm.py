@@ -174,3 +174,25 @@ def test_vllm_is_found_beside_the_interpreter_when_the_server_dir_has_no_venv(
     assert ev.vllm_bin() == str(bindir / "vllm")
     monkeypatch.setattr(ev.sys, "executable", str(tmp_path / "nowhere" / "python"))
     assert ev.vllm_bin() == os.path.join(str(tmp_path / "release"), "venv", "bin", "vllm")
+
+
+def test_a_grant_never_raises_the_fraction_above_the_configured_one(monkeypatch):
+    """A 3 GiB embedder granted a whole card was launched at 0.94 of it and
+    vLLM refused (rc=1) while any other tenant held memory."""
+    import livestack_node  # noqa: F401
+    from importlib import import_module
+    mod = import_module(VllmEngine.__module__)
+    monkeypatch.setattr(mod, "device_free_bytes", lambda: 0.0)
+    spec = {**_real_spec(), "gpu_fraction": "0.12"}
+    total = 24 * (1 << 30)
+    argv = VllmEngine().argv(spec, {"vram_bytes": 23 * (1 << 30)}, total_bytes=total)
+    assert argv[argv.index("--gpu-memory-utilization") + 1] == "0.120"
+
+
+def test_a_grant_is_clamped_to_live_free_vram(monkeypatch):
+    from importlib import import_module
+    mod = import_module(VllmEngine.__module__)
+    total = 24 * (1 << 30)
+    monkeypatch.setattr(mod, "device_free_bytes", lambda: 20.8 * (1 << 30))
+    argv = VllmEngine().argv(_real_spec(), {"vram_bytes": 23 * (1 << 30)}, total_bytes=total)
+    assert argv[argv.index("--gpu-memory-utilization") + 1] == f"{(20.8 * 0.94) / 24:.3f}"
