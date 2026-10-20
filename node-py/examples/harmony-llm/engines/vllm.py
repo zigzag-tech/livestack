@@ -166,7 +166,18 @@ class VllmEngine(Engine):
                 # Leave the tail of the grant unclaimed: the budget is what is
                 # free, and an engine that takes every last byte leaves nothing
                 # for the allocator's own overhead.
-                fraction = f"{max(0.10, min(0.97, (want * 0.94) / total)):.3f}"
+                # A grant only ever sizes a unit DOWN. A 3 GiB embedder granted a
+                # whole 23.6 GiB card was started at 0.94 of it, which vLLM
+                # refuses while any other tenant holds memory (rc=1,
+                # 2026-10-21); the configured fraction is the unit's own need.
+                sized = min(0.97, (want * 0.94) / total)
+                # ...and never above what the card has free right now: the
+                # planner's budget is its ledger, not a measurement, and other
+                # tenants' contexts are not always in it.
+                free = device_free_bytes()
+                if free > 0:
+                    sized = min(sized, (free * 0.94) / total)
+                fraction = f"{max(0.10, min(float(spec['gpu_fraction']), sized)):.3f}"
                 print(f"[harmony-llm] {spec['name']}: planner granted "
                       f"{want/(1<<30):.1f} GiB -> --gpu-memory-utilization {fraction}",
                       flush=True)
