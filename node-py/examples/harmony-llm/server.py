@@ -941,6 +941,11 @@ _busy = counting()
 _QUEUES = _Queues()
 
 
+from concurrent.futures import ThreadPoolExecutor as _TPE  # noqa: E402
+_ENSURE_POOL = _TPE(max_workers=int(os.environ.get("HARMONY_LLM_ENSURE_THREADS", "16")),
+                    thread_name_prefix="ensure")
+
+
 def _ensure_while_counted(ensure):
     """Reserve the facade before a unit starts loading for this request.
 
@@ -1473,6 +1478,12 @@ def _named_unit(requested: str) -> "str | None":
         return r
     for name, spec in SPECS.items():
         if spec["model"] == r:
+            return name
+    # `aliases`: other names callers send for this unit. Without them a caller's
+    # own name for a model ("harmony-flash-next") is an unknown model, which
+    # resolves to the DEFAULT unit -- on a two-unit node, the wrong engine.
+    for name, spec in SPECS.items():
+        if r and r in (spec.get("aliases") or ()):
             return name
     return None
 
@@ -2402,7 +2413,15 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         url = f"{_base_of(unit)}/v1/{path}"
     else:
         try:
-            _ensure_while_counted(lambda: manager.ensure(unit))
+            # OFF THE LOOP. `manager.ensure` blocks for the whole engine start
+            # (minutes) and for the retry back-off after a failed one. Called
+            # inline it froze the event loop: the listen queue filled to
+            # 2049/2048, /health timed out for ~30 min and the service had to be
+            # SIGKILLed (xc-tower-ubuntu 2026-10-21, llm_general failing to start
+            # on a full card). A dedicated pool keeps those waits from also
+            # starving the default executor the broker calls use.
+            await asyncio.get_running_loop().run_in_executor(
+                _ENSURE_POOL, lambda: _ensure_while_counted(lambda: manager.ensure(unit)))
         except Exception as e:
             _release_slot(ctx)
             raise HTTPException(status_code=503, detail=f"{unit} unavailable: {e}")

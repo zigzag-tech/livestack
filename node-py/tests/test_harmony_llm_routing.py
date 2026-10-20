@@ -124,3 +124,21 @@ def test_request_count_is_released_when_unit_load_fails(srv):
     with pytest.raises(RuntimeError, match="before resident"):
         srv._ensure_while_counted(ensure)
     assert int(srv._busy) == before
+
+
+def test_unit_alias_names_its_unit_not_the_default(srv, monkeypatch):
+    """A caller's own name for a model must reach that unit, not the default."""
+    monkeypatch.setitem(srv.SPECS["llm_small"], "aliases", ["harmony-small"])
+    assert srv._unit_for_model("harmony-small") == "llm_small"
+    assert srv._named_unit("harmony-small") == "llm_small"
+    assert srv._named_unit("harmony-other") is None
+
+
+def test_ensure_never_runs_on_the_event_loop(srv):
+    """Pins the 2026-10-21 wedge: `manager.ensure` blocks for a whole engine
+    start, and called inline in the async handler it froze the loop (listen
+    queue full, /health dead for ~30 min)."""
+    import inspect
+    src = inspect.getsource(srv._proxy_impl)
+    assert "run_in_executor(\n                _ENSURE_POOL" in src
+    assert "_ensure_while_counted(lambda: manager.ensure(unit))\n        except" not in src
