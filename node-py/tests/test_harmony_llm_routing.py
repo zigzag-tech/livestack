@@ -66,6 +66,16 @@ def test_a_caller_with_no_opinion_still_gets_a_unit(srv):
     assert srv._unit_for_model("") == "llm_title"
 
 
+def test_unknown_model_fallback_is_logged_once(srv, capsys):
+    srv._WARNED_UNKNOWN_MODELS.clear()
+    assert srv._unit_for_model("harmony-nope") == "llm_title"
+    assert srv._unit_for_model("harmony-nope") == "llm_title"
+    out = capsys.readouterr().out
+    assert out.count("names no declared unit") == 1 and "harmony-nope" in out
+    srv._unit_for_model("local")
+    assert "'local'" not in capsys.readouterr().out
+
+
 def test_the_path_still_implies_a_class(srv):
     # The derivation itself is right and stays: an embeddings request must not
     # be routed to a generation unit.

@@ -1514,7 +1514,23 @@ def _unit_for_model(requested: str) -> str:
     the first declared) rather than erroring, which keeps every existing
     caller — all of which send `local` — working.
     """
-    return _named_unit(requested) or _default_unit()
+    named = _named_unit(requested)
+    if named:
+        return named
+    default = _default_unit()
+    # Silent substitution hid a removed unit: on 2026-10-21 a `flash_next` unit
+    # had been dropped from the units file, `harmony-flash-next` fell through to
+    # the default 27B, and the 503 blamed llm_general with nothing saying the
+    # caller had asked for something else. Say it once per distinct name.
+    if requested and requested != "local" and requested not in _WARNED_UNKNOWN_MODELS:
+        _WARNED_UNKNOWN_MODELS.add(requested)
+        print(f"[harmony-llm] model {requested!r} names no declared unit "
+              f"({sorted(SPECS)}); serving it as the default unit {default!r}",
+              flush=True)
+    return default
+
+
+_WARNED_UNKNOWN_MODELS: "set[str]" = set()
 
 
 @app.get("/health")
