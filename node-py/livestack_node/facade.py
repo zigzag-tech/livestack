@@ -14,6 +14,7 @@ from typing import Callable, Mapping, Optional
 
 from .announce import node_region as _node_region
 from .lease import Capability
+from .coordinator import ActiveConsumerLeaseError
 
 
 def _machine_name(fallback: str) -> str:
@@ -534,7 +535,10 @@ def build_router(manager, coordinator, capability: Capability,
             raise HTTPException(status_code=400, detail="'unit' is required")
         if coordinator._pinned(unit):
             raise HTTPException(status_code=409, detail=f"unit '{unit}' is pinned")
-        gpu_call(lambda: manager.request_evict(unit))
+        try:
+            gpu_call(lambda: manager.request_evict(unit))
+        except ActiveConsumerLeaseError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         return {"resident": sorted(manager.resident)}
 
     @router.post("/model/reclaim")

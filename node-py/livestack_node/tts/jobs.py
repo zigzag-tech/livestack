@@ -56,7 +56,29 @@ def read_owned_speech_take(config, current, reference):
         raise ValueError("Retained history body digest changed")
     if any(body.get(key) != current.get(key) for key in ("ownerId", "engine", "voiceMode", "voiceId", "referenceSha256")):
         raise ValueError("History belongs to another owner/engine/reference")
-    if receipt.get("source") != config["sourceIdentity"] or receipt.get("settlement", {}).get("physicalSettled") is not True or receipt.get("localLeaseReleased") is not True:
+    source = receipt.get("source")
+    source_matches = source == config["sourceIdentity"]
+    if not source_matches:
+        # Retained actor history is an explicit immutable input asset. A new
+        # residency-control build may consume ONE precisely pinned old take;
+        # it never relabels that take as a result of the new producer.
+        inputs = config.get("retainedHistoryInputs", [])
+        if not isinstance(inputs, list) or len(inputs) > 4:
+            raise ValueError("Bounded retained history input bindings required")
+        matches = [item for item in inputs if isinstance(item, dict)
+                   and set(item) == {"jobId", "requestSha256", "takeSha256", "source"}
+                   and {key: item[key] for key in reference} == reference
+                   and item["source"] == source]
+        if len(matches) != 1 or not isinstance(source, dict):
+            raise ValueError("Exact retained history producer input refused")
+        # Only Harmony's ownership/control revision and its containing runtime archive can differ. Native model,
+        # library, PolyTTS implementation and session profile remain identical.
+        original_native = {key: value for key, value in source.items() if key not in {"harmonyCommit", "runtimeAssetArchiveSha256"}}
+        current_native = {key: value for key, value in config["sourceIdentity"].items() if key not in {"harmonyCommit", "runtimeAssetArchiveSha256"}}
+        if original_native != current_native:
+            raise ValueError("Retained history native producer identity differs")
+        source_matches = True
+    if not source_matches or receipt.get("settlement", {}).get("physicalSettled") is not True or receipt.get("localLeaseReleased") is not True:
         raise ValueError("History producer/physical settlement refused")
     native = receipt.get("nativeResult", {})
     unconditioned = current.get("voiceMode") == "unconditioned"
