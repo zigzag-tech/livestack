@@ -5,6 +5,9 @@ restart never resubmits it. Remote results/status are retained without secrets.
 """
 from __future__ import annotations
 
+import base64
+import io
+import wave
 import hashlib
 import json
 import math
@@ -20,16 +23,17 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from fastapi import Body, FastAPI, Header, HTTPException
+from fastapi import Body, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from livestack_node import ManagedUnit, attach, counting
 
 MODELS = {
     "eleven-music": "fal-ai/elevenlabs/music",
     "stable-audio-3-medium": "fal-ai/stable-audio-3/medium/text-to-audio",
+    "stable-audio-3-inpaint": "fal-ai/stable-audio-3/medium/audio-inpainting",
 }
 # Conservative retained ceilings for the 24-second audition lane, not invoices.
-CEILINGS = {"eleven-music": 0.60, "stable-audio-3-medium": 0.10}
+CEILINGS = {"eleven-music": 0.60, "stable-audio-3-medium": 0.10, "stable-audio-3-inpaint": 0.10}
 
 
 def canonical(value):
@@ -40,25 +44,46 @@ def sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
-def validate_request(body):
-    if not isinstance(body, dict) or set(body) != {"jobId", "ownerId", "model", "prompt", "seconds", "seed"}:
+def validate_request(body, owner_id):
+    if not isinstance(body, dict):
+        raise ValueError("Closed music request required")
+    expected = {"jobId", "ownerId", "model", "prompt", "seconds", "seed"}
+    repaint = body.get("model") == "stable-audio-3-inpaint"
+    if repaint:
+        expected |= {"sourceSha256", "startFrame", "endFrame", "sampleRate", "sourceFrames"}
+    if set(body) != expected:
         raise ValueError("Exact external music request required")
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", str(body["jobId"])):
+    if not isinstance(body["jobId"], str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", body["jobId"]):
         raise ValueError("Invalid job identity")
-    if body["ownerId"] != "histo:music-theme-comparison:20261024" or body["model"] not in MODELS:
+    if body["ownerId"] != owner_id or body["model"] not in MODELS:
         raise ValueError("Owner or model outside this audition lane")
-    if type(body["seconds"]) is not int or not 3 <= body["seconds"] <= 24:
+    if type(body["seconds"]) not in (int, float) or not math.isfinite(body["seconds"]) or not 3 <= body["seconds"] <= 40:
         raise ValueError("Bounded short audition required")
     if not isinstance(body["prompt"], str) or not 20 <= len(body["prompt"]) <= 1500:
         raise ValueError("Bounded prompt required")
     if type(body["seed"]) is not int or not 0 <= body["seed"] < 2**32:
         raise ValueError("Explicit seed required")
+    if repaint:
+        if not isinstance(body["sourceSha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", body["sourceSha256"]):
+            raise ValueError("Source digest required")
+        if any(type(body[k]) is not int for k in ("startFrame", "endFrame", "sampleRate", "sourceFrames")):
+            raise ValueError("Exact integer sample bounds required")
+        if body["sampleRate"] not in (44100, 48000) or not 0 <= body["startFrame"] < body["endFrame"] <= body["sourceFrames"]:
+            raise ValueError("Mask/source bounds refused")
+        if not 1 <= (body["endFrame"] - body["startFrame"]) / body["sampleRate"] <= 30:
+            raise ValueError("Bounded repaint interval required")
+        if abs(body["seconds"] - body["sourceFrames"] / body["sampleRate"]) > 1e-9:
+            raise ValueError("Declared duration differs from source clock")
+    elif type(body["seconds"]) is not int or body["seconds"] > 24:
+        raise ValueError("Text-only auditions limited to 24 seconds")
     return body
 
 
 def create_app(config):
     root = Path(config["stateRoot"])
     root.mkdir(parents=True, exist_ok=True)
+    sources = root / "sources"
+    sources.mkdir(exist_ok=True)
     import fcntl
     lock_fd = os.open(root / ".owner.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -79,7 +104,7 @@ def create_app(config):
     manager, coordinator = attach(app, host_id="zz-tower2-music-audition", kind="music_external",
         units={unit.name: unit}, port=config["port"], in_flight=busy, backend="cpu",
         idle_seconds=120, coload=True, gpu_call=lambda fn: fn(),
-        inventory={"models": MODELS, "execution": "remote-paid", "max_seconds": 24,
+        inventory={"models": MODELS, "execution": "remote-paid", "max_seconds": 40,
                    "budget_usd": config["budgetUsd"], "gpu_residency_claimed": False})
 
     def authenticate(value):
@@ -118,12 +143,29 @@ def create_app(config):
             store(job, "submitting", receipt)
             model = MODELS[body["model"]]
             payload = {"prompt": body["prompt"]}
-            if body["model"] == "eleven-music":
+            if body["model"] == "stable-audio-3-inpaint":
+                source = sources / (body["sourceSha256"] + ".wav")
+                raw_source = source.read_bytes()
+                if sha(raw_source) != body["sourceSha256"]:
+                    raise ValueError("Uploaded source changed")
+                with wave.open(io.BytesIO(raw_source), "rb") as wav:
+                    if (wav.getframerate() != body["sampleRate"] or wav.getnframes() != body["sourceFrames"]
+                            or wav.getnchannels() != 2 or wav.getsampwidth() != 2):
+                        raise ValueError("Actual source clock differs")
+                payload.update(audio_url="data:audio/wav;base64," + base64.b64encode(raw_source).decode(),
+                    mask_start_seconds=body["startFrame"] / body["sampleRate"],
+                    mask_end_seconds=body["endFrame"] / body["sampleRate"], seed=body["seed"],
+                    enable_prompt_expansion=False, output_format="wav")
+            elif body["model"] == "eleven-music":
                 payload.update(music_length_ms=body["seconds"] * 1000, force_instrumental=True,
                                output_format="mp3_44100_128")
             else:
                 payload.update(duration=body["seconds"], seed=body["seed"], enable_prompt_expansion=False, output_format="mp3")
-            (root / job / "provider-input.json").write_bytes(canonical(payload))
+            retained_input = dict(payload)
+            if "audio_url" in retained_input:
+                retained_input["audio_url"] = {"contentSha256": body["sourceSha256"], "transport": "inline-wav-data-uri"}
+            (root / job / "provider-input.json").write_bytes(canonical(retained_input))
+            receipt["providerInputSha256"] = sha(canonical(payload))
             receipt["submissionMayHaveOccurred"] = True
             store(job, "submitting", receipt)
             accepted = remote("POST", "https://queue.fal.run/" + model, payload)
@@ -152,8 +194,9 @@ def create_app(config):
                 raw = response.read(32 * 1024**2 + 1)
             if not 0 < len(raw) <= 32 * 1024**2:
                 raise ValueError("Artifact outside bounds")
-            (root / job / "audio.mp3").write_bytes(raw)
-            receipt.update(result=result, artifact={"name": "audio.mp3", "sha256": sha(raw), "bytes": len(raw)},
+            artifact_name = "audio.wav" if body["model"] == "stable-audio-3-inpaint" else "audio.mp3"
+            (root / job / artifact_name).write_bytes(raw)
+            receipt.update(result=result, artifact={"name": artifact_name, "sha256": sha(raw), "bytes": len(raw)},
                 remoteTerminalObserved=True, remotePhysicalSettlementClaimed=False,
                 gpuResidencyClaimed=False, localControlSettled=True)
             store(job, "succeeded", receipt)
@@ -177,6 +220,10 @@ def create_app(config):
             try:
                 with busy:
                     manager.run(unit.name, lambda _: run(job))
+            except Exception as error:
+                _, _, _, receipt = row(job)
+                receipt.update(errorType=type(error).__name__, automaticResubmit=False)
+                store(job, "held", receipt)
             finally:
                 pending.task_done()
 
@@ -188,11 +235,43 @@ def create_app(config):
         return {"ok": worker.is_alive() and not closing.is_set(), "kind": "music_external",
                 "incarnation": incarnation, "sourceSha256": sha(Path(__file__).read_bytes())}
 
+    @app.put("/v1/music/sources/{source_sha}")
+    async def upload_source(source_sha: str, request: Request, authorization: str | None = Header(None)):
+        authenticate(authorization)
+        if not re.fullmatch(r"[a-f0-9]{64}", source_sha):
+            raise HTTPException(400, "Source digest required")
+        chunks, size = [], 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > 16 * 1024**2:
+                raise HTTPException(413, "Source outside bounds")
+            chunks.append(chunk)
+        content = b"".join(chunks)
+        if sha(content) != source_sha:
+            raise HTTPException(400, "Source digest mismatch")
+        try:
+            with wave.open(io.BytesIO(content), "rb") as wav:
+                if (wav.getframerate() not in (44100, 48000) or wav.getnchannels() != 2 or wav.getsampwidth() != 2
+                        or not 3 <= wav.getnframes() / wav.getframerate() <= 40 or wav.getcomptype() != "NONE"):
+                    raise ValueError("Bounded stereo PCM required")
+        except (wave.Error, ValueError):
+            raise HTTPException(400, "Bounded stereo PCM required") from None
+        path = sources / (source_sha + ".wav")
+        try:
+            with path.open("xb") as file:
+                file.write(content)
+                file.flush()
+                os.fsync(file.fileno())
+        except FileExistsError:
+            if path.read_bytes() != content:
+                raise HTTPException(409, "Retained source differs")
+        return {"sha256": source_sha, "bytes": len(content)}
+
     @app.post("/v1/music/jobs", status_code=202)
     def submit(body: dict = Body(...), authorization: str | None = Header(None)):
         authenticate(authorization)
         try:
-            validate_request(body)
+            validate_request(body, config["ownerId"])
         except ValueError as error:
             raise HTTPException(400, str(error)) from None
         key, job = sha(canonical(body)), body["jobId"]
@@ -227,7 +306,7 @@ def create_app(config):
         authenticate(authorization)
         if row(job)[2] != "succeeded":
             raise HTTPException(409, "No accepted result")
-        return FileResponse(root / job / "audio.mp3", media_type="audio/mpeg")
+        return FileResponse(root / job / row(job)[3]["artifact"]["name"], media_type="audio/wav" if row(job)[3]["artifact"]["name"].endswith("wav") else "audio/mpeg")
 
     @app.on_event("shutdown")
     def shutdown():
