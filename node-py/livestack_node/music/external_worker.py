@@ -52,7 +52,7 @@ def validate_request(body, owner_id):
     repaint = body.get("model") == "stable-audio-3-inpaint"
     extend = body.get("model") == "stable-audio-3-outpaint"
     if extend:
-        expected |= {"sourceSha256", "sampleRate", "sourceFrames"}
+        expected |= {"sourceSha256", "sampleRate", "sourceFrames", "outputFormat"}
     if repaint:
         expected |= {"sourceSha256", "startFrame", "endFrame", "sampleRate", "sourceFrames"}
     if set(body) != expected:
@@ -61,18 +61,20 @@ def validate_request(body, owner_id):
         raise ValueError("Invalid job identity")
     if body["ownerId"] != owner_id or body["model"] not in MODELS:
         raise ValueError("Owner or model outside this audition lane")
-    if type(body["seconds"]) not in (int, float) or not math.isfinite(body["seconds"]) or not 3 <= body["seconds"] <= (90 if extend else 40):
+    if type(body["seconds"]) not in (int, float) or not math.isfinite(body["seconds"]) or not 3 <= body["seconds"] <= (300 if extend else 40):
         raise ValueError("Bounded short audition required")
     if not isinstance(body["prompt"], str) or not 20 <= len(body["prompt"]) <= 1500:
         raise ValueError("Bounded prompt required")
     if type(body["seed"]) is not int or not 0 <= body["seed"] < 2**32:
         raise ValueError("Explicit seed required")
     if extend:
+        if body["outputFormat"] not in ("mp3", "wav") or body["seconds"] > 90 and body["outputFormat"] != "mp3":
+            raise ValueError("Long continuation requires bounded compressed transfer")
         if not isinstance(body["sourceSha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", body["sourceSha256"]):
             raise ValueError("Source digest required")
         if any(type(body[k]) is not int for k in ("sampleRate", "sourceFrames")) or body["sampleRate"] not in (44100,48000) or not 3 <= body["sourceFrames"] / body["sampleRate"] <= 40:
             raise ValueError("Exact bounded source clock required")
-        if not 1 <= body["seconds"] - body["sourceFrames"] / body["sampleRate"] <= 60:
+        if not 1 <= body["seconds"] - body["sourceFrames"] / body["sampleRate"] <= 276:
             raise ValueError("Bounded forward continuation required")
     elif repaint:
         if not isinstance(body["sourceSha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", body["sourceSha256"]):
@@ -115,7 +117,7 @@ def create_app(config):
     manager, coordinator = attach(app, host_id="zz-tower2-music-audition", kind="music_external",
         units={unit.name: unit}, port=config["port"], in_flight=busy, backend="cpu",
         idle_seconds=120, coload=True, gpu_call=lambda fn: fn(),
-        inventory={"models": MODELS, "execution": "remote-paid", "max_seconds": 90, "max_source_seconds": 40, "max_text_seconds": 24,
+        inventory={"models": MODELS, "execution": "remote-paid", "max_seconds": 300, "max_source_seconds": 40, "max_text_seconds": 24,
                    "budget_usd": config["budgetUsd"], "gpu_residency_claimed": False})
 
     def authenticate(value):
@@ -168,7 +170,7 @@ def create_app(config):
                 if body["model"] == "stable-audio-3-inpaint":
                     payload.update(mask_start_seconds=body["startFrame"] / body["sampleRate"], mask_end_seconds=body["endFrame"] / body["sampleRate"])
                 else:
-                    payload.update(extend_seconds_before=0, extend_seconds_after=body["seconds"] - body["sourceFrames"] / body["sampleRate"])
+                    payload.update(extend_seconds_before=0, extend_seconds_after=body["seconds"] - body["sourceFrames"] / body["sampleRate"], output_format=body["outputFormat"], bitrate="192k")
             elif body["model"] == "eleven-music":
                 payload.update(music_length_ms=body["seconds"] * 1000, force_instrumental=True,
                                output_format="mp3_44100_128")
@@ -207,7 +209,7 @@ def create_app(config):
                 raw = response.read(32 * 1024**2 + 1)
             if not 0 < len(raw) <= 32 * 1024**2:
                 raise ValueError("Artifact outside bounds")
-            artifact_name = "audio.wav" if body["model"] in ("stable-audio-3-inpaint", "stable-audio-3-outpaint") else "audio.mp3"
+            artifact_name = "audio.wav" if body["model"] == "stable-audio-3-inpaint" or body["model"] == "stable-audio-3-outpaint" and body["outputFormat"] == "wav" else "audio.mp3"
             (root / job / artifact_name).write_bytes(raw)
             receipt.update(result=result, artifact={"name": artifact_name, "sha256": sha(raw), "bytes": len(raw)},
                 remoteTerminalObserved=True, remotePhysicalSettlementClaimed=False,
