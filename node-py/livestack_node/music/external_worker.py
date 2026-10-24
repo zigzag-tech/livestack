@@ -31,9 +31,10 @@ MODELS = {
     "eleven-music": "fal-ai/elevenlabs/music",
     "stable-audio-3-medium": "fal-ai/stable-audio-3/medium/text-to-audio",
     "stable-audio-3-inpaint": "fal-ai/stable-audio-3/medium/audio-inpainting",
+    "stable-audio-3-outpaint": "fal-ai/stable-audio-3/medium/audio-outpainting",
 }
 # Conservative retained ceilings for the 24-second audition lane, not invoices.
-CEILINGS = {"eleven-music": 0.60, "stable-audio-3-medium": 0.10, "stable-audio-3-inpaint": 0.10}
+CEILINGS = {"eleven-music": 0.60, "stable-audio-3-medium": 0.10, "stable-audio-3-inpaint": 0.10, "stable-audio-3-outpaint": 0.20}
 
 
 def canonical(value):
@@ -49,6 +50,9 @@ def validate_request(body, owner_id):
         raise ValueError("Closed music request required")
     expected = {"jobId", "ownerId", "model", "prompt", "seconds", "seed"}
     repaint = body.get("model") == "stable-audio-3-inpaint"
+    extend = body.get("model") == "stable-audio-3-outpaint"
+    if extend:
+        expected |= {"sourceSha256", "sampleRate", "sourceFrames"}
     if repaint:
         expected |= {"sourceSha256", "startFrame", "endFrame", "sampleRate", "sourceFrames"}
     if set(body) != expected:
@@ -57,13 +61,20 @@ def validate_request(body, owner_id):
         raise ValueError("Invalid job identity")
     if body["ownerId"] != owner_id or body["model"] not in MODELS:
         raise ValueError("Owner or model outside this audition lane")
-    if type(body["seconds"]) not in (int, float) or not math.isfinite(body["seconds"]) or not 3 <= body["seconds"] <= 40:
+    if type(body["seconds"]) not in (int, float) or not math.isfinite(body["seconds"]) or not 3 <= body["seconds"] <= (90 if extend else 40):
         raise ValueError("Bounded short audition required")
     if not isinstance(body["prompt"], str) or not 20 <= len(body["prompt"]) <= 1500:
         raise ValueError("Bounded prompt required")
     if type(body["seed"]) is not int or not 0 <= body["seed"] < 2**32:
         raise ValueError("Explicit seed required")
-    if repaint:
+    if extend:
+        if not isinstance(body["sourceSha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", body["sourceSha256"]):
+            raise ValueError("Source digest required")
+        if any(type(body[k]) is not int for k in ("sampleRate", "sourceFrames")) or body["sampleRate"] not in (44100,48000) or not 3 <= body["sourceFrames"] / body["sampleRate"] <= 40:
+            raise ValueError("Exact bounded source clock required")
+        if not 1 <= body["seconds"] - body["sourceFrames"] / body["sampleRate"] <= 60:
+            raise ValueError("Bounded forward continuation required")
+    elif repaint:
         if not isinstance(body["sourceSha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", body["sourceSha256"]):
             raise ValueError("Source digest required")
         if any(type(body[k]) is not int for k in ("startFrame", "endFrame", "sampleRate", "sourceFrames")):
@@ -104,7 +115,7 @@ def create_app(config):
     manager, coordinator = attach(app, host_id="zz-tower2-music-audition", kind="music_external",
         units={unit.name: unit}, port=config["port"], in_flight=busy, backend="cpu",
         idle_seconds=120, coload=True, gpu_call=lambda fn: fn(),
-        inventory={"models": MODELS, "execution": "remote-paid", "max_seconds": 40,
+        inventory={"models": MODELS, "execution": "remote-paid", "max_seconds": 90, "max_source_seconds": 40, "max_text_seconds": 24,
                    "budget_usd": config["budgetUsd"], "gpu_residency_claimed": False})
 
     def authenticate(value):
@@ -143,7 +154,7 @@ def create_app(config):
             store(job, "submitting", receipt)
             model = MODELS[body["model"]]
             payload = {"prompt": body["prompt"]}
-            if body["model"] == "stable-audio-3-inpaint":
+            if body["model"] in ("stable-audio-3-inpaint", "stable-audio-3-outpaint"):
                 source = sources / (body["sourceSha256"] + ".wav")
                 raw_source = source.read_bytes()
                 if sha(raw_source) != body["sourceSha256"]:
@@ -153,9 +164,11 @@ def create_app(config):
                             or wav.getnchannels() != 2 or wav.getsampwidth() != 2):
                         raise ValueError("Actual source clock differs")
                 payload.update(audio_url="data:audio/wav;base64," + base64.b64encode(raw_source).decode(),
-                    mask_start_seconds=body["startFrame"] / body["sampleRate"],
-                    mask_end_seconds=body["endFrame"] / body["sampleRate"], seed=body["seed"],
-                    enable_prompt_expansion=False, output_format="wav")
+                    seed=body["seed"], enable_prompt_expansion=False, output_format="wav")
+                if body["model"] == "stable-audio-3-inpaint":
+                    payload.update(mask_start_seconds=body["startFrame"] / body["sampleRate"], mask_end_seconds=body["endFrame"] / body["sampleRate"])
+                else:
+                    payload.update(extend_seconds_before=0, extend_seconds_after=body["seconds"] - body["sourceFrames"] / body["sampleRate"])
             elif body["model"] == "eleven-music":
                 payload.update(music_length_ms=body["seconds"] * 1000, force_instrumental=True,
                                output_format="mp3_44100_128")
@@ -194,7 +207,7 @@ def create_app(config):
                 raw = response.read(32 * 1024**2 + 1)
             if not 0 < len(raw) <= 32 * 1024**2:
                 raise ValueError("Artifact outside bounds")
-            artifact_name = "audio.wav" if body["model"] == "stable-audio-3-inpaint" else "audio.mp3"
+            artifact_name = "audio.wav" if body["model"] in ("stable-audio-3-inpaint", "stable-audio-3-outpaint") else "audio.mp3"
             (root / job / artifact_name).write_bytes(raw)
             receipt.update(result=result, artifact={"name": artifact_name, "sha256": sha(raw), "bytes": len(raw)},
                 remoteTerminalObserved=True, remotePhysicalSettlementClaimed=False,
