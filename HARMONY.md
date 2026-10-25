@@ -883,6 +883,16 @@ show the committed generation; status reports defaults, worker-effective
 generations, installed digests, and recent refusals. Rollback selects a retained
 digest in a new generation and affects future acceptance only.
 
+The bundle `stage` reads is produced by the application-neutral builder `python
+-m livestack_node.workloads.handler_package_builder --root <files> --out
+<bundle-dir> --spec <spec.json>` (or `build_bundle()` from Python). The spec names
+`release_version`, `platform`, `architecture` and, per handler id, `runtime_id`
+(must be in the operator-installed set, default `node22`/`python3`), `entrypoint`,
+`arguments`, `outputs`, `infrastructure_exit_codes` and the payload/result schema
+ids. It refuses links, special files, an unknown runtime, an entry point outside
+the package and an output directory inside the package root, and its digests are
+byte-identical to the shared v1 fixture.
+
 The initial bounds are 64 handler IDs, four releases per handler, 2 GiB per
 package, 16 GiB of authority package bytes, 4 MiB of manifest metadata, 16
 staged candidates, 16 activation receipts, 256 installed worker packages, 260
