@@ -18,6 +18,11 @@ def validate_request(body: dict) -> dict:
     if type(seed) is not int or not 0 <= seed < 2**63:
         raise ValueError("seed must be an integer between 0 and 2**63-1")
     out["seed"] = seed
+    # How long the caller can wait for Harmony to find room (seconds): a busy or just-restarted fleet is not a refusal.
+    wait = body.get("harmony_wait_s", 0)
+    if type(wait) not in (int, float) or not 0 <= wait <= 3600:
+        raise ValueError("harmony_wait_s must be a number of seconds between 0 and 3600")
+    out["harmony_wait_s"] = wait
     req = body.get("harmony_requires", {})
     if not isinstance(req, dict) or req.get("class", "imagegen") != "imagegen":
         raise ValueError("harmony_requires must describe class=imagegen")
