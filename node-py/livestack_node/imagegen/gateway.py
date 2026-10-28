@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 import os
 import secrets
 import urllib.error
@@ -27,7 +28,7 @@ def json_call(base: str, method: str, path: str, body=None, token=None, timeout=
     return json.loads(raw)
 
 
-def create_app(config=None, call=json_call):
+def create_app(config=None, call=json_call, sleep=time.sleep, clock=time.monotonic):
     config = config or json.loads(Path(os.environ["HARMONY_IMAGE_GATEWAY_CONFIG"]).read_text())
     worker_token = Path(config["worker_token_file"]).read_text().strip()
     fleet_token = Path(config["fleet_token_file"]).read_text().strip()
@@ -48,9 +49,16 @@ def create_app(config=None, call=json_call):
         try:
             # Observe-only fleet planner picks the unit and device; the worker's
             # local broker is the only authority allowed to load or evict there.
-            grant = call(config["fleet"], "POST", "/admit", {
-                "requires": request["harmony_requires"],
-                "owner": config.get("owner", "acct_harmony-image")}, token=fleet_token)
+            # A request may say it can wait (`harmony_wait_s`): while Harmony defers it (a unit not yet registered, a device
+            # still being cleared) the ask is repeated, so the planner reconciles between tries; the last refusal is the answer.
+            give_up = clock() + request["harmony_wait_s"]
+            while True:
+                grant = call(config["fleet"], "POST", "/admit", {
+                    "requires": request["harmony_requires"],
+                    "owner": config.get("owner", "acct_harmony-image")}, token=fleet_token)
+                if grant.get("granted") or clock() >= give_up:
+                    break
+                sleep(min(config.get("admit_poll_s", 5), max(0.0, give_up - clock())))
             view = call(config["fleet"], "GET", "/fleet")
             target = resolve_worker(view, grant, request["harmony_requires"])
             endpoint = target["peer"].removesuffix("/livestack")
