@@ -32,7 +32,10 @@ def satisfies(attributes: dict, requirements: dict) -> bool:
 def resolve_worker(view: dict, grant: dict, requirements: dict) -> dict:
     """Resolve the planner's grant, verifying its advertised requirements again."""
     if not grant.get("granted") or not grant.get("device_id") or not grant.get("kind"):
-        raise RuntimeError(grant.get("reason") or "Harmony did not grant a concrete image unit")
+        # The planner says WHY it deferred (`defer_reason`); a bare "could not place it" leaves the caller guessing between
+        # a registration gap, a full device and a refusal to respect.
+        why = grant.get("defer_reason")
+        raise RuntimeError((grant.get("reason") or "Harmony did not grant a concrete image unit") + (f": {why}" if why else ""))
     matches = []
     for host, data in view.get("hosts", {}).items():
         for node in data.get("nodes", []):
