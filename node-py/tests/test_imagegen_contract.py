@@ -30,3 +30,9 @@ def test_misleading_or_degraded_grant_cannot_silently_substitute_model():
 def test_invalid_requests_fail_before_inference(body):
     with pytest.raises(ValueError):
         validate_request(body)
+
+
+def test_a_refusal_carries_the_planners_own_reason():
+    refused = {"granted": False, "reason": "the planner could not place it on any device", "defer_reason": "qwen_image_2512 needs 20.9 GB, gpu1 has 20.1 GB free"}
+    with pytest.raises(RuntimeError, match="could not place it on any device: qwen_image_2512 needs 20.9 GB"):
+        resolve_worker({}, refused, {})
