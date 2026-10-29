@@ -12,7 +12,7 @@ def setup(tmp_path):
     config = {"worker_token_file": str(worker), "fleet_token_file": str(fleet), "fleet": "http://fleet"}
     calls = []
 
-    def call(base, method, path, body=None, token=None):
+    def call(base, method, path, body=None, token=None, timeout=None):
         calls.append((base, method, path, body, token))
         if path == "/admit":
             assert token == "fleet-secret"
@@ -58,33 +58,23 @@ def test_worker_cannot_return_a_different_model(setup):
     assert response.status_code == 503
 
 
-def test_a_request_that_can_wait_is_asked_again_until_harmony_places_it(setup):
-    config, calls, real = setup
-    now, slept, refusals = [0.0], [], [2]
-    def call(base, method, path, body=None, token=None):
-        if path == "/admit" and refusals[0]:
-            refusals[0] -= 1
-            return {"granted": False, "reason": "the planner could not place it on any device", "defer_reason": "no unit satisfies"}
-        return real(base, method, path, body, token)
-    def sleep(s):
-        slept.append(s); now[0] += s
-    client = TestClient(create_app(config, call=call, sleep=sleep, clock=lambda: now[0]))
+def test_a_request_that_can_wait_says_so_to_harmony_and_is_asked_once(setup):
+    config, calls, call = setup
+    client = TestClient(create_app(config, call=call))
     body = {"prompt": "x", "harmony_requires": {"params_b>=": 20}, "harmony_wait_s": 60}
     assert client.post("/v1/images/generations", json=body, headers={"Authorization": "Bearer worker-secret"}).status_code == 200
-    assert slept == [5, 5]
+    admits = [c for c in calls if c[2] == "/admit"]
+    assert len(admits) == 1 and admits[0][3]["wait_s"] == 60
 
 
 def test_a_request_that_runs_out_of_patience_gets_the_planners_reason(setup):
     config, _, real = setup
-    now = [0.0]
-    def call(base, method, path, body=None, token=None):
+    def call(base, method, path, body=None, token=None, timeout=None):
         if path == "/admit":
             return {"granted": False, "reason": "the planner could not place it on any device", "defer_reason": "no unit satisfies"}
         return real(base, method, path, body, token)
-    def sleep(s):
-        now[0] += s
-    client = TestClient(create_app(config, call=call, sleep=sleep, clock=lambda: now[0]))
+    client = TestClient(create_app(config, call=call))
     body = {"prompt": "x", "harmony_requires": {"params_b>=": 20}, "harmony_wait_s": 12}
     r = client.post("/v1/images/generations", json=body, headers={"Authorization": "Bearer worker-secret"})
-    assert r.status_code == 503 and "no unit satisfies" in r.json()["detail"] and now[0] == 12
+    assert r.status_code == 503 and "no unit satisfies" in r.json()["detail"]
     assert client.post("/v1/images/generations", json={**body, "harmony_wait_s": -1}, headers={"Authorization": "Bearer worker-secret"}).status_code == 400

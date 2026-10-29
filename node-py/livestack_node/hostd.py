@@ -117,6 +117,50 @@ from .planner import Defer, Device, Request, Residency, Unit, Evict, Grant, Load
 
 GB = 1_000_000_000
 
+# `wait_s` on POST /admit: the longest a caller may ask to be held, and how often
+# a held request is planned again.
+ADMIT_WAIT_MAX_S = 3600.0
+ADMIT_WAIT_POLL_S = 1.0
+
+
+class AdmitQueue:
+    """Arrival order among held /admit requests with the same requirement.
+
+    Only the head of a requirement's line plans; the rest wait their turn, so a
+    later arrival cannot take room an earlier one is waiting for. A request
+    leaves the line when it is answered or its caller gives up, whichever
+    comes first.
+    """
+
+    def __init__(self):
+        import threading
+        self._lock = threading.Lock()
+        self._lines: Dict[str, List[str]] = {}
+
+    def waiting(self, key, req_id):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def hold():
+            with self._lock:
+                self._lines.setdefault(key, []).append(req_id)
+            try:
+                yield
+            finally:
+                with self._lock:
+                    line = self._lines.get(key, [])
+                    if req_id in line:
+                        line.remove(req_id)
+                    if not line:
+                        self._lines.pop(key, None)
+        return hold()
+
+    def is_head(self, key, req_id):
+        with self._lock:
+            line = self._lines.get(key)
+            return bool(line) and line[0] == req_id
+
+
 # Priority policy (lower = more important). The ASR pipeline (asr/align/diarize)
 # outranks TTS, which outranks chipgen — so a digest'''s align can preempt idle
 # TTS/chipgen. Decoupled from the residency tier on purpose: align/diarize are
@@ -240,6 +284,8 @@ def build_app(broker: HostBroker):
         except AuthError:
             return None
 
+    admit_queue = AdmitQueue()
+
     @app.post("/admit")
     def admit(payload: dict = Body(...), authorization: str = Header(None)):
         kind = payload.get("kind") or ""
@@ -309,53 +355,83 @@ def build_app(broker: HostBroker):
         # `granted: False` with a reason, so a refusal and an outage stop
         # looking alike. Distinguishing FAULTS from refusals inside
         # `plan_and_apply` is the remaining half and wants its own change.
+        # `wait_s`: how long the caller can wait for room. A refusal inside the
+        # window is not an answer — the request stays here, planned again as
+        # the fleet changes (a unit registering, a device being cleared), and
+        # each pass renews the unmet-demand signal the reconcile loop prepares
+        # room from. Waiters for the same requirement are served in arrival
+        # order; a different requirement is never held up behind them.
         try:
-            p = broker.plan_and_apply([req], state["last_evicted_at"])
-        except Exception as e:  # a peer down etc. — degrade: let the caller proceed
-            return {"granted": True, "device_id": None, "degraded": str(e)}
-        _track(p)
-        grant = next((g for g in p.of(Grant) if g.request_id == req.id), None)
-        dev = grant.device_id if grant is not None else None
-        defer = next((d.reason for d in p.of(Defer) if d.request_id == req.id), None)
-        if dev is None and defer and "host memory" in defer:
-            # DRAIN, DON'T KILL (host_ledger.py): a model load that does not
-            # fit the host's RAM is written to the ledger as WAITING, so task
-            # placement admits no new attempt here until it does. The caller
-            # keeps asking (harmony-llm retries a host-memory defer), and each
-            # ask refreshes the entry; when it stops, the entry lapses.
-            from .planner import _unit_satisfies
-            units = getattr(broker, "_last_units", {}) or {}
-            broker.note_waiting(
-                [k for k, u in units.items()
-                 if (k == kind or (requires and _unit_satisfies(u, requires)))],
-                defer)
-        served_kind = grant.kind if grant is not None else None
-        lease_id = None
-        if dev is not None and broker.device_config.get(dev, {}).get("hosted"):
-            # A hosted grant is only half-done until the ledger knows: without a
-            # lease the next admit would double-book the same concurrency slot.
-            # A checkout failure must NOT void the grant — the caller got its
-            # device; the ledger is bookkeeping, and snapshot expiry heals it.
+            wait_s = float(payload.get("wait_s", 0) or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "'wait_s' must be a number of seconds")
+        if not 0 <= wait_s <= ADMIT_WAIT_MAX_S:
+            raise HTTPException(400, f"'wait_s' must be between 0 and {ADMIT_WAIT_MAX_S:g}")
+
+        def attempt():
             try:
-                lease_id = broker.hosted_checkout(dev, served_kind or kind, req.owner)
-            except Exception as e:
-                print(f"[harmony] hosted checkout failed dev={dev}: {e}", flush=True)
-        return {"granted": dev is not None, "device_id": dev, "plan": p.summary(),
-                # WHICH unit satisfied it. A caller that asked for "an llm >= 20B"
-                # has no other way to know what it got, and it needs the name to
-                # address the completion.
-                "kind": served_kind,
-                # How much room the unit actually has, so the node can size the
-                # engine to it instead of an operator guessing a fraction.
-                "budget": dict(grant.budget) if grant is not None else {},
-                "lease_id": lease_id,
-                **({} if dev is not None else
-                   {"reason": "the planner could not place it on any device",
-                    # The planner's own words, so a node can tell "no unit
-                    # like that is known" (a transient registration gap) from
-                    # "known, and not placed" (a refusal to respect).
-                    "defer_reason": next((d.reason for d in p.of(Defer)
-                                          if d.request_id == req.id), None)})}
+                p = broker.plan_and_apply([req], state["last_evicted_at"])
+            except Exception as e:  # a peer down etc. — degrade: let the caller proceed
+                return {"granted": True, "device_id": None, "degraded": str(e)}
+            _track(p)
+            grant = next((g for g in p.of(Grant) if g.request_id == req.id), None)
+            dev = grant.device_id if grant is not None else None
+            defer = next((d.reason for d in p.of(Defer) if d.request_id == req.id), None)
+            if dev is None and defer and "host memory" in defer:
+                # DRAIN, DON'T KILL (host_ledger.py): a model load that does not
+                # fit the host's RAM is written to the ledger as WAITING, so task
+                # placement admits no new attempt here until it does. The caller
+                # keeps asking (harmony-llm retries a host-memory defer), and each
+                # ask refreshes the entry; when it stops, the entry lapses.
+                from .planner import _unit_satisfies
+                units = getattr(broker, "_last_units", {}) or {}
+                broker.note_waiting(
+                    [k for k, u in units.items()
+                     if (k == kind or (requires and _unit_satisfies(u, requires)))],
+                    defer)
+            served_kind = grant.kind if grant is not None else None
+            lease_id = None
+            if dev is not None and broker.device_config.get(dev, {}).get("hosted"):
+                # A hosted grant is only half-done until the ledger knows: without a
+                # lease the next admit would double-book the same concurrency slot.
+                # A checkout failure must NOT void the grant — the caller got its
+                # device; the ledger is bookkeeping, and snapshot expiry heals it.
+                try:
+                    lease_id = broker.hosted_checkout(dev, served_kind or kind, req.owner)
+                except Exception as e:
+                    print(f"[harmony] hosted checkout failed dev={dev}: {e}", flush=True)
+            return {"granted": dev is not None, "device_id": dev, "plan": p.summary(),
+                    # WHICH unit satisfied it. A caller that asked for "an llm >= 20B"
+                    # has no other way to know what it got, and it needs the name to
+                    # address the completion.
+                    "kind": served_kind,
+                    # How much room the unit actually has, so the node can size the
+                    # engine to it instead of an operator guessing a fraction.
+                    "budget": dict(grant.budget) if grant is not None else {},
+                    "lease_id": lease_id,
+                    **({} if dev is not None else
+                       {"reason": "the planner could not place it on any device",
+                        # The planner's own words, so a node can tell "no unit
+                        # like that is known" (a transient registration gap) from
+                        # "known, and not placed" (a refusal to respect).
+                        "defer_reason": next((d.reason for d in p.of(Defer)
+                                              if d.request_id == req.id), None)})}
+
+        if wait_s <= 0:
+            return attempt()
+        wait_key = json.dumps([kind, requires, req.selector], sort_keys=True, default=str)
+        deadline = time.monotonic() + wait_s
+        with admit_queue.waiting(wait_key, req.id):
+            while True:
+                if admit_queue.is_head(wait_key, req.id):
+                    out = attempt()
+                    if out.get("granted") or time.monotonic() >= deadline:
+                        return out
+                elif time.monotonic() >= deadline:
+                    return {"granted": False, "device_id": None, "plan": {},
+                            "reason": "still waiting behind earlier requests for the same requirement",
+                            "defer_reason": None}
+                time.sleep(min(ADMIT_WAIT_POLL_S, max(0.0, deadline - time.monotonic())))
 
     # `:path`, because a fleet lease id names its device and a hosted device
     # id is a URL (`http://100.64.0.18:8190-<ms>-<seq>`). A bare `{lease_id}`
