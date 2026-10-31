@@ -11,6 +11,8 @@ infrastructure and never guessed to be an OOM kill.
 """
 from __future__ import annotations
 
+import json
+
 from .log_excerpt import clean as clean_excerpt
 from .model import encode
 
@@ -86,7 +88,12 @@ def _excerpt(result):
 
 
 def reason_of(cause):
-    """The human line for a terminal job whose cause names a log excerpt; None when it has none."""
+    """Return the bounded reason supported by a terminal cause, if any."""
+    evidence = cause.get("evidence") if isinstance(cause, dict) else None
+    if (isinstance(evidence, dict) and cause.get("kind") == "succeeded" and
+            all(type(evidence.get(key)) is int and evidence[key] == 0
+                for key in ("exit_code", "oom_kill", "pids_max_events"))):
+        return "handler_exit_code_zero"
     if isinstance(cause, dict) and cause.get("kind") == "handler_failed":
         found = (cause.get("evidence") or {}).get("excerpt")
         if found:
@@ -94,9 +101,93 @@ def reason_of(cause):
     return None
 
 
+def limit_breach(result, need):
+    """Return the store's typed resource-limit breach, shared with worker classification."""
+    resources = result.get("resources") if isinstance(result, dict) else None
+    resources = resources if isinstance(resources, dict) else {}
+    try:
+        need = json.loads(need) if isinstance(need, str) else (need or {})
+    except (TypeError, ValueError):
+        need = {}
+    if not isinstance(need, dict):
+        need = {}
+
+    def breach(kind, observed, declared, detail):
+        return {"cause": "resource_limit", "kind": kind, "observed": observed, "declared": declared,
+                "retryable": False, "source": resources.get("source"), "detail": detail}
+
+    oom_kill = resources.get("oom_kill")
+    if isinstance(oom_kill, (int, float)) and oom_kill > 0:
+        declared = need.get("memory_bytes", need.get("ram"))
+        observed = resources.get("memory_peak_bytes")
+        return breach("memory", observed, declared,
+                      "resource limit: memory peak %s bytes reached the job's declared need.memory_bytes %s; "
+                      "raise the job's need, a retry would hit the same cap"
+                      % (observed if observed is not None else "unknown",
+                         declared if declared is not None else "unknown"))
+    pids_max_events = resources.get("pids_max_events")
+    if isinstance(pids_max_events, (int, float)) and pids_max_events > 0:
+        observed = resources.get("tasks_peak")
+        return breach("tasks", observed, None,
+                      "resource limit: the attempt reached its task limit (peak %s); raise the handler's max_tasks, "
+                      "a retry would hit the same cap" % (observed if observed is not None else "unknown"))
+    declared, grown = need.get("disk_bytes"), resources.get("disk_delta_bytes")
+    if isinstance(declared, (int, float)) and not isinstance(declared, bool) and isinstance(grown, int) and \
+            not isinstance(grown, bool) and grown >= declared:
+        return breach("disk", grown, declared,
+                      "resource limit: the workspace filesystem grew by %s bytes, reaching the job's declared "
+                      "need.disk_bytes %s; raise the job's need, a retry would hit the same cap" % (grown, declared))
+    return None
+
+
+def success_metadata(result, need=None):
+    """The bounded terminal classification supported by an explicit clean worker receipt.
+
+    Missing measurements are not zero. This is also used by readers of historical
+    records so they can distinguish a verified success from a state-only legacy row.
+    """
+    if not isinstance(result, dict) or type(result.get("exit_code")) is not int or result["exit_code"] != 0:
+        return None
+    resources = result.get("resources")
+    if not isinstance(resources, dict) or resources.get("resource_evidence") == "none":
+        return None
+    if need is not None and limit_breach(result, need) is not None:
+        return None
+    counters = {}
+    for key in ("oom_kill", "pids_max_events"):
+        value = resources.get(key)
+        if type(value) is not int or value < 0 or value != 0:
+            return None
+        counters[key] = value
+    evidence = {"exit_code": 0, **counters}
+    cause = make("succeeded", evidence)
+    return {"attribution": "workload", "reason": "handler_exit_code_zero", "cause": cause}
+
+
+def completion_success_metadata(completion, need=None):
+    """Read success metadata from a stored completion, deriving only from its receipt."""
+    if not isinstance(completion, dict):
+        completion = {}
+    result = completion.get("result")
+    metadata = success_metadata(result, need=need)
+    if metadata is None:
+        return {"attribution": "unknown", "reason": "success_evidence_unavailable",
+                "cause": make("unknown", {"unreadable": ["exit_code", "resources.oom_kill",
+                                                            "resources.pids_max_events"]}, retry="no")}
+    for key in ("attribution", "reason", "cause"):
+        if key in completion and completion[key] != metadata[key]:
+            return {"attribution": "unknown", "reason": "success_evidence_conflict",
+                    "cause": make("unknown", {"conflict": "stored terminal metadata differs from receipt"},
+                                  retry="no")}
+    return metadata
+
+
 def _derive(outcome, result, breach, fence, attempts):
     if outcome == "succeeded":
-        return make("succeeded")
+        metadata = success_metadata(result)
+        return metadata["cause"] if metadata is not None else make(
+            "unknown", {"unreadable": ["exit_code", "resources.oom_kill", "resources.pids_max_events"]},
+            fence=fence, attempts=attempts)
     if outcome == "product_failure":
         # The worker's excerpt of command.log is re-cleaned here: the bounds are ours, not the worker's.
         return make("handler_failed", {"exit_code": result.get("exit_code"),

@@ -30,8 +30,12 @@ def run(store, handler, key, resources, outcome='succeeded', need=8*GIB, admit=N
                                **({'admit': dict(cpu=1, memory_bytes=admit, disk_bytes=GIB)} if admit else {})))
     a = store.claim('w', 'boot1')
     store._now[0] += 1
+    receipt_resources = dict(resources)
+    if outcome == 'succeeded':
+        receipt_resources.setdefault('oom_kill', 0)
+        receipt_resources.setdefault('pids_max_events', 0)
     return store.complete('w', 'boot1', a['attempt_id'], a['fence'], input_digest='a'*64, outcome=outcome,
-                          result=dict(exit_code=0, artifacts=[], resources=resources))
+                          result=dict(exit_code=0, artifacts=[], resources=receipt_resources))
 
 
 def rows(store, handler=H, dimension='memory_peak'):
@@ -58,7 +62,7 @@ def test_infrastructure_outcomes_are_not_evidence_and_a_killed_attempt_is(store)
 
 
 def test_a_missing_figure_is_absent_not_zero(store):
-    run(store, H, 'none', {'resource_evidence': 'none'})
+    run(store, H, 'none', {'oom_kill': 0, 'pids_max_events': 0})
     assert rows(store) == []
 
 
