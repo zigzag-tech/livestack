@@ -39,3 +39,17 @@ f6b5a349feaf84e9c48e400b852c460765af141cab3577e788aa80f681dd75d8  openspec/chang
 e72c87e0accd1647240a94a72115b2ce09314521e0859fa244ca41f757de6180  openspec/changes/fleetd-subscribes-to-harmony-streams/specs/fleet-supervision-loop/spec.md
 f0c32e482daf78374e90e32c3ca46c4146c13686220f0915ebfed83e456e0da0  openspec/changes/fleetd-subscribes-to-harmony-streams/tasks.md
 ```
+
+## Spec sync and archive receipt
+
+- Synced the additive authenticated-stream requirement and its seven scenarios
+  into `openspec/specs/fleet-supervision-loop/spec.md`, preserving the existing
+  planning and operations requirements. Main-spec SHA-256:
+  `4bfbb40b25e45d15a03ef648e7a2f92d3422800692a184ce16cc930d2a23c72a`.
+- `openspec validate --specs`: 16 passed, 0 failed after the sync.
+- `openspec validate fleetd-subscribes-to-harmony-streams --type change`:
+  valid before archive.
+- `openspec archive fleetd-subscribes-to-harmony-streams --yes --json`:
+  archived as `2026-10-31-fleetd-subscribes-to-harmony-streams`; the archive
+  command made no additional spec edits because the delta was already synced.
+- `git diff --check`: passed after the spec sync.
