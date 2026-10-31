@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS jobs (
  request_hash TEXT NOT NULL, spec TEXT NOT NULL, state TEXT NOT NULL,
  fence INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL, updated REAL NOT NULL,
  labels TEXT NOT NULL DEFAULT '{}', reason TEXT, result TEXT, retain INTEGER NOT NULL DEFAULT 0,
- environment_handle TEXT,
+ environment_handle TEXT, source_kind TEXT, source_turn_id TEXT,
  UNIQUE(owner, request_key)
 );
 CREATE TABLE IF NOT EXISTS workers (

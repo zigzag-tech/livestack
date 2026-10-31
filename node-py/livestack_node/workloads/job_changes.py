@@ -18,12 +18,14 @@ page remains without scanning and counting the full owner history.
 from __future__ import annotations
 
 import json
+import re
 
 from .model import WorkloadError, encode, name
 
 MAX_LIMIT = 256
 # Below the 32 KiB frame a daemon loopback reader accepts.
 MAX_BYTES = 30 * 1024
+SOURCE_TURN_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 _OUTCOME_OF_COMPLETION = {"product_failure": "product", "infrastructure": "infrastructure"}
 _REFUSED_CAUSES = ("unplaceable", "capability_absent")
@@ -63,7 +65,7 @@ def _outcome(state, result, cause):
     return {"kind": kind, "reason": _clip(reason or cause_kind or state, 240) or state}
 
 
-def _row(db_row, attempt):
+def _row(db_row, attempt, *, include_lineage=False):
     state = db_row["state"]
     spec = json.loads(db_row["spec"])
     labels = json.loads(db_row["labels"] or "{}")
@@ -81,16 +83,25 @@ def _row(db_row, attempt):
     if attempt is not None:
         row["attempt"] = {"id": _clip(attempt["id"], 128), "worker": _clip(attempt["worker"], 128),
                           "lease_until_ms": _ms(attempt["expires"]), "started_ms": _ms(attempt["created"])}
+        if include_lineage:
+            row["attempt"]["worker_session_id"] = _clip(attempt["boot"], 128)
+    if include_lineage:
+        row["source_kind"] = db_row["source_kind"]
+        row["source_turn_id"] = db_row["source_turn_id"]
+        code = state if state in ("queued", "running", "succeeded", "failed", "cancelled", "expired") else "unknown"
+        row["current_explanation"] = {"code": code, "observed_ms": row["updated_ms"]}
     if state in _TERMINAL:
         row["finished_ms"] = row["updated_ms"]
-        outcome = _outcome(state, result, cause)
-        if outcome:
-            row["outcome"] = outcome
+        if not include_lineage:
+            outcome = _outcome(state, result, cause)
+            if outcome:
+                row["outcome"] = outcome
     return row
 
 
 def job_changes(store, *, updated_since=0, owner=None, limit=MAX_LIMIT,
-                after_job_id=None, inclusive=False, with_cursor=False, bounded=False):
+                after_job_id=None, inclusive=False, with_cursor=False, bounded=False,
+                source_turn_id=None):
     """Read one bounded projection. `bounded` avoids a total-row count for source polling."""
     if isinstance(updated_since, bool) or not isinstance(updated_since, int) or updated_since < 0:
         raise WorkloadError("updated_since must be a non-negative integer (ms)")
@@ -99,6 +110,9 @@ def job_changes(store, *, updated_since=0, owner=None, limit=MAX_LIMIT,
     limit = min(limit, MAX_LIMIT)
     if owner is not None and (not isinstance(owner, str) or not 0 < len(owner) <= 128):
         raise WorkloadError("invalid owner")
+    if source_turn_id is not None and (not isinstance(source_turn_id, str) or
+                                       not SOURCE_TURN_ID.fullmatch(source_turn_id)):
+        raise WorkloadError("invalid source_turn_id")
     if after_job_id is not None:
         try:
             name(after_job_id, "after_job_id")
@@ -114,6 +128,9 @@ def job_changes(store, *, updated_since=0, owner=None, limit=MAX_LIMIT,
     if owner is not None:
         where += " AND COALESCE(NULLIF(json_extract(labels,'$.owner'), ''), owner) = ?"
         args.append(owner)
+    if source_turn_id is not None:
+        where += " AND source_turn_id = ?"
+        args.append(source_turn_id)
     with store.transaction() as db:
         store._expire(db, store.clock())
         total = None if bounded else db.execute(f"SELECT count(*) FROM jobs WHERE {where}", args).fetchone()[0]
@@ -126,13 +143,14 @@ def job_changes(store, *, updated_since=0, owner=None, limit=MAX_LIMIT,
         if ids:
             placeholders = ",".join("?" for _ in ids)
             latest = db.execute(
-                "SELECT job,id,worker,expires,created FROM ("
-                "SELECT job,id,worker,expires,created,"
+                "SELECT job,id,worker,boot,expires,created FROM ("
+                "SELECT job,id,worker,boot,expires,created,"
                 "ROW_NUMBER() OVER (PARTITION BY job ORDER BY fence DESC) AS rank "
                 f"FROM attempts WHERE job IN ({placeholders})"
                 ") WHERE rank=1", ids).fetchall()
             attempts = {attempt["job"]: attempt for attempt in latest}
-        jobs = [_row(db_row, attempts.get(db_row["id"])) for db_row in rows]
+        jobs = [_row(db_row, attempts.get(db_row["id"]), include_lineage=source_turn_id is not None)
+                for db_row in rows]
         now_ms = _ms(store.clock())
 
     def response():

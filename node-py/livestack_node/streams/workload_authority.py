@@ -69,7 +69,8 @@ EXPIRE_AFTER_S = 2592000
 
 _INTENT_ID = re.compile(r"^[A-Za-z0-9_.:@-]{1,64}$")
 _DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
-_SUBMIT_FIELDS = {"intent_id", "kind", "spec", "selector", "owner"}
+_TURN_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_SUBMIT_FIELDS = {"intent_id", "kind", "spec", "selector", "owner", "source"}
 
 
 class BackendRefused(Exception):
@@ -298,6 +299,12 @@ class WorkloadAuthority:
         if selector is not None and not (isinstance(selector, dict) and len(selector) <= 16 and all(
                 isinstance(k, str) and isinstance(v, str) and len(v) <= 128 for k, v in selector.items())):
             return None, (REFUSAL_SCHEMA_INVALID, "body.selector must map up to 16 names to strings")
+        source = body.get("source")
+        if "source" in body and not (
+                isinstance(source, dict) and set(source) == {"kind", "turn_id"} and
+                source.get("kind") == "overlord_turn" and isinstance(source.get("turn_id"), str) and
+                _TURN_ID.fullmatch(source["turn_id"])):
+            return None, (REFUSAL_SCHEMA_INVALID, "body.source must be {kind: overlord_turn, turn_id: bounded id}")
         owner = body.get("owner")
         if owner is not None and not (isinstance(owner, str) and len(owner) <= 128):
             return None, (REFUSAL_SCHEMA_INVALID, "body.owner must be a string of at most 128 characters")
@@ -306,6 +313,10 @@ class WorkloadAuthority:
             return None, (REFUSAL_SCHEMA_INVALID, "write.principal must name the authenticated requester")
         if owner is not None and owner != principal:
             return None, (REFUSAL_FORBIDDEN_FIELD, "body.owner must match the authenticated requester")
+        if "source" in body:
+            can_submit_source = getattr(self.backend, "can_submit_turn_source", None)
+            if not callable(can_submit_source) or not can_submit_source(principal):
+                return None, (REFUSAL_FORBIDDEN_FIELD, "source_turn_not_authorized")
         # Owner is derived from the authenticated write, not caller-selected body data.
         normalized = dict(body)
         normalized.pop("owner", None)
@@ -340,7 +351,7 @@ class WorkloadAuthority:
         body = record["body"]
         try:
             job = self.backend.submit(record["owner"], body["kind"], body.get("spec"), body.get("selector") or {},
-                                      record["intent_id"])
+                                      record["intent_id"], source=body.get("source"))
         except BackendRefused as error:
             attribution = "infra" if error.status in (429, 502, 503, 504) else (
                 "workload" if error.status in (400, 403, 404, 409, 413, 415, 422) else "unknown")
@@ -473,7 +484,12 @@ class StoreBackend:
         self.store, self.resolve_spec, self.blobs = store, resolve_spec, blobs
         self.public_base_url = public_base_url.rstrip("/") if public_base_url else ""
 
-    def submit(self, owner: str, kind: str, spec: Optional[dict], selector: dict, intent_id: str) -> dict:
+    def can_submit_turn_source(self, owner: str) -> bool:
+        principal = self.store.principals.get(owner)
+        return bool(principal is not None and principal.role in ("caller", "admin") and principal.source_turns)
+
+    def submit(self, owner: str, kind: str, spec: Optional[dict], selector: dict, intent_id: str,
+               *, source: Optional[dict] = None) -> dict:
         if spec is None:
             raise BackendRefused(400, "spec_reference_required")
         if self.resolve_spec is None:
@@ -486,6 +502,12 @@ class StoreBackend:
             if not isinstance(resolved, dict):
                 raise BackendRefused(400, "resolved_spec_must_be_an_object")
             request = dict(resolved)
+            if "source" in request:
+                raise BackendRefused(400, "source_must_be_on_authenticated_intent")
+            if source is not None:
+                if not self.can_submit_turn_source(owner):
+                    raise BackendRefused(403, "source_turn_not_authorized")
+                request["source"] = source
             # The durable intent id is the workload request key. A body cannot split the two idempotency
             # domains by supplying its own key.
             request["key"] = intent_id

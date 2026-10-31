@@ -22,10 +22,12 @@ def api(tmp_path):
     server = WorkloadServer(('127.0.0.1', 0), store, [
         Principal('alice', 'a'*32, 'caller', ('test.v1',)),
         Principal('bob', 'b'*32, 'caller', ('test.v1',)),
+        Principal('trusted', 't'*32, 'caller', ('test.v1',), source_turns=True),
         Principal('worker', 'w'*32, 'worker', worker='w1', host='host1'),
     ])
     data = b'input fixture'
     server.blobs.put('alice', hashlib.sha256(data).hexdigest(), len(data), BytesIO(data))
+    server.blobs.put('trusted', hashlib.sha256(data).hexdigest(), len(data), BytesIO(data))
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     def call(path, data=None, token='a'*32):
@@ -52,6 +54,19 @@ def test_auth_handler_allowlist_and_owner_isolation(api):
     assert api('jobs', spec)[1]['id'] == job['id']
     assert api('jobs/'+job['id'], token='b'*32)[0] == 404
     assert api('worker/claim', {'boot': 'boot'})[0] == 403
+
+
+def test_direct_workload_submit_requires_source_turn_principal_capability(api):
+    source = {'kind': 'overlord_turn', 'turn_id': '5b1d5447-9261-4e33-a9b2-160ff52e8143'}
+    spec = dict(version=1, key='untrusted-source', handler='test.v1',
+                input_digest=hashlib.sha256(b'input fixture').hexdigest(),
+                need={'cpu': 1}, source=source)
+    assert api('jobs', spec)[0] == 403
+
+    accepted = dict(spec, key='trusted-source')
+    status, job = api('jobs', accepted, token='t'*32)
+    assert status == 200
+    assert job['spec']['source'] == source
 
 
 def test_object_put_acknowledges_canonical_cas_before_optional_mirror(tmp_path):

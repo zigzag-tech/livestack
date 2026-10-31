@@ -42,7 +42,8 @@ class WorkloadAuthorityIntegration(unittest.IsolatedAsyncioTestCase):
                                    decision_ledger=self.decision_ledger,
                                    decision_emitter_id="fixture-workload-authority")
         self.principals = (
-            Principal("caller-a", "a" * 40, "caller", handlers=("test.v1", "uninstalled.v1")),
+            Principal("caller-a", "a" * 40, "caller", handlers=("test.v1", "uninstalled.v1"),
+                      source_turns=True),
             Principal("caller-b", "b" * 40, "caller", handlers=("test.v1",)),
         )
         self.store.bind_principals(self.principals)
@@ -77,10 +78,12 @@ class WorkloadAuthorityIntegration(unittest.IsolatedAsyncioTestCase):
                 "input_digest": input_digest or hashlib.sha256(INPUT).hexdigest(),
                 "need": {"cpu": 1}, "payload": {"source": "fixture"}}
 
-    async def submit(self, intent_id, spec, *, principal="caller-a", owner=None):
+    async def submit(self, intent_id, spec, *, principal="caller-a", owner=None, source=None):
         body = {"kind": "fixture", "spec": spec}
         if owner is not None:
             body["owner"] = owner
+        if source is not None:
+            body["source"] = source
         return await self.ingress.write(CONTRACT, "submit", intent_id, {"body": body}, principal=principal)
 
     def counts(self):
@@ -131,6 +134,55 @@ class WorkloadAuthorityIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(decisions), 1, "one real WorkloadStore placement decision is recorded")
         self.assertEqual(decisions[0]["request"]["owner"], "caller-a")
         self.assertEqual(decisions[0]["request"]["attempt_id"], assignment["attempt_id"])
+
+    async def test_authenticated_turn_source_persists_and_replay_conflicts_are_refused(self):
+        self.blobs.put("caller-a", hashlib.sha256(INPUT).hexdigest(), len(INPUT), io.BytesIO(INPUT))
+        raw = json.dumps(self.request()).encode("utf-8")
+        ref = self.reference(raw)
+        source = {"kind": "overlord_turn", "turn_id": "5b1d5447-9261-4e33-a9b2-160ff52e8143"}
+
+        first = await self.submit("intent-lineage", ref, source=source)
+        self.assertEqual(first["body"]["status"], "admitted")
+        record = self.runtime.workload.ledger.get("intent-lineage")
+        self.assertEqual(record["body"]["source"], source)
+        self.assertEqual(record["owner"], "caller-a")
+        job = self.store.get("caller-a", record["job"])
+        self.assertEqual(job["spec"]["source"], source)
+        self.assertEqual(job["spec"]["key"], "intent-lineage")
+
+        replay = await self.submit("intent-lineage", ref, source=source)
+        self.assertEqual(replay, first)
+        conflicting = await self.submit(
+            "intent-lineage", ref,
+            source={"kind": "overlord_turn", "turn_id": "1a318f48-30bd-4d9c-aeef-8d2759235a84"},
+        )
+        self.assertEqual(conflicting["body"]["status"], "refused")
+        self.assertEqual(self.counts(), (1, 0))
+
+    async def test_source_turn_claim_requires_operator_authorized_principal(self):
+        raw = json.dumps(self.request()).encode("utf-8")
+        ref = self.reference(raw, owner="caller-b")
+        source = {"kind": "overlord_turn", "turn_id": "5b1d5447-9261-4e33-a9b2-160ff52e8143"}
+
+        result = await self.submit("intent-untrusted-source", ref, principal="caller-b", source=source)
+
+        self.assertEqual(result["body"]["status"], "refused")
+        self.assertIn("source_turn_not_authorized", result["body"]["reason"])
+        self.assertEqual(self.counts(), (0, 0))
+
+    async def test_stream_source_shape_is_closed_and_bounded(self):
+        raw = json.dumps(self.request()).encode("utf-8")
+        ref = self.reference(raw)
+        invalid_sources = [
+            {"kind": "other", "turn_id": "turn-1"},
+            {"kind": "overlord_turn", "turn_id": "turn/1"},
+            {"kind": "overlord_turn", "turn_id": "turn-1", "owner": "caller-a"},
+            {"kind": "overlord_turn", "turn_id": "x" * 129},
+        ]
+        for index, source in enumerate(invalid_sources):
+            result = await self.submit(f"intent-invalid-source-{index}", ref, source=source)
+            self.assertEqual(result["body"]["status"], "refused")
+        self.assertEqual(self.counts(), (0, 0))
 
     async def test_strict_reference_and_handler_refusals_are_attributed_without_jobs(self):
         self.blobs.put("caller-a", hashlib.sha256(INPUT).hexdigest(), len(INPUT), io.BytesIO(INPUT))
