@@ -440,14 +440,19 @@ class Handler(BaseHTTPRequestHandler):
     def route(self, principal, method, parts, body):
         store = self.server.store
         if parts == ['jobs', 'changes'] and method == 'GET':
-            if principal.role != 'job_reader':
-                raise WorkloadError('job changes require a job_reader principal', 403)
             query = parse_qs(urlparse(self.path).query, keep_blank_values=True,
                              strict_parsing=True, max_num_fields=4)
             unknown = set(query) - {'updated_since', 'after_job_id', 'limit', 'source_turn_id'}
             if (unknown or any(len(values) != 1 for values in query.values()) or
                     'after_job_id' in query and 'updated_since' not in query):
                 raise WorkloadError('invalid job-changes query')
+            exact_source_reader = (
+                principal.role in ('caller', 'admin') and principal.source_turns and
+                'source_turn_id' in query
+            )
+            if principal.role != 'job_reader' and not exact_source_reader:
+                raise WorkloadError(
+                    'exact source-turn reads require source_turns on the fixed-owner principal', 403)
 
             def number(key, default):
                 if key not in query:
