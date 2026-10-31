@@ -396,7 +396,8 @@ def test_default_submission_keeps_original_digest_and_placement_is_exact(authori
     assignment = clients['worker'].request('worker/claim', {'boot': 'boot-1'})['assignment']
     assert assignment['handler_release']['release_digest'] == first[1]
     wrong = dict(boot='boot-1', attempt_id=assignment['attempt_id'], fence=assignment['fence'],
-        input_digest=input_digest, outcome='succeeded', result={'artifacts': []},
+        input_digest=input_digest, outcome='succeeded', result={'exit_code': 0,
+            'resources': {'oom_kill': 0, 'pids_max_events': 0}, 'artifacts': []},
         handler_result_identity=dict(job_id=assignment['job_id'], attempt_id=assignment['attempt_id'],
             fence=assignment['fence'], worker=assignment['worker'], boot=assignment['boot'],
             input_digest=input_digest, handler_release={**identity, 'release_digest': second[1]}))
