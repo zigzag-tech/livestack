@@ -20,6 +20,7 @@ import {
   type PlanAction,
   type StructuredError,
 } from './client.js';
+import type { FleetObservation, FleetObservationSource } from './fleetStream.js';
 import type {
   BrokerPolicyStatus,
   PolicyBroker,
@@ -77,7 +78,6 @@ export function err(stage: string, cls: string, code: string): StructuredError {
 }
 
 export interface FakeBrokerOptions {
-  view?: FleetView | Error;
   plan?: FleetPlan | Error;
   /** What `startOperation` returns, or throws. */
   start?: Operation | Error;
@@ -93,10 +93,6 @@ export class FakeBroker implements FleetClient {
     this.calls.push(name);
     if (value instanceof Error) return Promise.reject(value);
     return Promise.resolve(value ?? fallback);
-  }
-
-  view(): Promise<FleetView> {
-    return this.record('view', this.options.view, view());
   }
 
   plan(): Promise<FleetPlan> {
@@ -127,7 +123,16 @@ export class FakeBroker implements FleetClient {
   }
 }
 
-export const unreachable = () => new BrokerUnreachable('/fleet', new Error('ECONNREFUSED'));
+export class FakeFleetObservationSource implements FleetObservationSource {
+  calls = 0;
+  constructor(private readonly observation: FleetObservation = { status: 'fresh', view: view() }) {}
+  read(): Promise<FleetObservation> {
+    this.calls += 1;
+    return Promise.resolve(this.observation);
+  }
+}
+
+export const unreachable = () => new BrokerUnreachable('/fleet/plan', new Error('ECONNREFUSED'));
 export const refused = (status: number, detail: string) => new OperationRefused(status, detail);
 
 // ---------------------------------------------------------------------------
