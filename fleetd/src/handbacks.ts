@@ -18,6 +18,7 @@ import { z } from 'zod';
 import type { Handback } from 'jingway-framework/common/routines/wovine.js';
 import { READ_EFFECT } from 'jingway-framework/common/routines/effects.js';
 import type { FleetClient, Operation } from './client.js';
+import type { FleetObservationSource } from './fleetStream.js';
 import { COOLDOWN_S, MAX_COOLDOWN_S } from './workflows.js';
 
 /** Where a cooled pool and a pending wakeup live for the length of a tick. */
@@ -44,19 +45,26 @@ const OperationShape = z.object({
 
 export interface HandbackDeps {
   client: FleetClient;
+  fleetSource: FleetObservationSource;
   state: LoopState;
   now: () => number;
 }
 
 export function fleetHandbacks(deps: HandbackDeps): Record<string, Handback<any, any>> {
-  const { client, state, now } = deps;
+  const { client, fleetSource, state, now } = deps;
   return {
     read_fleet_view: {
-      description: 'The whole fleet as the broker sees it: every node, its state, how long unseen, and the operations outstanding.',
+      description: 'The latest complete raw host-level facts from the authenticated harmony.fleet/1 account stream.',
       input: z.object({}),
       output: z.object({ generated_at: z.number(), hosts: z.record(z.string(), z.unknown()) }).passthrough(),
       effect: READ_EFFECT,
-      run: async () => client.view(),
+      run: async () => {
+        const observation = await fleetSource.read();
+        if (observation.status !== 'fresh' || !observation.view) {
+          throw new Error(`harmony.fleet/1 ${observation.status}: ${observation.reason ?? 'no current view'}`);
+        }
+        return observation.view;
+      },
     },
 
     read_operation: {
