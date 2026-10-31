@@ -42,7 +42,11 @@ class ScriptedBackend:
         self.jobs: Dict[str, dict] = {}
         self.clock = lambda: wall_ms() / 1000.0
 
-    def submit(self, owner: str, kind: str, spec: Optional[dict], selector: dict, intent_id: str) -> dict:
+    def can_submit_turn_source(self, owner: str) -> bool:
+        return False
+
+    def submit(self, owner: str, kind: str, spec: Optional[dict], selector: dict, intent_id: str,
+               *, source: Optional[dict] = None) -> dict:
         if kind == "refuse-429":
             raise BackendRefused(429, "job storage capacity exhausted")
         job = self.jobs.setdefault(intent_id, {

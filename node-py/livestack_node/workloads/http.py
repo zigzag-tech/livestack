@@ -58,6 +58,9 @@ class Principal:
     upload_base_url: str | None = None
     # Explicit operator-owned join to the Benchday host identity graph.
     benchday_host_id: str | None = None
+    # May submit an exact Overlord turn as workload provenance. Default off;
+    # this never changes owner, handler admission, or placement authority.
+    source_turns: bool = False
 
     def __post_init__(self):
         name(self.id, "principal")
@@ -70,7 +73,7 @@ class Principal:
                     any(value is not None for value in
                         (self.remote_job, self.remote_provider, self.remote_run_id, self.remote_boot)) or
                     self.upload_grants or self.upload_base_url is not None or
-                    self.benchday_host_id is not None):
+                    self.benchday_host_id is not None or self.source_turns):
                 raise ValueError('job_reader principals must be fixed-owner and carry no other privileges')
         elif self.role == 'worker':
             name(self.worker, 'worker')
@@ -93,6 +96,10 @@ class Principal:
             raise ValueError('caller/admin must declare allowed handlers')
         if type(self.upload_grants) is not bool or self.upload_grants and self.role == 'worker':
             raise ValueError('upload_grants must be boolean and is for caller/admin principals only')
+        if type(self.source_turns) is not bool:
+            raise ValueError('source_turns must be boolean')
+        if self.source_turns and self.role not in ('caller', 'admin'):
+            raise ValueError('source_turns is for caller/admin principals only')
         if self.upload_base_url is not None:
             from urllib.parse import urlparse
             parsed = urlparse(self.upload_base_url) if isinstance(self.upload_base_url, str) else None
@@ -433,14 +440,19 @@ class Handler(BaseHTTPRequestHandler):
     def route(self, principal, method, parts, body):
         store = self.server.store
         if parts == ['jobs', 'changes'] and method == 'GET':
-            if principal.role != 'job_reader':
-                raise WorkloadError('job changes require a job_reader principal', 403)
             query = parse_qs(urlparse(self.path).query, keep_blank_values=True,
-                             strict_parsing=True, max_num_fields=3)
-            unknown = set(query) - {'updated_since', 'after_job_id', 'limit'}
+                             strict_parsing=True, max_num_fields=4)
+            unknown = set(query) - {'updated_since', 'after_job_id', 'limit', 'source_turn_id'}
             if (unknown or any(len(values) != 1 for values in query.values()) or
                     'after_job_id' in query and 'updated_since' not in query):
                 raise WorkloadError('invalid job-changes query')
+            exact_source_reader = (
+                principal.role in ('caller', 'admin') and principal.source_turns and
+                'source_turn_id' in query
+            )
+            if principal.role != 'job_reader' and not exact_source_reader:
+                raise WorkloadError(
+                    'exact source-turn reads require source_turns on the fixed-owner principal', 403)
 
             def number(key, default):
                 if key not in query:
@@ -462,6 +474,7 @@ class Handler(BaseHTTPRequestHandler):
                 limit=number('limit', 256),
                 with_cursor=True,
                 bounded=True,
+                source_turn_id=query.get('source_turn_id', [None])[0],
             )
         if parts == ['status'] and method == 'GET':
             if principal.role != 'admin':
@@ -524,6 +537,8 @@ class Handler(BaseHTTPRequestHandler):
                 if method == 'POST':
                     if body.get('handler') not in principal.handlers:
                         raise WorkloadError('handler is not authorized', 403)
+                    if 'source' in body and not principal.source_turns:
+                        raise WorkloadError('source_turn_not_authorized', 403)
                     self._authorized_labels(principal, body)
                     # Refuse unsupported schema/purpose before checking or
                     # touching the uploaded source objects. SDK callers also

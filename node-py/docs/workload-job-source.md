@@ -43,3 +43,38 @@ Each response contains at most 256 jobs and 30 KiB. `truncated` is zero when
 the page is complete and positive when at least one more page is available.
 Continue only when a cursor is present. The client verifies the returned owner,
 row ordering, cursor, and response bounds before returning data to its caller.
+
+## Exact Overlord turn lineage
+
+A submitter may attach
+`source: {"kind":"overlord_turn","turn_id":"<stable-id>"}` to a
+workload intent only when its operator-managed caller principal has
+`"source_turns": true`. This capability defaults to false and is valid only
+for caller/admin principals. The stream authority and direct `POST /jobs` path
+both enforce it. It does not change the authenticated owner or admission
+policy. Do not put turn ids in labels. A source claim supplied by a principal
+without this capability is refused before job admission.
+
+The fixed-owner reader accepts the exact `source_turn_id` query parameter in
+addition to its normal timestamp and cursor fields. The authority applies the
+fixed owner and exact source id before limiting results and uses the indexed
+source id. Each exact-source row carries `source_kind`, `source_turn_id`, the
+latest attempt id, worker id and the boot id authenticated for that attempt as
+`attempt.worker_session_id`. It also carries
+`current_explanation: {code, observed_ms}`; `code` is one of `queued`,
+`running`, `succeeded`, `failed`, `cancelled`, or `expired`.
+
+Exact-source rows omit handler outcome prose, progress messages, command logs
+and artifacts. `WorkloadClient.list_job_changes_for_turn` checks the owner,
+exact source id, attempt identity, explanation code, response bounds and cursor.
+It reports `complete: false` when a page is truncated; keep the relation
+unknown until the source result is complete. An empty complete page is an
+unknown relation too. Missing source, stale/malformed response or an owner
+mismatch never falls back to a nearby job, worker or timestamp match.
+
+A caller/admin principal with the explicit `source_turns` capability may use
+that same exact-source projection for its own fixed owner id. The source id is
+mandatory for this read; it cannot request another owner or an unfiltered job
+changes page. This lets the trusted submitter inspect only jobs carrying the
+source capability it already controls, without distributing a second reader
+credential.

@@ -160,7 +160,9 @@ class WorkloadStore:
             if "scope" not in {row[1] for row in db.execute("PRAGMA table_info(jobs)")}:
                 db.execute("ALTER TABLE jobs ADD COLUMN scope TEXT")
             db.execute("CREATE INDEX IF NOT EXISTS jobs_scope ON jobs(owner,scope,state)")
-            for table, column, declaration in (("jobs", "cause", "TEXT"), ("jobs", "placement", "TEXT"),
+            for table, column, declaration in (("jobs", "source_kind", "TEXT"),
+                                               ("jobs", "source_turn_id", "TEXT"),
+                                               ("jobs", "cause", "TEXT"), ("jobs", "placement", "TEXT"),
                                                ("attempts", "progress_changed", "REAL"),
                                                ("attempts", "progress_reported", "REAL"),
                                                ("attempts", "phase_started", "REAL"),
@@ -172,6 +174,8 @@ class WorkloadStore:
                 if column not in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
             db.execute("CREATE INDEX IF NOT EXISTS jobs_environment ON jobs(environment_handle,state)")
+            db.execute("CREATE INDEX IF NOT EXISTS jobs_source_turn_changes "
+                       "ON jobs(source_turn_id, CAST(updated*1000 AS INTEGER), id)")
             environment_columns = {row[1] for row in db.execute("PRAGMA table_info(task_environments)")}
             for column, declaration in (('writer_job', 'TEXT'), ('writer_attempt', 'TEXT'),
                                         ('affinity_started', 'REAL')):
@@ -822,10 +826,12 @@ class WorkloadStore:
             if active >= self.limits.active_jobs or total >= self.limits.active_jobs + self.limits.terminal_jobs:
                 raise WorkloadError("job storage capacity exhausted", 429)
             jid = uuid.uuid4().hex
-            db.execute("INSERT INTO jobs(id,owner,request_key,request_hash,spec,state,created,updated,labels,retain,scope) "
-                       "VALUES(?,?,?,?,?,'queued',?,?,?,?,?)",
+            source = spec.get("source") or {}
+            db.execute("INSERT INTO jobs(id,owner,request_key,request_hash,spec,state,created,updated,labels,retain,scope,"
+                       "source_kind,source_turn_id) VALUES(?,?,?,?,?,'queued',?,?,?,?,?,?,?)",
                        (jid, owner, spec["key"], digest, encode(spec), now, now,
-                        encode(spec.get("labels", {})), spec["retain"], scope['key'] if scope else None))
+                        encode(spec.get("labels", {})), spec["retain"], scope['key'] if scope else None,
+                        source.get("kind"), source.get("turn_id")))
             env = self._resolve_environment(db, owner, spec, now, jid)
             if env is not None:
                 db.execute('UPDATE jobs SET environment_handle=? WHERE id=?', (env['handle'], jid))
