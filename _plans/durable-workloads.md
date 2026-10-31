@@ -682,6 +682,30 @@ job-list `principal` block) and `tests/test_workload_progress.py` (a handler
 reporting `tts` then `stills` is read back in order; missing-heartbeat and
 absent cases).
 
+## Exact Overlord turn lineage (2026-10-31)
+
+The 2026-09-20 three-application model established authenticated workload
+owners, but the stream submit and fixed-owner job reader did not preserve the
+Overlord turn that caused a job. Benchday therefore could not join a turn to
+its own workload without guessing from labels, handler or timing. The
+`workload-overlord-turn-lineage` change adds an optional
+`source: {kind: "overlord_turn", turn_id}` claim to authenticated submissions.
+It is accepted only for an operator-granted `source_turns` caller/admin
+principal (default off), remains immutable job provenance, and never changes
+the owner or placement authority.
+
+WorkloadStore persists the source in nullable columns and indexes exact turn
+lookups; legacy jobs remain unlinked. The fixed-owner `jobs/changes` reader
+filters by both authenticated owner and exact source id before applying its
+existing 256-row / 30-KiB bound. Exact rows return the stored source, authority
+job id, latest attempt id, worker id and authenticated attempt boot session,
+plus a closed current-state explanation and authority timestamp. This exact
+projection omits handler prose, progress text, logs and artifacts. A missing,
+empty, malformed or truncated result remains unknown; no consumer correlates a
+nearby job or worker. The existing stream intent ledger records the validated
+source body before dispatch; no placement decision or parallel decision
+ledger entry is added.
+
 ## Measured host memory and learned claims (2026-10-02)
 
 Change: `openspec/changes/host-memory-ledger/` (design, rollout, verification). This

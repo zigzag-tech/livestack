@@ -1740,6 +1740,29 @@ does not emit, so shadow divergence is expected until it is corrected (set
 `/peers`, `/status`, `/fleet`, `/fleet/rank`, `/fleet/operations` and `/fleet/ledger` still have callers
 (benchday's poll-mode roster and `fleet_rank`, fleetd) and are NOT removed from hostd's listener.
 
+### Exact Overlord turn workload lineage
+
+The optional submit field
+`source: {"kind":"overlord_turn","turn_id":"<stable-id>"}` records
+causality from an authenticated Overlord turn to its workload job. The
+operator-managed caller `Principal` must explicitly enable `source_turns`;
+the default is false, and the capability is limited to caller/admin roles.
+The stream authority and direct WorkloadStore HTTP submission paths enforce
+this grant. The owner still comes only from the authenticated principal;
+source ids are immutable provenance, never labels or placement selectors.
+
+The fixed-owner `GET /v1/workloads/jobs/changes` reader may filter by the exact
+`source_turn_id`. It applies the authenticated owner and exact id before the
+bounded 256-row / 30-KiB limit and returns the existing `(updated_ms, job_id)`
+cursor plus truncation signal. Exact-source rows carry the stored source id,
+authority job id, latest attempt id, worker id and that attempt's authenticated
+worker boot session id. `current_explanation` contains only a closed job-state
+code (`queued`, `running`, `succeeded`, `failed`, `cancelled`, `expired`) and
+the authority update time. This projection omits worker result prose, progress,
+logs and artifacts. A truncated page, missing source, invalid owner response
+or empty complete result does not establish a turn-to-job relation; consumers
+keep it unknown instead of selecting a nearby job or worker.
+
 
 ## LLM queue offers and caller wait budgets (2026-10-19)
 
