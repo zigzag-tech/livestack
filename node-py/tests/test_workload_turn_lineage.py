@@ -243,3 +243,45 @@ def test_exact_turn_reader_is_owner_scoped_bounded_and_exposes_safe_attempt_line
         server.shutdown()
         serving.join(timeout=5)
         server.server_close()
+
+
+def test_source_turn_caller_can_read_only_its_exact_turn_projection(tmp_path):
+    store = WorkloadStore(tmp_path / "caller-reader.sqlite", handlers={"test.v1"})
+    sourced = store.submit("source-caller", request("source-owned", SOURCE))
+    store.submit("source-caller", request(
+        "different-turn", {"kind": "overlord_turn", "turn_id": "another-turn"}))
+    store.submit("source-caller", request("legacy", None))
+    server = WorkloadServer(("127.0.0.1", 0), store, [
+        Principal("source-caller", "s" * 32, "caller", ("test.v1",), source_turns=True),
+        Principal("ordinary-caller", "o" * 32, "caller", ("test.v1",)),
+    ])
+    serving = Thread(target=server.serve_forever, daemon=True)
+    serving.start()
+    source_client = WorkloadClient(f"http://127.0.0.1:{server.server_port}", "s" * 32)
+    ordinary_client = WorkloadClient(f"http://127.0.0.1:{server.server_port}", "o" * 32)
+    try:
+        exact = source_client.list_job_changes_for_turn(
+            expected_owner="source-caller", source_turn_id=TURN,
+        )
+        assert exact["complete"] is True
+        assert [job["id"] for job in exact["jobs"]] == [sourced["id"]]
+        assert exact["jobs"][0]["source_turn_id"] == TURN
+
+        empty = source_client.list_job_changes_for_turn(
+            expected_owner="source-caller", source_turn_id="unrelated-turn",
+        )
+        assert empty["complete"] is True
+        assert empty["jobs"] == []
+
+        with pytest.raises(WorkloadError, match="source_turns"):
+            ordinary_client.list_job_changes_for_turn(
+                expected_owner="ordinary-caller", source_turn_id=TURN,
+            )
+        with pytest.raises(WorkloadError, match="source_turns"):
+            source_client.request("jobs/changes?updated_since=0&limit=10")
+    finally:
+        source_client.close()
+        ordinary_client.close()
+        server.shutdown()
+        serving.join(timeout=5)
+        server.server_close()

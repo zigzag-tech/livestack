@@ -71,3 +71,10 @@ It reports `complete: false` when a page is truncated; keep the relation
 unknown until the source result is complete. An empty complete page is an
 unknown relation too. Missing source, stale/malformed response or an owner
 mismatch never falls back to a nearby job, worker or timestamp match.
+
+A caller/admin principal with the explicit `source_turns` capability may use
+that same exact-source projection for its own fixed owner id. The source id is
+mandatory for this read; it cannot request another owner or an unfiltered job
+changes page. This lets the trusted submitter inspect only jobs carrying the
+source capability it already controls, without distributing a second reader
+credential.
