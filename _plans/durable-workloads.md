@@ -142,6 +142,16 @@ when these references can be released. The blob sweep materializes this bounded
 reference set once per sweep. Real SQLite/blob tests verify both preservation
 and eventual removal, and reject missing, foreign and mismatched artifacts.
 
+A `succeeded` completion is accepted only with a supervisor receipt containing
+integer `exit_code: 0` and explicit integer zero values for both
+`resources.oom_kill` and `resources.pids_max_events`. WorkloadStore persists the
+receipt evidence with attribution `workload`, reason `handler_exit_code_zero`,
+and a typed success cause. Ordinary job reads, the authority's `done` partial,
+and the hash-bound owner-scoped result manifest use the same receipt classifier
+and expose the same attribution and reason. A legacy success without a complete
+receipt remains attributed `unknown` with reason `success_evidence_unavailable`;
+its stored state does not prove a clean exit.
+
 The native worker now polls independently, measures RAM/CPU/disk headroom,
 downloads and verifies the assigned source, launches an installed handler,
 uploads bounded logs and declared artifacts, and acknowledges completion only

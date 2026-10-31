@@ -26,12 +26,16 @@ def test_result_objects_survive_until_job_retention_releases_them(tmp_path, reta
     store.register('w','host','boot',dict(capacity={'cpu':2},available={'cpu':2},
         handlers=['build.v1'],labels={},ready=True))
     a = store.claim('w','boot')
+    completion_result = {'artifacts':[refs[1]]}
+    if first_outcome == 'succeeded':
+        completion_result.update(exit_code=0, resources={'oom_kill': 0, 'pids_max_events': 0})
     store.complete('w','boot',a['attempt_id'],a['fence'],input_digest=refs[0]['digest'],
-                   outcome=first_outcome,result={'artifacts':[refs[1]]})
+                   outcome=first_outcome,result=completion_result)
     if first_outcome == 'infrastructure':
         retry = store.claim('w','boot')
         store.complete('w','boot',retry['attempt_id'],retry['fence'],input_digest=refs[0]['digest'],
-                       outcome='succeeded',result={})
+                       outcome='succeeded',result={'exit_code': 0,
+                           'resources': {'oom_kill': 0, 'pids_max_events': 0}})
     now[0] += 20
     blobs.prune()
     with blobs.open('alice', refs[1]['digest']) as (stream, _):
@@ -62,5 +66,7 @@ def test_completion_refuses_invalid_or_foreign_artifact_references(tmp_path, kin
     ref = dict(name='binary',digest=digest,size=7 if kind == 'wrong-size' else 6)
     with pytest.raises(WorkloadError):
         store.complete('w','boot',a['attempt_id'],a['fence'],input_digest='0'*64,
-            outcome='succeeded',result={'artifacts':[ref,ref] if kind == 'duplicate-name' else [ref]})
+            outcome='succeeded',result={'exit_code': 0,
+                'resources': {'oom_kill': 0, 'pids_max_events': 0},
+                'artifacts':[ref,ref] if kind == 'duplicate-name' else [ref]})
     assert store.get('alice',a['job_id'])['state'] == 'running'

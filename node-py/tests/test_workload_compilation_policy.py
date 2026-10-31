@@ -195,7 +195,7 @@ def test_authenticated_completed_job_retains_original_compilation_producer(autho
     clients['builder'].request('worker/complete', dict(boot='boot',
         attempt_id=assignment['attempt_id'], fence=assignment['fence'],
         input_digest=assignment['spec']['input_digest'], outcome='succeeded',
-        result={'exit_code': 0, 'artifacts': []}))
+        result={'exit_code': 0, 'resources': {'oom_kill': 0, 'pids_max_events': 0}, 'artifacts': []}))
     value['revision'] = 'revision-2'
     value['hosts']['physical-builder'] = []
     write()

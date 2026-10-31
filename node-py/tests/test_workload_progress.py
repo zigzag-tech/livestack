@@ -83,14 +83,16 @@ def test_heartbeat_without_progress_leaves_last_value_and_absent_stays_absent(ap
         client.request('worker/heartbeat', dict(base, progress={'phase': 'x', 'fraction': 2}))
     assert document(caller.get(job['id'])) == {'phase': 'stills', 'fraction': .5}
     client.request('worker/complete', dict(base, input_digest=digest,
-                                           outcome='succeeded', result={'exit_code': 0}))
+                                           outcome='succeeded', result={'exit_code': 0,
+                                               'resources': {'oom_kill': 0, 'pids_max_events': 0}}))
     # A handler that never reported stays absent after completion.
     quiet = caller.submit(submit_spec('quiet', digest))
     attempt = running_attempt(api, digest)
     assert attempt['job_id'] == quiet['id']
     client.request('worker/complete', dict(boot='boot', attempt_id=attempt['attempt_id'],
                                            fence=attempt['fence'], input_digest=digest,
-                                           outcome='succeeded', result={'exit_code': 0}))
+                                           outcome='succeeded', result={'exit_code': 0,
+                                               'resources': {'oom_kill': 0, 'pids_max_events': 0}}))
     done = caller.get(quiet['id'])
     assert done['state'] == 'succeeded'
     assert 'progress' not in done

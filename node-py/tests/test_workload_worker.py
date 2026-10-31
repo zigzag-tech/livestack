@@ -369,18 +369,31 @@ def test_release_specific_exit_policy_uses_the_pinned_descriptor(fleet, tmp_path
                 archive_digest=package['archive_digest'], archive_bytes=package['archive_bytes'])
             worker.handler_packages.install(package['archive_path'], descriptor)
 
-        def classify(package):
+        def classify(package, result, need=None):
             manifest = package['manifest']
             identity = dict(handler_id=manifest['handler_id'], release_digest=package['release_digest'],
                 execution_contract=manifest['execution_contract'], payload_schema=manifest['payload_schema'],
                 result_schema=manifest['result_schema'])
-            assignment = dict(spec={'handler': manifest['handler_id']}, handler_release=identity)
-            return worker._completion_from_exit(assignment, {'exit_code': 75, 'resources': {}})['outcome']
+            assignment = dict(spec={'handler': manifest['handler_id'], 'need': need or {}},
+                              handler_release=identity)
+            return worker._completion_from_exit(assignment, result)
 
         # The supervised live A/B integration covers process, lease and artifact
         # pinning. This isolates the scalar exit-policy difference itself.
-        assert classify(first) == 'infrastructure'
-        assert classify(second) == 'product_failure'
+        assert classify(first, {'exit_code': 75, 'resources': {}})['outcome'] == 'infrastructure'
+        assert classify(second, {'exit_code': 75, 'resources': {}})['outcome'] == 'product_failure'
+        clean = {'exit_code': 0, 'resources': {'oom_kill': 0, 'pids_max_events': 0}}
+        assert classify(first, clean)['outcome'] == 'succeeded'
+        incomplete = classify(first, {'exit_code': 0, 'resources': {'oom_kill': 0}})
+        assert incomplete['outcome'] == 'infrastructure'
+        assert incomplete['result']['error'] == 'success_resource_evidence_unavailable'
+        unavailable = classify(first, {'exit_code': 0,
+            'resources': {'oom_kill': 0, 'pids_max_events': 0, 'resource_evidence': 'none'}})
+        assert unavailable['outcome'] == 'infrastructure'
+        disk_breach = classify(first, {'exit_code': 0,
+            'resources': {'oom_kill': 0, 'pids_max_events': 0, 'disk_delta_bytes': 10}},
+            need={'disk_bytes': 10})
+        assert disk_breach['outcome'] == 'infrastructure'
     finally:
         worker.close()
 
@@ -1371,7 +1384,8 @@ worker.step()
         with pytest.raises(WorkloadError) as refused:
             stale_worker.request('worker/complete', dict(boot=assignment['boot'],
                 attempt_id=assignment['attempt_id'], fence=assignment['fence'], input_digest=digest,
-                outcome='succeeded', result={'exit_code': 0, 'artifacts': []},
+                outcome='succeeded', result={'exit_code': 0,
+                    'resources': {'oom_kill': 0, 'pids_max_events': 0}, 'artifacts': []},
                 environment_receipt=stale_receipt))
         assert refused.value.status == 409
         assert worker.journal.read() is None
