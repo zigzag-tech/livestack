@@ -394,6 +394,7 @@ class HostBroker:
         # being a candidate, so demand falls back to the GPU with no other
         # special case in the planner.
         self.hosted_available: Dict[str, bool] = {}
+        self.device_holds: Dict[str, str] = {}
         # Kinds no peer will ever report (e.g. "build" on a peerless BUILD-host
         # broker). Without them, admit() for such a kind defers "unknown kind".
         self.extra_units: Dict[str, Unit] = dict(extra_units or {})
@@ -509,6 +510,12 @@ class HostBroker:
         measured_caps = measured_caps or {}
         out = []
         for did, hid in sorted(discovered.items()):
+            # A held device is the operator's, not the planner's: it is never a
+            # placement, eviction or warm target. Dropped from the world, so
+            # nothing else has to know it exists (placements a peer still reports
+            # on it are already ignored for an unknown device).
+            if self.device_holds.get(did) or self.device_config.get(did, {}).get("hold"):
+                continue
             # Capacity precedence: explicit device_config (operator intent) > MEASURED
             # (the device's real total / recommended working set) > default guess. So a
             # node that reports its true size auto-sizes its budget instead of being
@@ -827,6 +834,15 @@ class HostBroker:
         for l in expired:
             self._lease_outcome(l, now, expired=True)
         return n
+
+    def set_device_hold(self, device_id: str, reason: Optional[str]) -> None:
+        """Reserve a discovered device for a human (a falsy ``reason`` releases it).
+        Memory only; a hold that must survive a restart is ``hold`` in
+        LIVESTACK_DEVICES."""
+        if reason:
+            self.device_holds[device_id] = reason
+        else:
+            self.device_holds.pop(device_id, None)
 
     def set_hosted_available(self, device_id: str, available: bool) -> None:
         """Flip the health gate hostd's prober feeds. An unhealthy backend simply
