@@ -24,6 +24,16 @@ Harmony does not have its own repository — it lives inside `livestack`:
 `fleet_dispatch.py`, `fleet_scheduler.py`, `provision.py`, `provision_runpod.py`,
 `measure.py` (tests `test_fleet_*.py`, `test_provision.py`).
 
+## Exclusive-device leases
+
+`Unit.exclusive_device` controls co-residency; a broker-owned **device lease** coordinates an actual drain for one caller. `POST /admit` with `exclusive_device: true`, `selector.device_id`, and `min_free_bytes` persists a drain before evicting idle managed tenants, reclaims allocators, and requires a fresh memory reading above the requested threshold before issuing a lease. Busy, hard-pinned, young, in-flight, unavailable-peer, and external-memory conditions are blockers rather than invitations to OOM.
+
+The SQLite record in `device_leases.py` survives broker restart. Heartbeat expiry enters `expired_draining`, not immediately shared scheduling. Ordinary admissions and warm/restore work stay fenced until valid release or cleanup; only the matching `device_lease_id` admits the owner afterward. `client.exclusive_lease()` handles renewal and release without accepting degraded grants.
+
+A multi-GPU worker holds one primary placement and several same-owner device leases. Its gateway supplies ordered `device_lease_ids`; the broker validates every lease and uses the first for placement. `LIVESTACK_DEVICE_METERS` supplies measured memory for local CUDA devices that have no model facade. The worker returns every device/lease pair, and the gateway rejects missing or mismatched evidence.
+
+This is exclusivity over **participating managed tenants and valid leaseholders**, not a license to kill unmanaged GPU processes. Direct warm/ensure calls outside admission are outside that contract. External memory is measured and can block acquisition. Production activation of an exclusive drain is a separate operational action.
+
 ## Two brains, two layers
 
 - **`planner.py` — placement** (cross-process): given the whole world (every unit's

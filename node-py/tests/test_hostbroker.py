@@ -5,7 +5,7 @@ import time
 
 from livestack_node.measure import measure_footprint
 from livestack_node.hostbroker import HostBroker, _UnitTelemetry
-from livestack_node.planner import Device, Grant, Load, Unit, Placement, Request, Residency
+from livestack_node.planner import Device, Defer, Grant, Load, Unit, Placement, Request, Residency
 from livestack_node.ledger import JsonlLedger, validate
 
 
@@ -1326,3 +1326,370 @@ def test_a_unit_that_stays_gone_is_eventually_believed():
     broker.plan_and_apply([])
     assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 2, \
         "a unit that is really gone should be placed again"
+
+
+def _image_routing_unit(kind, quantization="nf4", depth=False):
+    attributes = {
+        "class": "imagegen", "task": "text_to_image",
+        "model": "Qwen/Qwen-Image-2512", "revision": "e" * 40,
+        "quantization": quantization,
+    }
+    if depth:
+        attributes.update(
+            depth_guide=True, controlnet_model="test/Qwen-ControlNet",
+            controlnet_revision="f" * 40,
+            controlnet_config_sha256="0" * 64,
+        )
+    return Unit(kind, {"vram_bytes": 24 if depth else 20}, attributes=attributes)
+
+
+def _image_candidates(units, requirements):
+    from livestack_node.planner import WorldState, candidate_kinds
+    return candidate_kinds(
+        WorldState(units=units, devices=()),
+        Request("image-route", "", requires=requirements),
+    )
+
+
+def test_mixed_text_and_depth_image_workers_keep_distinct_aggregates_and_routes():
+    from livestack_node.hostbroker import aggregate_units
+    text = _image_routing_unit("qwen_image_2512")
+    depth = _image_routing_unit("qwen_image_2512_depth_nf4", depth=True)
+    merged = aggregate_units({
+        (text.kind, "text-peer"): text,
+        (depth.kind, "depth-peer"): depth,
+    })
+
+    assert set(merged) == {text.kind, depth.kind}
+    assert merged[text.kind].footprint == {"vram_bytes": 20}
+    assert merged[depth.kind].footprint == {"vram_bytes": 24}
+    assert "depth_guide" not in merged[text.kind].attributes
+    assert merged[depth.kind].attributes == depth.attributes
+    assert _image_candidates(merged, depth.attributes) == [depth.kind]
+
+
+def _crossed_image_pair_has_no_guided_route(kind, advertised, requested):
+    from livestack_node.hostbroker import aggregate_units
+    text = _image_routing_unit("qwen_image_2512")
+    crossed = _image_routing_unit(kind, advertised, depth=True)
+    merged = aggregate_units({
+        (text.kind, "text-peer"): text,
+        (crossed.kind, "crossed-peer"): crossed,
+    })
+    requirements = dict(crossed.attributes, quantization=requested)
+
+    assert merged[crossed.kind].attributes["quantization"] == advertised
+    assert _image_candidates(merged, requirements) == []
+
+
+def test_nf4_depth_kind_with_int8_attributes_cannot_satisfy_nf4_route():
+    _crossed_image_pair_has_no_guided_route(
+        "qwen_image_2512_depth_nf4", "int8", "nf4")
+
+
+def test_int8_depth_kind_with_nf4_attributes_cannot_satisfy_int8_route():
+    _crossed_image_pair_has_no_guided_route(
+        "qwen_image_2512_depth_int8", "nf4", "int8")
+
+
+# --- broker-owned exclusive-device leases -----------------------------------
+
+class ExclusivePeer:
+    def __init__(self, base, kind, *, resident=True, busy=False, loading=False,
+                 residency=Residency.UNPINNED, loaded_at=0.0, free=24_000,
+                 reclaim_free=None):
+        self.base = base
+        self.host_id = "tower0"
+        self.device_id = "gpu0"
+        self.unit = Unit(kind, {"vram_bytes": 4_000}, priority=20,
+                         residency=residency, min_residency_s=15.0)
+        self._resident = resident
+        self._busy = busy
+        self._loading = loading
+        self._loaded_at = loaded_at
+        self.free = free
+        self.reclaim_free = reclaim_free
+        self.calls = []
+
+    def units(self):
+        return {self.unit.kind: self.unit}
+
+    def placements(self):
+        if not self._resident:
+            return []
+        return [Placement(self.unit.kind, self.device_id,
+                          loaded_at=self._loaded_at, busy=self._busy,
+                          loading=self._loading)]
+
+    def device_memory(self):
+        return None if self.free is None else {"vram_bytes": self.free}
+
+    def device_capacity(self):
+        return {"vram_bytes": 24_000}
+
+    def warm(self, kind, device=None, budget=None):
+        self.calls.append(("warm", kind, device, budget))
+        self._resident = True
+        self._loading = False
+
+    def evict(self, kind):
+        self.calls.append(("evict", kind))
+        self._resident = False
+        self._busy = False
+        self._loading = False
+
+    def reclaim(self):
+        self.calls.append(("reclaim",))
+        if self.reclaim_free is not None:
+            self.free = self.reclaim_free
+        return {"freed_bytes": 0}
+
+
+def _exclusive_broker(*peers, clock=None, store=None, dispatch=True):
+    device = Device("gpu0", "tower0", capacity={"vram_bytes": 24_000},
+                    reserved={"vram_bytes": 0})
+    return HostBroker([device], list(peers), clock=clock or (lambda: 1000.0),
+                      exclusive_store=store, dispatch=dispatch)
+
+
+def _exclusive_request(request_id="exclusive-1", kind="alpha", owner="alice"):
+    return Request(request_id, kind, owner=owner, created_at=1000.0)
+
+
+def _calls(peer, name):
+    return [call for call in peer.calls if call[0] == name]
+
+
+def test_exclusive_drains_two_managed_peers_reclaims_and_is_idempotent():
+    alpha = ExclusivePeer("http://alpha", "alpha", free=12_000,
+                          reclaim_free=24_000)
+    beta = ExclusivePeer("http://beta", "beta", free=12_000,
+                         reclaim_free=24_000)
+    broker = _exclusive_broker(alpha, beta)
+    request = _exclusive_request()
+
+    granted = broker.acquire_exclusive(request, "gpu0", 24_000,
+                                       wait_timeout_s=5, ttl_s=60)
+    assert granted == {
+        "granted": True, "exclusive_device": True, "device_id": "gpu0",
+        "lease_id": granted["lease_id"], "request_id": "exclusive-1",
+        "state": "exclusive", "free_bytes": 24_000,
+        "min_free_bytes": 24_000, "blockers": [], "reason": None,
+    }
+    assert granted["lease_id"].startswith("device-lease-")
+    assert _calls(alpha, "evict") == [("evict", "alpha")]
+    assert _calls(beta, "evict") == [("evict", "beta")]
+    assert len(_calls(alpha, "reclaim")) == 1
+    assert len(_calls(beta, "reclaim")) == 1
+
+    repeated = broker.acquire_exclusive(request, "gpu0", 24_000,
+                                        wait_timeout_s=5, ttl_s=60)
+    assert repeated == granted
+    assert len(_calls(alpha, "evict")) == 1
+    assert len(_calls(beta, "evict")) == 1
+    assert len(_calls(alpha, "reclaim")) == 1
+    assert len(_calls(beta, "reclaim")) == 1
+
+
+def test_exclusive_busy_tenant_is_not_evicted_and_release_allows_retry():
+    peer = ExclusivePeer("http://alpha", "alpha", busy=True)
+    broker = _exclusive_broker(peer, clock=time.monotonic)
+
+    blocked = broker.acquire_exclusive(
+        _exclusive_request("busy-request"), "gpu0", 24_000,
+        wait_timeout_s=0.01)
+    assert blocked["granted"] is False
+    assert blocked["state"] == "timeout"
+    assert blocked["lease_id"] is None
+    assert blocked["blockers"] == [{"type": "busy", "kind": "alpha"}]
+    assert peer.calls == []
+
+    peer._busy = False
+    granted = broker.acquire_exclusive(
+        _exclusive_request("after-release"), "gpu0", 24_000,
+        wait_timeout_s=1)
+    assert granted["granted"] is True
+    assert _calls(peer, "evict") == [("evict", "alpha")]
+    assert len(_calls(peer, "reclaim")) == 1
+
+
+def test_exclusive_external_memory_and_unknown_memory_fail_closed():
+    for free, expected in (
+            (23_999, {"type": "external_memory", "free_bytes": 23_999,
+                      "min_free_bytes": 24_000}),
+            (None, {"type": "memory_unknown"})):
+        peer = ExclusivePeer("http://alpha", "alpha", resident=False, free=free)
+        broker = _exclusive_broker(peer, clock=time.monotonic)
+        result = broker.acquire_exclusive(
+            _exclusive_request(f"memory-{free}"), "gpu0", 24_000,
+            wait_timeout_s=0.01)
+        assert result["granted"] is False
+        assert result["state"] == "timeout"
+        assert result["lease_id"] is None
+        assert result["blockers"] == [expected]
+        assert peer.calls == []
+
+
+def test_exclusive_busy_floor_and_in_flight_blockers_do_not_evict():
+    for blocker in ("busy", "residency_floor", "in_flight"):
+        peer = ExclusivePeer(
+            "http://alpha", "alpha", busy=blocker == "busy",
+            loading=blocker == "in_flight",
+            loaded_at=time.monotonic() if blocker == "residency_floor" else 0.0)
+        broker = _exclusive_broker(peer, clock=time.monotonic)
+        result = broker.acquire_exclusive(
+            _exclusive_request(blocker), "gpu0", 24_000,
+            wait_timeout_s=0.01)
+        assert result["granted"] is False, blocker
+        assert result["state"] == "timeout", blocker
+        assert result["blockers"] == [{"type": blocker, "kind": "alpha"}], blocker
+        assert peer.calls == [], blocker
+
+
+def test_exclusive_hard_pin_is_terminal_and_names_the_blocker():
+    peer = ExclusivePeer("http://alpha", "alpha", residency=Residency.HARD_PIN)
+    broker = _exclusive_broker(peer)
+    result = broker.acquire_exclusive(
+        _exclusive_request("hard-pin"), "gpu0", 24_000, wait_timeout_s=5)
+    assert result["granted"] is False
+    assert result["state"] == "failed"
+    assert result["reason"] == "hard_pin"
+    assert result["blockers"] == [{"type": "hard_pin", "kind": "alpha"}]
+    assert result["lease_id"] is None
+    assert peer.calls == []
+
+
+def test_exclusive_owner_only_readmission_and_release_restore_sharing():
+    peer = ExclusivePeer("http://alpha", "alpha", resident=False)
+    broker = _exclusive_broker(peer)
+    granted = broker.acquire_exclusive(
+        _exclusive_request(), "gpu0", 24_000, wait_timeout_s=5, ttl_s=60)
+    lease_id = granted["lease_id"]
+
+    assert broker.valid_exclusive_owner(lease_id, "alice", "gpu0") is True
+    assert broker.valid_exclusive_owner(lease_id, "bob", "gpu0") is False
+    assert broker.valid_exclusive_owner(lease_id, "alice", "gpu1") is False
+    assert broker.valid_exclusive_owner("device-lease-missing", "alice", "gpu0") is False
+
+    for bypass in (None, "device-lease-missing"):
+        plan_result = broker.plan_and_apply(
+            [_exclusive_request(f"ordinary-{bypass}", owner="bob")],
+            device_lease_id=bypass)
+        assert plan_result.of(Grant) == []
+        assert plan_result.of(Load) == []
+        assert len(plan_result.of(Defer)) == 1
+    assert peer.calls == []
+
+    owner_plan = broker.plan_and_apply(
+        [_exclusive_request("owner-work")], device_lease_id=lease_id)
+    assert [(g.request_id, g.device_id) for g in owner_plan.of(Grant)] == [
+        ("owner-work", "gpu0")]
+    assert len(_calls(peer, "warm")) == 1
+
+    assert broker.exclusive_release(lease_id) is True
+    assert broker.valid_exclusive_owner(lease_id, "alice", "gpu0") is False
+    shared = broker.plan_and_apply([_exclusive_request("shared-after", owner="bob")])
+    assert [g.request_id for g in shared.of(Grant)] == ["shared-after"]
+
+
+def test_exclusive_second_owner_cannot_acquire_an_active_lease():
+    peer = ExclusivePeer("http://alpha", "alpha", resident=False)
+    broker = _exclusive_broker(peer)
+    first = broker.acquire_exclusive(
+        _exclusive_request("first", owner="alice"), "gpu0", 24_000,
+        wait_timeout_s=5)
+
+    second = broker.acquire_exclusive(
+        _exclusive_request("second", owner="bob"), "gpu0", 24_000,
+        wait_timeout_s=5)
+    assert second["granted"] is False
+    assert second["lease_id"] is None
+    assert second["blockers"] == [{"type": "other_owner", "owner": "alice"}]
+    assert broker.valid_exclusive_owner(first["lease_id"], "alice", "gpu0") is True
+
+
+def test_exclusive_heartbeat_extends_ttl_and_expiry_revokes_owner_access():
+    now = [1000.0]
+    peer = ExclusivePeer("http://alpha", "alpha", resident=False)
+    broker = _exclusive_broker(peer, clock=lambda: now[0])
+    granted = broker.acquire_exclusive(
+        _exclusive_request(), "gpu0", 24_000, wait_timeout_s=5, ttl_s=10)
+    lease_id = granted["lease_id"]
+
+    now[0] = 1009.0
+    assert broker.exclusive_heartbeat(lease_id, ttl_s=20) is True
+    assert broker.exclusive_store.get_lease(lease_id)["expires_at"] == 1029.0
+    now[0] = 1028.0
+    assert broker.valid_exclusive_owner(lease_id, "alice", "gpu0") is True
+    now[0] = 1029.0
+    assert broker.valid_exclusive_owner(lease_id, "alice", "gpu0") is False
+    assert broker.exclusive_heartbeat(lease_id, ttl_s=20) is False
+    expired_world = broker.snapshot(device_lease_id=lease_id)
+    assert expired_world.device_leases["gpu0"]["state"] == "exclusive"
+    expired_plan = broker.plan_and_apply(
+        [_exclusive_request("expired-owner")], device_lease_id=lease_id)
+    assert expired_plan.of(Grant) == [] and expired_plan.of(Load) == []
+    assert broker.exclusive_heartbeat("device-lease-missing") is False
+    assert broker.exclusive_release("device-lease-missing") is False
+
+
+def test_exclusive_expiry_fences_until_managed_placements_are_gone():
+    now = [1000.0]
+    peer = ExclusivePeer("http://alpha", "alpha", resident=False)
+    broker = _exclusive_broker(peer, clock=lambda: now[0])
+    granted = broker.acquire_exclusive(
+        _exclusive_request(), "gpu0", 24_000, wait_timeout_s=5, ttl_s=30)
+    lease_id = granted["lease_id"]
+
+    peer._resident = True
+    peer._busy = True
+    now[0] = 1031.0
+    broker.reconcile_exclusive()
+    expired = broker.exclusive_store.get_lease(lease_id)
+    assert expired["state"] == "expired_draining"
+    assert expired["blockers"] == [{"type": "busy", "kind": "alpha"}]
+    assert broker.exclusive_heartbeat(lease_id) is False
+    fenced = broker.plan_and_apply([_exclusive_request("other", owner="bob")])
+    assert fenced.of(Grant) == [] and fenced.of(Load) == []
+
+    peer._resident = False
+    peer._busy = False
+    broker.reconcile_exclusive()
+    assert broker.exclusive_store.get_lease(lease_id)["state"] == "released"
+    assert broker.exclusive_store.active("gpu0") == []
+    shared = broker.plan_and_apply([_exclusive_request("shared", owner="bob")])
+    assert [g.request_id for g in shared.of(Grant)] == ["shared"]
+
+
+def test_exclusive_active_lease_survives_store_reopen(tmp_path):
+    from livestack_node.device_leases import DeviceLeaseStore
+
+    path = str(tmp_path / "exclusive.sqlite3")
+    first_store = DeviceLeaseStore(path)
+    first_peer = ExclusivePeer("http://alpha", "alpha", resident=False)
+    first_broker = _exclusive_broker(first_peer, store=first_store)
+    granted = first_broker.acquire_exclusive(
+        _exclusive_request(), "gpu0", 24_000, wait_timeout_s=5, ttl_s=60)
+    lease_id = granted["lease_id"]
+    first_store.close()
+
+    reopened = DeviceLeaseStore(path)
+    try:
+        second_peer = ExclusivePeer("http://alpha-new", "alpha", resident=False)
+        broker = _exclusive_broker(second_peer, store=reopened)
+        world = broker.snapshot()
+        assert world.device_leases["gpu0"]["state"] == "exclusive"
+        assert world.device_leases["gpu0"]["lease_id"] == lease_id
+        assert broker.valid_exclusive_owner(lease_id, "alice", "gpu0") is True
+        assert broker.exclusive_heartbeat(lease_id, ttl_s=90) is True
+        assert broker.exclusive_store.get_lease(lease_id)["expires_at"] == 1090.0
+
+        ordinary = broker.plan_and_apply([_exclusive_request("other", owner="bob")])
+        assert ordinary.of(Grant) == [] and ordinary.of(Load) == []
+        owner = broker.plan_and_apply(
+            [_exclusive_request("owner-after-restart")], device_lease_id=lease_id)
+        assert [g.request_id for g in owner.of(Grant)] == ["owner-after-restart"]
+        assert broker.exclusive_release(lease_id) is True
+        assert broker.snapshot().device_leases == {}
+    finally:
+        reopened.close()

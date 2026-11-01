@@ -1,0 +1,12 @@
+{
+  "sourceHash": "6c66680d77097b7ed62a8467b606d10da80395fbc316caf85763cdffe2708d71",
+  "fileCount": 532,
+  "stagedAt": "2026-10-25T06:39:28.662730+00:00",
+  "scope": [
+    "examples",
+    "livestack_node",
+    "pyproject.toml",
+    "tests"
+  ],
+  "remoteRoot": "/home/ubuntu/harmony-image/livestack-depth-qualification/node-py"
+}

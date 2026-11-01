@@ -1,0 +1,47 @@
+{
+  "change": "add-image-depth-guidance",
+  "state": "completed",
+  "codeRevision": "b5abf81940dbc3f84975c748326ef2f6c64941b1",
+  "sourceManifestSha256": "582c3300a544892c917e8831f4d52dd9e938b1d583970857e9e9a0de254f6323",
+  "baseline": {"passed": 13, "failed": 0},
+  "validation": {"passed": 174, "failed": 0},
+  "runtimeAndLifecycle": {"passed": 264, "failed": 0},
+  "finalSuite": {"passed": 273, "skipped": 1, "failed": 0},
+  "realManagedSmoke": {
+    "schema": "livestack.image-depth-smoke.v1",
+    "path": "openspec/changes/add-image-depth-guidance/evidence/nf4-smoke.json",
+    "png": "openspec/changes/add-image-depth-guidance/evidence/nf4-smoke.png",
+    "sha256": "7fd19f8ebacab62616356d712846f195858d4083220526e83def4c392a6e8267",
+    "dimensions": [768, 432],
+    "unit": "qwen_image_2512_depth_nf4",
+    "deviceId": "xc-tower-ubuntu/4bac2869",
+    "baseModel": "Qwen/Qwen-Image-2512",
+    "baseRevision": "25468b98e3276ca6700de15c6628e51b7de54a26",
+    "controlnetModel": "InstantX/Qwen-Image-ControlNet-Union",
+    "controlnetRevision": "b13036f066d6dee7c20513e263d3d673055e9de8",
+    "controlnetConfigSha256": "6d80a5e2ab3abeb773b06f917b54a72f60c35ce91091f59f79243fb0f5d3d4bd",
+    "guideSha256": "dec1050c3abb9c5a1fd1e091a312432e5932b0f051f47350ab25e0f5cff8a85b",
+    "conditioningScale": 0.8,
+    "steps": 50,
+    "trueCfgScale": 4.0,
+    "peakAllocatedBytes": 14683149824,
+    "peakReservedBytes": 14784921600,
+    "generationSeconds": 48.983,
+    "totalSeconds": 69.042,
+    "loadSeconds": 71.51,
+    "fleetAndLocalGrantsVerified": true
+  },
+  "restart": {
+    "environmentFingerprint": "1a5e478057a5c7dd819f326b0c9d27b7fb1b0c4e0bc16b2ba344d0a95d659634",
+    "runIds": ["857e535f0c3abb73", "b3a2a09c763c1712"],
+    "fingerprintsMatched": true,
+    "allRecordedProcessesStopped": true
+  },
+  "int8": {
+    "realManagedRunAttemptedInThisChange": false,
+    "note": "Histo owns the single INT8 smoke attempt. Earlier direct INT8 + BF16 ControlNet experiment failed with CUDA OOM and is not managed-production evidence."
+  },
+  "productionActivated": false,
+  "productionBrokerOrWrapperChanged": false,
+  "directDiffusersResultUsedAsQualification": false
+}

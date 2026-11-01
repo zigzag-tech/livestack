@@ -32,6 +32,8 @@ Config via env:
     LIVESTACK_DEVICES    hosted devices, e.g. {"buildhost-a": {"hosted": true,
                          "concurrency": 1, "labels": {"arch": "linux/amd64"}}}
     LIVESTACK_UNITS      kinds no peer reports, e.g. {"build": {"priority": 20}}
+    LIVESTACK_DEVICE_METERS JSON device ID -> logical CUDA index for local devices
+                         without a model facade; supplies lease memory measurements
     LIVESTACK_PROBES     health probes for hosted devices:
                          {"buildhost-a": {"cmd": "docker info", "interval_s": 60}}
     LIVESTACK_LEASE_TTL_S hosted-lease expiry without heartbeats (default 120)
@@ -105,9 +107,11 @@ from __future__ import annotations
 import json
 import os
 import time
+from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
-from .hostbroker import HostBroker, RestPeer
+from .hostbroker import HostBroker, LocalDeviceMeterPeer, RestPeer
+from .device_leases import DeviceLeaseStore
 from .mesh_peer import MeshPeer, RelayRoute, facade_id
 from . import relay_control
 from .membership import MembershipPolicy, RosterFull
@@ -174,7 +178,8 @@ def build_broker(peer_urls: List[str], device_config=None,
                  default_vram_gb: float = 24.0, default_reserved_gb: float = 2.0,
                  membership=None, extra_units=None, dispatch: bool = True,
                  ledger=None, emitter_id: str = "host-broker",
-                 node_control_token: Optional[str] = None) -> HostBroker:
+                 node_control_token: Optional[str] = None,
+                 device_meters=None) -> HostBroker:
     """Federated by default: devices are DISCOVERED from the peers (one per reported
     device_id, across however many hosts), sized from device_config[device_id] or the
     default. Point peer_urls at nodes on several hosts and the same broker plans and
@@ -188,6 +193,10 @@ def build_broker(peer_urls: List[str], device_config=None,
                        fallback_footprints=DEFAULT_FOOTPRINTS,
                        control_token=node_control_token)
              for u in peer_urls]
+    if not isinstance(device_meters or {}, dict):
+        raise ValueError("device_meters must map device IDs to logical CUDA indices")
+    peers.extend(LocalDeviceMeterPeer(device_id.rsplit("/", 1)[0], device_id, index)
+                 for device_id, index in (device_meters or {}).items())
     return HostBroker(devices=None, peers=peers, device_config=device_config or {},
                       default_capacity={"vram_bytes": int(default_vram_gb * GB),
                                         "reserved": int(default_reserved_gb * GB)},
@@ -221,6 +230,11 @@ def build_app(broker: HostBroker):
             headers.get("authorization"),
             getattr(broker, "fleet_principals", None)))
     state = {"last_evicted_at": {}}
+    if hasattr(broker, "use_exclusive_store"):
+        ledger_dir = os.environ.get("LIVESTACK_LEDGER_DIR") or os.path.expanduser("~/.cache/livestack")
+        os.makedirs(ledger_dir, exist_ok=True)
+        broker.use_exclusive_store(DeviceLeaseStore(
+            os.path.join(ledger_dir, "device-exclusivity.sqlite3")))
     # Hosted-backend health probes (LIVESTACK_PROBES), run on the reconcile
     # loop's cadence. probe_state is what /status reports under "hosted".
     import json as _json
@@ -305,6 +319,46 @@ def build_app(broker: HostBroker):
                       # from an anonymous caller to LIFT an owner — it only
                       # annotates whichever owner the credential path resolved.
                       owner_asserted=bool(payload.get("owner_asserted")))
+        exclusive = payload.get("exclusive_device", False)
+        if type(exclusive) is not bool:
+            raise HTTPException(400, "exclusive_device must be a boolean")
+        device_lease_id = payload.get("device_lease_id")
+        device_lease_ids = payload.get("device_lease_ids")
+        if device_lease_ids is not None:
+            if (device_lease_id is not None or exclusive
+                    or not isinstance(device_lease_ids, list) or not device_lease_ids
+                    or any(not isinstance(value, str) or not value for value in device_lease_ids)
+                    or len(set(device_lease_ids)) != len(device_lease_ids)):
+                raise HTTPException(400, "device_lease_ids must be a nonempty unique list without other lease fields")
+            device_lease_id = device_lease_ids[0]
+        if exclusive:
+            min_free_bytes = payload.get("min_free_bytes")
+            if type(min_free_bytes) is not int or min_free_bytes <= 0:
+                raise HTTPException(400, "exclusive acquisition requires positive min_free_bytes")
+            try:
+                return broker.acquire_exclusive(
+                    req, req.selector.get("device_id"), min_free_bytes,
+                    payload.get("wait_timeout_s", 240.0), payload.get("ttl_seconds", 120.0))
+            except Exception as e:
+                return {"granted": False, "exclusive_device": True,
+                        "reason": str(e), "device_id": req.selector.get("device_id")}
+        if device_lease_id is not None:
+            lease = broker.exclusive_store.get_lease(device_lease_id)
+            lease_device = lease.get("device_id") if lease is not None else None
+            selected_device = req.selector.get("device_id") or lease_device
+            if not broker.valid_exclusive_owner(device_lease_id, owner, selected_device):
+                return {"granted": False, "reason": "invalid, expired, or mismatched device_lease_id",
+                        "device_id": req.selector.get("device_id")}
+            if selected_device != req.selector.get("device_id"):
+                req = replace(req, selector={**req.selector, "device_id": selected_device})
+            if device_lease_ids is not None:
+                leases = [broker.exclusive_store.get_lease(value) for value in device_lease_ids]
+                if (any(lease is None for lease in leases)
+                        or len({lease["device_id"] for lease in leases}) != len(leases)
+                        or any(not broker.valid_exclusive_owner(value, owner, lease["device_id"])
+                               for value, lease in zip(device_lease_ids, leases))):
+                    return {"granted": False, "reason": "invalid, expired, or mismatched device_lease_ids",
+                            "device_id": selected_device}
         # NOTE on the degrade branch below. It answers `granted: True` for ANY
         # exception, which tells the caller to proceed — and a caller that loads
         # a model on that word puts it on a card the planner never cleared.
@@ -315,8 +369,13 @@ def build_app(broker: HostBroker):
         # looking alike. Distinguishing FAULTS from refusals inside
         # `plan_and_apply` is the remaining half and wants its own change.
         try:
-            p = broker.plan_and_apply([req], state["last_evicted_at"])
+            if device_lease_id is None:
+                p = broker.plan_and_apply([req], state["last_evicted_at"])
+            else:
+                p = broker.plan_and_apply([req], state["last_evicted_at"], device_lease_id)
         except Exception as e:  # a peer down etc. — degrade: let the caller proceed
+            if device_lease_id is not None:
+                return {"granted": False, "reason": str(e), "device_id": req.selector.get("device_id")}
             return {"granted": True, "device_id": None, "degraded": str(e)}
         _track(p)
         grant = next((g for g in p.of(Grant) if g.request_id == req.id), None)
@@ -355,9 +414,11 @@ def build_app(broker: HostBroker):
     # heartbeat for such a lease was a 404 and it lived out its TTL — enough
     # to hold a caller's whole quota between calls (attune, 2026-09-23).
     @app.post("/lease/{lease_id:path}/heartbeat")
-    def lease_heartbeat(lease_id: str):
+    def lease_heartbeat(lease_id: str, payload: Optional[dict] = Body(default=None)):
         """Proof of life from a hosted leaseholder. Unknown/expired is a False,
         not an error — the answer the client needs is 'do I still hold the slot'."""
+        if lease_id.startswith("device-lease-"):
+            return {"ok": broker.exclusive_heartbeat(lease_id, (payload or {}).get("ttl_seconds", 120.0))}
         return {"ok": broker.hosted_heartbeat(lease_id)}
 
     @app.post("/lease/{lease_id:path}/release")
@@ -368,6 +429,8 @@ def build_app(broker: HostBroker):
         §1). A value that is not exactly that shape is REFUSED (422), never
         coerced: an outcome that was guessed is worse than none."""
         extra = _release_report(payload or {})
+        if lease_id.startswith("device-lease-"):
+            return {"ok": broker.exclusive_release(lease_id)}
         return {"ok": broker.hosted_release(lease_id, **extra)}
 
     @app.post("/devices/{device_id}/health")
@@ -1084,6 +1147,8 @@ def build_app(broker: HostBroker):
             while True:
                 time.sleep(interval)
                 try:
+                    if hasattr(broker, "reconcile_exclusive"):
+                        broker.reconcile_exclusive()
                     # Reclaim BEFORE planning. A node that has evicted everything
                     # and still holds its allocator pool is memory no unit claims,
                     # so the planner has nothing to evict and would shed innocent
@@ -1444,6 +1509,7 @@ def main():
         extra_units=extra_units,
         dispatch=dispatch, ledger=ledger, emitter_id=emitter_id,
         node_control_token=node_control_token,
+        device_meters=json.loads(os.environ.get("LIVESTACK_DEVICE_METERS", "{}")),
     )
     broker.node_control_token = node_control_token
     broker.host_id = host_id

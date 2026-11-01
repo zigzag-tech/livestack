@@ -1,0 +1,133 @@
+{
+  "depth_guide": {
+    "conditioning_scale": 0.8,
+    "control_guidance_end": 1.0,
+    "control_guidance_start": 0.0,
+    "controlnet_config_sha256": "6d80a5e2ab3abeb773b06f917b54a72f60c35ce91091f59f79243fb0f5d3d4bd",
+    "controlnet_model": "InstantX/Qwen-Image-ControlNet-Union",
+    "controlnet_revision": "b13036f066d6dee7c20513e263d3d673055e9de8",
+    "image_sha256": "dec1050c3abb9c5a1fd1e091a312432e5932b0f051f47350ab25e0f5cff8a85b"
+  },
+  "environment_fingerprint": "965371eeb43a94521dc7799bfbb0952c2b1ee656e23126f0812422382eec07a8",
+  "fleet_grant": {
+    "budget": {
+      "ram_bytes": 42244591616.0,
+      "vram_bytes": 6463972184.0
+    },
+    "device_id": "xc-tower-ubuntu/4bac2869",
+    "granted": true,
+    "kind": "qwen_image_2512_depth_nf4",
+    "lease_id": null,
+    "plan": "load qwen_image_2512_depth_nf4@xc-tower-ubuntu/4bac2869; grant req-1542527955->qwen_image_2512_depth_nf4@xc-tower-ubuntu/4bac2869 (loaded on demand)"
+  },
+  "generation_settings": {
+    "max_sequence_length": 512,
+    "negative_prompt": "",
+    "steps": 50,
+    "text_encoder": "CPU FP32",
+    "true_cfg_scale": 4.0
+  },
+  "harmony": {
+    "compute_dtype": "torch.bfloat16",
+    "depth_guide": {
+      "conditioning_scale": 0.8,
+      "control_guidance_end": 1.0,
+      "control_guidance_start": 0.0,
+      "controlnet_config_sha256": "6d80a5e2ab3abeb773b06f917b54a72f60c35ce91091f59f79243fb0f5d3d4bd",
+      "controlnet_model": "InstantX/Qwen-Image-ControlNet-Union",
+      "controlnet_revision": "b13036f066d6dee7c20513e263d3d673055e9de8",
+      "image_sha256": "dec1050c3abb9c5a1fd1e091a312432e5932b0f051f47350ab25e0f5cff8a85b"
+    },
+    "device_id": "xc-tower-ubuntu/4bac2869",
+    "fleet_grant": {
+      "budget": {
+        "ram_bytes": 42244591616.0,
+        "vram_bytes": 6463972184.0
+      },
+      "device_id": "xc-tower-ubuntu/4bac2869",
+      "granted": true,
+      "kind": "qwen_image_2512_depth_nf4",
+      "lease_id": null,
+      "plan": "load qwen_image_2512_depth_nf4@xc-tower-ubuntu/4bac2869; grant req-1542527955->qwen_image_2512_depth_nf4@xc-tower-ubuntu/4bac2869 (loaded on demand)"
+    },
+    "generation_s": 48.983,
+    "generation_settings": {
+      "max_sequence_length": 512,
+      "negative_prompt": "",
+      "steps": 50,
+      "text_encoder": "CPU FP32",
+      "true_cfg_scale": 4.0
+    },
+    "height": 432,
+    "host": "xc-tower-ubuntu",
+    "load_s": 71.51,
+    "local_grant": {
+      "budget": {
+        "ram_bytes": 16985886720.0,
+        "vram_bytes": 7615634432.0
+      },
+      "device_id": "xc-tower-ubuntu/4bac2869",
+      "granted": true,
+      "kind": "qwen_image_2512_depth_nf4",
+      "lease_id": null,
+      "plan": "grant qwen_image_2512_depth_nf4-1542599704->qwen_image_2512_depth_nf4@xc-tower-ubuntu/4bac2869 (resident)"
+    },
+    "model": "Qwen/Qwen-Image-2512",
+    "peak_allocated_bytes": 14683149824,
+    "peak_reserved_bytes": 14784921600,
+    "prompt": "Naturalistic cinematic documentary reconstruction of Gettysburg, Pennsylvania in 1863. Rolling rural landscape with a small town in the distance, believable fields and atmospheric depth. Elevated wide 16:9 view with sharp material detail. Unlettered image, no people, no modern monuments.",
+    "prompt_encoding_s": 19.9,
+    "quantization": "nf4",
+    "requirements": {
+      "class": "imagegen",
+      "controlnet_config_sha256": "6d80a5e2ab3abeb773b06f917b54a72f60c35ce91091f59f79243fb0f5d3d4bd",
+      "controlnet_model": "InstantX/Qwen-Image-ControlNet-Union",
+      "controlnet_revision": "b13036f066d6dee7c20513e263d3d673055e9de8",
+      "depth_guide": true,
+      "model": "Qwen/Qwen-Image-2512",
+      "params_b>=": 20,
+      "quantization": "nf4",
+      "revision": "25468b98e3276ca6700de15c6628e51b7de54a26",
+      "task": "text_to_image"
+    },
+    "revision": "25468b98e3276ca6700de15c6628e51b7de54a26",
+    "seed": 1863,
+    "steps": 50,
+    "text_encoder": "CPU FP32",
+    "total_s": 69.042,
+    "unit": "qwen_image_2512_depth_nf4",
+    "vae_dtype": "torch.bfloat16",
+    "width": 768,
+    "worker_endpoint": "http://127.0.0.1:38647"
+  },
+  "local_grant": {
+    "budget": {
+      "ram_bytes": 16985886720.0,
+      "vram_bytes": 7615634432.0
+    },
+    "device_id": "xc-tower-ubuntu/4bac2869",
+    "granted": true,
+    "kind": "qwen_image_2512_depth_nf4",
+    "lease_id": null,
+    "plan": "grant qwen_image_2512_depth_nf4-1542599704->qwen_image_2512_depth_nf4@xc-tower-ubuntu/4bac2869 (resident)"
+  },
+  "output": {
+    "height": 432,
+    "nonblank": true,
+    "path": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-cda39aee8467c001-vi8yco0g/smoke.png",
+    "sha256": "7fd19f8ebacab62616356d712846f195858d4083220526e83def4c392a6e8267",
+    "width": 768
+  },
+  "request": {
+    "path": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-cda39aee8467c001-vi8yco0g/smoke-request.json",
+    "sha256": "70913f8a1e0b4cb98301aae52e5d61b5061d1730e3f04dee76788a9175e6ed19"
+  },
+  "request_sha256": "70913f8a1e0b4cb98301aae52e5d61b5061d1730e3f04dee76788a9175e6ed19",
+  "response": {
+    "path": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-cda39aee8467c001-vi8yco0g/smoke-response.json",
+    "sha256": "ca33363ffde1d3ae7f9df6bd6e1c4c7dbd9ba89f4913496181a2052aa8e71473"
+  },
+  "response_sha256": "ca33363ffde1d3ae7f9df6bd6e1c4c7dbd9ba89f4913496181a2052aa8e71473",
+  "run_id": "cda39aee8467c001",
+  "schema": "livestack.image-depth-smoke.v1"
+}

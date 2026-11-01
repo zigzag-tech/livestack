@@ -58,13 +58,17 @@ BENCHDAY_CAP_AUDIENCE = "benchday-speech-relay"
 # ---------------------------------------------------------------------------
 
 
+def _skip(reason):
+    pytest.skip(reason, allow_module_level=True)
+
+
 def _require_checkout() -> None:
     if not (MESHLINK_RELAY_SRC / "server.ts").exists():
-        pytest.skip(f"meshlink checkout not found at {MESHLINK_REPO}")
+        _skip(f"meshlink checkout not found at {MESHLINK_REPO}")
     if shutil.which("node") is None:
-        pytest.skip("node not on PATH")
+        _skip("node not on PATH")
     if not (OUTBOUND_PKG / "mesh_outbound_py" / "mux.py").exists():
-        pytest.skip(f"mesh_outbound_py package not found at {OUTBOUND_PKG}")
+        _skip(f"mesh_outbound_py package not found at {OUTBOUND_PKG}")
 
 
 def load_meshlink() -> None:
@@ -80,7 +84,7 @@ def load_meshlink() -> None:
             MESHLINK_REPO.glob("rust/target/*/deps/libmesh_route_py.so"),
             key=lambda p: p.stat().st_mtime)
         if not candidates:
-            pytest.skip("mesh_route_py .so not built — run `cargo build -p "
+            _skip("mesh_route_py .so not built — run `cargo build -p "
                         "mesh-route-py` in the meshlink checkout")
         spec = importlib.util.spec_from_file_location("mesh_route_py",
                                                       candidates[-1])
@@ -88,7 +92,7 @@ def load_meshlink() -> None:
         try:
             spec.loader.exec_module(module)
         except Exception as e:
-            pytest.skip(f"mesh_route_py .so failed to import: {e}")
+            _skip(f"mesh_route_py .so failed to import: {e}")
         sys.modules["mesh_route_py"] = module
 
 
@@ -212,7 +216,7 @@ class RelayHarness:
         tsx = (OUTBOUND_PKG / "node_modules" / ".bin" / "tsx")
         tsx = str(tsx) if tsx.exists() else shutil.which("tsx")
         if tsx is None:
-            pytest.skip("tsx not found (npm install in mesh_outbound_py)")
+            _skip("tsx not found (npm install in mesh_outbound_py)")
         self._proc = subprocess.Popen(
             [tsx, str(Path(__file__).parent / "mesh_relay_harness.mjs"),
              json.dumps({

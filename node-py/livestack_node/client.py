@@ -69,18 +69,29 @@ def lease(
             pass
 
 
-def _post(url: str, body: dict) -> dict:
+def _post(url: str, body: dict, *, token: Optional[str] = None) -> dict:
     data = json.dumps(body).encode("utf-8")
     target, path = transport.split_target(url)
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     _status, _headers, raw = transport.dial(
         target, "POST", path,
-        headers={"Content-Type": "application/json"}, body=data, timeout=5)
+        headers=headers, body=data, timeout=5)
     return json.loads(raw.decode("utf-8")) if raw else {}
+
+
+class LeaseLost(RuntimeError):
+    """An exclusive lease was not granted authoritatively or stopped renewing."""
 
 
 def admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "node",
           token: Optional[str] = None, owner_asserted: bool = False,
-          timeout: float = 240.0, brokers: Optional[list] = None) -> dict:
+          timeout: float = 240.0, brokers: Optional[list] = None,
+          exclusive_device: bool = False, device_lease_id: Optional[str] = None,
+          device_lease_ids: Optional[list] = None,
+          min_free_bytes: Optional[int] = None, wait_timeout_s: Optional[float] = None,
+          request_id: Optional[str] = None, device_id: Optional[str] = None) -> dict:
     """Ask Harmony to MAKE ROOM for `kind`, and say where it granted it.
 
     This is the missing half of arbitration. A node that loads a unit straight
@@ -102,7 +113,8 @@ def admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "n
     Degradation is deliberate and NARROW: only when no broker ANSWERS does this
     return `granted: True, device_id: None, degraded: <why>`, meaning "proceed
     as if arbitration did not exist". An arbitration outage must not take a
-    model offline.
+    model offline. Exclusive and owner-lease admissions cannot degrade: their
+    callers require an authoritative lease and get `LeaseLost` instead.
 
     A broker that answers and does not grant is a REFUSAL — `granted: False`
     with a `reason` — and a caller that loads anyway defeats the point. That
@@ -122,18 +134,54 @@ def admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "n
     capacity" from "harmony-llm spent capacity without being told who was
     asking".
     """
+    res, _base = _admit(
+        kind, requires=requires, owner_id=owner_id, token=token,
+        owner_asserted=owner_asserted, timeout=timeout, brokers=brokers,
+        exclusive_device=exclusive_device, device_lease_id=device_lease_id,
+        device_lease_ids=device_lease_ids,
+        min_free_bytes=min_free_bytes, wait_timeout_s=wait_timeout_s,
+        request_id=request_id, device_id=device_id)
+    return res
+
+
+def _admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "node",
+           token: Optional[str] = None, owner_asserted: bool = False,
+           timeout: float = 240.0, brokers: Optional[list] = None,
+           exclusive_device: bool = False, device_lease_id: Optional[str] = None,
+           device_lease_ids: Optional[list] = None,
+           min_free_bytes: Optional[int] = None, wait_timeout_s: Optional[float] = None,
+           request_id: Optional[str] = None, device_id: Optional[str] = None) -> tuple:
     from .announce import broker_urls
-    # No device selector: WHERE it goes is the planner's decision, and pinning it
-    # here would be the caller deciding placement again. `requires` goes one
-    # further — WHICH model is also the planner's decision, from a stated need
-    # ({"class": "llm", "params_b>": 7, "params_b<=": 10}). The answer carries
-    # `kind`, because a caller that asked for a capability has no other way to
-    # know what it got.
+    if device_lease_ids is not None:
+        if device_lease_id is not None:
+            raise ValueError("device_lease_id and device_lease_ids are mutually exclusive")
+        if not device_lease_ids or len(set(device_lease_ids)) != len(device_lease_ids):
+            raise ValueError("device_lease_ids must be nonempty and unique")
+        device_lease_id = device_lease_ids[0]
+    if exclusive_device and device_lease_id is not None:
+        raise ValueError("exclusive_device and device leases are mutually exclusive")
+    if exclusive_device and not device_id:
+        raise ValueError("exclusive_device requires device_id")
+
     body = {"kind": kind, "owner": owner_id}
     if requires:
         body["requires"] = dict(requires)
     if owner_asserted:
         body["owner_asserted"] = True
+    if exclusive_device:
+        body["exclusive_device"] = True
+        body["selector"] = {"device_id": device_id}
+    if device_lease_ids is not None:
+        body["device_lease_ids"] = list(device_lease_ids)
+    elif device_lease_id is not None:
+        body["device_lease_id"] = device_lease_id
+    if min_free_bytes is not None:
+        body["min_free_bytes"] = min_free_bytes
+    if wait_timeout_s is not None:
+        body["wait_timeout_s"] = wait_timeout_s
+    if request_id is not None:
+        body["id"] = request_id
+
     headers = {"Content-Type": "application/json"}
     if token:
         # A credential rides its own header, never the body: bodies are logged,
@@ -147,12 +195,86 @@ def admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "n
             _status, _headers, raw = transport.dial(
                 base, "POST", "/admit", headers=headers, body=data,
                 timeout=timeout)
-            return json.loads(raw.decode("utf-8")) if raw else {}
+            res = json.loads(raw.decode("utf-8")) if raw else {}
+            if exclusive_device or device_lease_id is not None:
+                degraded = res.get("degraded") is not None
+                if device_lease_id is not None and degraded:
+                    raise LeaseLost(f"owner lease admission degraded: {res['degraded']}")
+                if exclusive_device and res.get("granted") is True:
+                    if degraded or res.get("device_id") is None:
+                        raise LeaseLost("exclusive admission returned no authoritative device")
+                    if not res.get("lease_id"):
+                        raise LeaseLost("exclusive admission returned no lease_id")
+            return res, base
+        except LeaseLost:
+            raise
         except (urllib.error.URLError, OSError, ValueError) as e:
             last = e
             continue
-    return {"granted": True, "device_id": None,
-            "degraded": f"no broker answered ({last})"}
+    res = {"granted": True, "device_id": None,
+           "degraded": f"no broker answered ({last})"}
+    if exclusive_device or device_lease_id is not None:
+        raise LeaseLost(res["degraded"])
+    return res, None
+
+
+@contextmanager
+def exclusive_lease(kind: str, *, device_id: str, min_free_bytes: int,
+                    owner_id: str = "node", token: Optional[str] = None,
+                    brokers: Optional[list] = None, ttl_seconds: int = 120,
+                    wait_timeout_s: float = 240, heartbeat_interval: float = 30,
+                    request_id: Optional[str] = None) -> Iterator[dict]:
+    """Hold an authoritative whole-device lease, renewing it until context exit."""
+    if heartbeat_interval <= 0:
+        raise ValueError("heartbeat_interval must be positive")
+    res, base = _admit(
+        kind, owner_id=owner_id, token=token, brokers=brokers,
+        timeout=wait_timeout_s, exclusive_device=True, device_id=device_id,
+        min_free_bytes=min_free_bytes, wait_timeout_s=wait_timeout_s,
+        request_id=request_id)
+    if res.get("granted") is not True:
+        raise LeaseLost(f"exclusive admission refused: {res.get('reason') or res}")
+    lease_id = res["lease_id"]
+    stop = threading.Event()
+    heartbeat_failure = []
+
+    def _beat() -> None:
+        path = f"/lease/{urllib.parse.quote(str(lease_id), safe='')}/heartbeat"
+        while not stop.wait(heartbeat_interval):
+            try:
+                beat = _post(f"{base}{path}", {"ttl_seconds": ttl_seconds}, token=token)
+                if beat.get("ok") is not True:
+                    heartbeat_failure.append(LeaseLost(f"heartbeat rejected: {beat}"))
+                    return
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                heartbeat_failure.append(LeaseLost(f"heartbeat failed: {e}"))
+                return
+
+    beater = threading.Thread(target=_beat, name="exclusive-lease-heartbeat", daemon=True)
+    beater.start()
+    body_failed = False
+    try:
+        yield res
+    except BaseException:
+        body_failed = True
+        raise
+    finally:
+        stop.set()
+        beater.join()
+        release = None
+        try:
+            path = f"/lease/{urllib.parse.quote(str(lease_id), safe='')}/release"
+            release = _post(f"{base}{path}", {}, token=token)
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+        if not body_failed:
+            if heartbeat_failure:
+                raise heartbeat_failure[0]
+            if release and release.get("ok") is False:
+                detail = " ".join(str(release.get(key, ""))
+                                  for key in ("reason", "error", "detail")).lower()
+                if "expired" not in detail:
+                    raise LeaseLost(f"exclusive lease release rejected: {release}")
 
 
 class NoEligibleTarget(RuntimeError):

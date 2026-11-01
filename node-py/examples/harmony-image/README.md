@@ -32,6 +32,53 @@ python examples/harmony-image/compare.py --prompts examples/harmony-image/prompt
 
 The gallery is served on the mesh at `http://100.64.0.18:8212/`. Each result has a PNG and evidence JSON with a SHA256 hash. Equal seeds are recorded for reproducibility but do not give identical noise across model architectures. Generation settings and different GPUs are part of this comparison.
 
+## Depth-guided generation (qualification only)
+
+The image worker also supports Qwen depth ControlNet as an explicitly routed capability. It is not enabled for ordinary production workers and does not use RGB img2img. Approved unit/quantization pairs are exactly `qwen_image_2512_depth_nf4` with NF4 and `qwen_image_2512_depth_int8` with INT8; crossed pairs and ordinary-kind collisions are refused before `attach`.
+
+A guided request uses the normal `/v1/images/generations` endpoint and adds:
+
+- `control_image`: one output-sized PNG as strict base64 plus its lowercase SHA-256 (at most 8 MiB decoded).
+- `controlnet_conditioning_scale`: 0.8–1.0 inclusive.
+- `harmony_requires.depth_guide: true`, exact base model/revision, ControlNet model/revision/config hash, and quantization.
+
+The tracked examples are `depth-worker.example.json`, `depth-smoke-request-nf4.json`, `depth-smoke-request-int8.json`, and `depth-smoke-guide.png`. The ControlNet is `InstantX/Qwen-Image-ControlNet-Union` revision `b13036f066d6dee7c20513e263d3d673055e9de8`. Startup verifies its `config.json` class and SHA-256 `6d80a5e2ab3abeb773b06f917b54a72f60c35ce91091f59f79243fb0f5d3d4bd`, and its weight byte count 3536027816 and SHA-256 `d51dca0073366a675108d5b83c3b7ef941cf2214c9a1c95c23f1e9a228ddbdb0` before advertising depth. ControlNet precision is `bf16` by default or `int8` when explicitly configured, and `controlnet_quantization` is advertised and verified in guided evidence. The declared ControlNet footprint is the full source `weight_bytes` for BF16 or half that size, rounded up, for INT8; measured runtime allocation and reservation still update residency. INT8 plus BF16 ControlNet may not fit a 24 GB GPU and must not silently fall back to NF4.
+
+The runtime shares the base transformer, text encoder, tokenizer, VAE, and scheduler with `QwenImageControlNetPipeline`. Optional `offload: {"strategy":"sequential","controlnet_gib":null}` initializes the transformer on CPU, resets the pipeline device map, and calls `enable_sequential_cpu_offload()` with `vae` and `text_encoder` excluded so transformer blocks return to CPU after execution while VAE stays on GPU and text encoding stays on CPU. Adding `"vae":"cpu"` leaves only the text encoder excluded, keeping VAE decoding on CPU and reducing GPU residency; output dimensions and quantization are unchanged. ControlNet remains GPU-resident by default because `QwenImageControlNetModel` does not support automatic maps; adding `"controlnet":"sequential"` initializes it on CPU and applies Accelerate `cpu_offload` block hooks instead, recording `controlnet: "sequential"` in the evidence. For a hard transformer budget, use `strategy: "auto"` with a positive `transformer_gib`; this uses `device_map="auto"` and `max_memory` instead of the pipeline's sequential offload and can be combined with sequential ControlNet and CPU VAE. Use `controlnet: "cpu"` to run the entire ControlNet on CPU and move only its residuals to the GPU; this avoids GPU-resident ControlNet weights and activations without per-step cache hooks. INT8 CPU-dispatched modules use `llm_int8_enable_fp32_cpu_offload=True`. The actual strategy and device map are logged and included in managed evidence. Results include actual `image.size`, `harmony.depth_guide`, and `generation_settings` (steps, CFG, negative-prompt semantics, text encoder, and max sequence length). The gateway verifies those values against the selected unit's advertised attributes. Missing or mismatched evidence is a failure, not a text-only fallback. Eviction clears all pipeline and ControlNet references. If `fleet_token_file` is configured, its raw token is passed to local `admit` without being logged; absent configuration preserves unauthenticated admission.
+
+For an isolated generation that requires measured free memory, set `exclusive_device: {"min_free_bytes":23000000000,"wait_timeout_s":240,"ttl_seconds":120}`. The gateway acquires durable exclusive-device leases before fleet admission can warm the model, forwards their ordered IDs to fleet and worker admission, heartbeats throughout loading and generation, and releases afterward. The worker requires the authenticated `X-Harmony-Device-Lease` header and never creates a nested lease. Isolated qualification configures both gateway and worker with the `harmony-image` owner so broker owner checks still apply. Results include every lease/device pair in `harmony.device_leases` and the acquisition records in `harmony.device_grants`. No degraded grant or external-process termination is permitted. The isolated broker only coordinates its participating peers; any other GPU occupant remains an external measured blocker.
+
+For multiple GPUs, set ordered `device_ids`, matching comma-separated `cuda_visible_devices`, and per-device `exclusive_device.min_free_bytes`. The first device owns the worker placement and its `resident_bytes`; secondary ControlNet weight bytes are not charged to that primary. With `offload.strategy: "auto"`, `transformer_gib` may be an object such as `{"0":2,"1":4}`; keys are logical CUDA indices after `CUDA_VISIBLE_DEVICES` mapping. `controlnet_device` selects the logical GPU for sequential ControlNet. The gateway acquires all leases before admission, and the broker validates all of them but places only the primary device. Qualification creates broker-local meters for secondary devices through `LIVESTACK_DEVICE_METERS`. When transformer blocks span GPUs, a forward wrapper and per-block hooks move each ControlNet residual to the corresponding block output device before addition. `offload_map` and `device_peaks` record the actual placement and per-GPU allocation/reservation peaks.
+
+### Isolated lifecycle
+
+`qualify-depth.py` starts a dedicated apply-mode hostd, worker, and gateway with no production peers, fresh run-scoped credentials, and an output-sized smoke request. Production broker `127.0.0.1:8799`, gateway `8211`, and `/home/ubuntu/harmony-image/generate-creative-image.py` are refused. The staged wrapper is copied under the unique run directory. No request-time model download or direct Diffusers result qualifies. Omitting `depth_guide` creates a genuinely text-only lifecycle with exact `qwen_image_2512_text_nf4`/`nf4` or `qwen_image_2512_text_int8`/`int8` pairs and no ControlNet allocation. Qwen workers advertise and return their configured steps, CFG, negative prompt, and prompt-encoding settings; the lifecycle accepts either an empty negative prompt or the pinned official Qwen 2512 quality negative prompt. The request contract permits up to 2048 pixels per side, while each worker's lower `max_dimension` remains authoritative; Qwen's official 16:9 experiment uses 1664×928.
+
+```sh
+python examples/harmony-image/qualify-depth.py up \
+  --config /home/ubuntu/harmony-image/depth-worker-nf4-qualification.json \
+  --output /home/ubuntu/harmony-image/depth-dispatch-nf4.json
+python examples/harmony-image/qualify-depth.py smoke \
+  --dispatch /home/ubuntu/harmony-image/depth-dispatch-nf4.json \
+  --request node-py/examples/harmony-image/depth-smoke-request-nf4.json
+python examples/harmony-image/qualify-depth.py down \
+  --dispatch /home/ubuntu/harmony-image/depth-dispatch-nf4.json
+```
+
+`up` creates a mode-0700 run directory and fresh worker/fleet credentials, uses `LIVESTACK_REGISTER=0`, validates `/plan` and `/fleet` before starting the gateway, and writes a credential-free `livestack.image-depth-dispatch.v1` handoff. It contains expected host/device/unit, model/config revisions, generation settings, runtime versions, staged wrapper/config/code hashes, and process identities. Resume fingerprints exclude timestamps, grants, PIDs, run-specific ports, and token paths. `down` verifies process identity before stopping gateway, worker, then hostd.
+
+For code tests, stage source to `/home/ubuntu/harmony-image/livestack-depth-qualification/node-py` on `xc-tower-ubuntu`; do not rely on ambient local Python. Run the qualified image virtualenv with `HF_HUB_OFFLINE=1` and `PYTHONPATH=.` from that directory. Re-stage and verify source hashes before every test invocation. For real hostd runs, append `/home/ubuntu/livestack/node-py/.venv/lib/python3.12/site-packages` after the staged code to supply `cryptography` without changing installed packages. Preserve the image venv interpreter symlink rather than resolving it to system Python, and pin staged `code_revision` plus `source_manifest_sha256` when `.git` metadata is absent.
+
+Rollback removes the depth configuration and distinct unit; ordinary unguided units continue unchanged. See `_plans/image-depth-guidance.md` and `openspec/changes/add-image-depth-guidance` for the complete contract and acceptance evidence.
+
+### SDXL depth qualification
+
+The isolated `sdxl_depth_int8` unit supports `stabilityai/stable-diffusion-xl-base-1.0` with `diffusers/controlnet-depth-sdxl-1.0`. The UNet is INT8, the depth ControlNet is BF16, both text encoders are CPU FP32, and VAE decoding is GPU FP32. Its worker configuration uses `guidance_scale` instead of Qwen's `true_cfg_scale` and permits 20–50 inference steps. The same guided request contract, full revision/config/weight pinning, exclusive-device lifecycle, and evidence verification apply. This runtime does not accept Qwen transformer-offload settings.
+
+### FLUX.2 Fun Union depth qualification (experimental)
+
+The `flux_2_dev_depth_int8` unit loads `black-forest-labs/FLUX.2-dev` with the integrated `alibaba-pai/FLUX.2-dev-Fun-Controlnet-Union` 2602 controller through the pinned VideoX-Fun pipeline. This is not a stock Diffusers ControlNet: the controller adds blocks to the 32B transformer. The transformer loads as INT8 through a meta-device, shard-streaming adapter and is dispatched across both logical GPUs using the configured `transformer_gib` budgets. Text encoding is CPU INT8 and VAE work is GPU BF16. `videox_fun_root` is mandatory. The controller's class/config/weight hashes, actual device map, per-device peaks, guidance, and control interval are included in evidence. Do not substitute FP8 or NF4 base checkpoints.
+
 ## FLUX.2-klein on zz-joe (2026-10-02)
 
 `harmony-klein-0` / `-1` (GPU 0 / 1, RTX 2070 8 GB, ports 8213 / 8214) run

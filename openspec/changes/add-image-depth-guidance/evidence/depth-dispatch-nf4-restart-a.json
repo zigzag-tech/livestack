@@ -1,0 +1,191 @@
+{
+  "base": {
+    "model": "Qwen/Qwen-Image-2512",
+    "revision": "25468b98e3276ca6700de15c6628e51b7de54a26",
+    "snapshot": "/home/ubuntu/.cache/huggingface/hub/models--Qwen--Qwen-Image-2512/snapshots/25468b98e3276ca6700de15c6628e51b7de54a26"
+  },
+  "broker_host_id": "depth-qualification-857e535f0c3abb73",
+  "broker_url": "http://127.0.0.1:55675",
+  "configs": {
+    "gateway": {
+      "path": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/gateway.json",
+      "sha256": "1cd612fc24882227b20da98065a2b10104f8312c185978395bdce8a56f20c7f2"
+    },
+    "hostd_launch": {
+      "path": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/hostd-launch.json",
+      "sha256": "08880d93ffac874eb85dd48c2bd9020273a5b51c1d3c9fefe0417fadcbb72055"
+    },
+    "worker": {
+      "path": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/worker.json",
+      "sha256": "cdabeab4164424cef440dd5ae1ca28d7eac63fcbfd9b647cf01bf48246e28b81"
+    }
+  },
+  "controlnet": {
+    "config_sha256": "6d80a5e2ab3abeb773b06f917b54a72f60c35ce91091f59f79243fb0f5d3d4bd",
+    "model": "InstantX/Qwen-Image-ControlNet-Union",
+    "revision": "b13036f066d6dee7c20513e263d3d673055e9de8",
+    "snapshot": "/home/ubuntu/.cache/huggingface/hub/models--InstantX--Qwen-Image-ControlNet-Union/snapshots/b13036f066d6dee7c20513e263d3d673055e9de8",
+    "weight_bytes": 3536027816,
+    "weight_sha256": "d51dca0073366a675108d5b83c3b7ef941cf2214c9a1c95c23f1e9a228ddbdb0"
+  },
+  "environment_fingerprint": "1a5e478057a5c7dd819f326b0c9d27b7fb1b0c4e0bc16b2ba344d0a95d659634",
+  "expected": {
+    "cuda_visible_devices": "1",
+    "device_id": "xc-tower-ubuntu/4bac2869",
+    "host": "xc-tower-ubuntu",
+    "logical_device": "cuda:0",
+    "quantization": "nf4",
+    "unit": "qwen_image_2512_depth_nf4"
+  },
+  "facade_url": "http://127.0.0.1:41665/livestack",
+  "gateway_url": "http://127.0.0.1:48833",
+  "generation_settings": {
+    "max_sequence_length": 512,
+    "negative_prompt": "",
+    "steps": 50,
+    "text_encoder": "CPU FP32",
+    "true_cfg_scale": 4.0
+  },
+  "livestack_code_revision": "b5abf81940dbc3f84975c748326ef2f6c64941b1",
+  "owner_host": "xc-tower-ubuntu",
+  "owner_variant": {
+    "code_revision": "b5abf81940dbc3f84975c748326ef2f6c64941b1",
+    "cpu_threads": 12,
+    "depth_guide": {
+      "config_sha256": "6d80a5e2ab3abeb773b06f917b54a72f60c35ce91091f59f79243fb0f5d3d4bd",
+      "model": "InstantX/Qwen-Image-ControlNet-Union",
+      "revision": "b13036f066d6dee7c20513e263d3d673055e9de8",
+      "snapshot": "/home/ubuntu/.cache/huggingface/hub/models--InstantX--Qwen-Image-ControlNet-Union/snapshots/b13036f066d6dee7c20513e263d3d673055e9de8",
+      "weight_bytes": 3536027816,
+      "weight_sha256": "d51dca0073366a675108d5b83c3b7ef941cf2214c9a1c95c23f1e9a228ddbdb0"
+    },
+    "device_id": "xc-tower-ubuntu/4bac2869",
+    "host_id": "xc-tower-ubuntu",
+    "idle_seconds": 900,
+    "max_dimension": 1024,
+    "max_sequence_length": 512,
+    "model": "Qwen/Qwen-Image-2512",
+    "negative_prompt": "",
+    "params_b": 20,
+    "quantization": "nf4",
+    "resident_bytes": 12000000000,
+    "revision": "25468b98e3276ca6700de15c6628e51b7de54a26",
+    "snapshot": "/home/ubuntu/.cache/huggingface/hub/models--Qwen--Qwen-Image-2512/snapshots/25468b98e3276ca6700de15c6628e51b7de54a26",
+    "source_manifest_sha256": "582c3300a544892c917e8831f4d52dd9e938b1d583970857e9e9a0de254f6323",
+    "steps": 50,
+    "true_cfg_scale": 4.0,
+    "unit": "qwen_image_2512_depth_nf4"
+  },
+  "owner_variant_sha256": "b2a3943e0d1fc1c24fef8a9fca8ab95f82927deddd781b59060faf3196464db0",
+  "processes": {
+    "gateway": {
+      "argv": [
+        "/home/ubuntu/harmony-image/venv/bin/python",
+        "-m",
+        "livestack_node.imagegen.gateway"
+      ],
+      "environment": {
+        "HARMONY_IMAGE_GATEWAY_CONFIG": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/gateway.json",
+        "HARMONY_STREAMS": "0",
+        "HF_HUB_OFFLINE": "1",
+        "LIVESTACK_BROKER_URL": "http://127.0.0.1:55675",
+        "LIVESTACK_LEDGER": "0",
+        "LIVESTACK_LEDGER_DIR": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/ledger",
+        "LIVESTACK_LINK_PEERS": "",
+        "LIVESTACK_MESH_ENABLED": "0",
+        "LIVESTACK_REGISTER": "0",
+        "LIVESTACK_RELAYS": "",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONPATH": "/home/ubuntu/harmony-image/livestack-depth-qualification/node-py:/home/ubuntu/livestack/node-py/.venv/lib/python3.12/site-packages"
+      },
+      "executable": "/home/ubuntu/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/bin/python3.12",
+      "log": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/logs/gateway.log",
+      "pgid": 1378775,
+      "pid": 1378775,
+      "start_ticks": 154296199
+    },
+    "hostd": {
+      "argv": [
+        "/home/ubuntu/harmony-image/venv/bin/python",
+        "-m",
+        "livestack_node.hostd"
+      ],
+      "environment": {
+        "HARMONY_STREAMS": "0",
+        "HF_HUB_OFFLINE": "1",
+        "LIVESTACK_BROKER_PORT": "55675",
+        "LIVESTACK_DEVICES": "{\"xc-tower-ubuntu/4bac2869\":{\"vram_gb\":24,\"reserved_gb\":2}}",
+        "LIVESTACK_DISPATCH": "apply",
+        "LIVESTACK_FLEET_TOKENS_FILE": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/fleet-principals.json",
+        "LIVESTACK_HOST_ID": "depth-qualification-857e535f0c3abb73",
+        "LIVESTACK_LEDGER": "0",
+        "LIVESTACK_LEDGER_DIR": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/ledger",
+        "LIVESTACK_LINK_PEERS": "",
+        "LIVESTACK_MESH_ENABLED": "0",
+        "LIVESTACK_NODE_CONTROL_TOKEN_FILE": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/worker.token",
+        "LIVESTACK_PEERS": "http://127.0.0.1:41665/livestack",
+        "LIVESTACK_RELAYS": "",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONPATH": "/home/ubuntu/harmony-image/livestack-depth-qualification/node-py:/home/ubuntu/livestack/node-py/.venv/lib/python3.12/site-packages"
+      },
+      "executable": "/home/ubuntu/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/bin/python3.12",
+      "log": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/logs/hostd.log",
+      "pgid": 1376995,
+      "pid": 1376995,
+      "start_ticks": 154295027
+    },
+    "worker": {
+      "argv": [
+        "/home/ubuntu/harmony-image/venv/bin/python",
+        "-m",
+        "livestack_node.imagegen.worker"
+      ],
+      "environment": {
+        "CUDA_VISIBLE_DEVICES": "1",
+        "HARMONY_IMAGE_CONFIG": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/worker.json",
+        "HARMONY_STREAMS": "0",
+        "HF_HUB_OFFLINE": "1",
+        "LIVESTACK_ACT_STORE": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/state/activation-imagegen.json",
+        "LIVESTACK_BROKER_URL": "http://127.0.0.1:55675",
+        "LIVESTACK_DEVICE_ID": "xc-tower-ubuntu/4bac2869",
+        "LIVESTACK_LEDGER": "0",
+        "LIVESTACK_LEDGER_DIR": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/ledger",
+        "LIVESTACK_LINK_PEERS": "",
+        "LIVESTACK_MACHINE_ID": "xc-tower-ubuntu",
+        "LIVESTACK_MESH_ENABLED": "0",
+        "LIVESTACK_NODE_HOST": "127.0.0.1",
+        "LIVESTACK_NODE_TOKENS_FILE": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/node-principals.json",
+        "LIVESTACK_REGISTER": "0",
+        "LIVESTACK_RELAYS": "",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONPATH": "/home/ubuntu/harmony-image/livestack-depth-qualification/node-py:/home/ubuntu/livestack/node-py/.venv/lib/python3.12/site-packages"
+      },
+      "executable": "/home/ubuntu/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/bin/python3.12",
+      "log": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/logs/worker.log",
+      "pgid": 1377050,
+      "pid": 1377050,
+      "start_ticks": 154295089
+    }
+  },
+  "python": "/home/ubuntu/harmony-image/venv/bin/python",
+  "pythonpath": "/home/ubuntu/harmony-image/livestack-depth-qualification/node-py:/home/ubuntu/livestack/node-py/.venv/lib/python3.12/site-packages",
+  "run_dir": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59",
+  "run_id": "857e535f0c3abb73",
+  "schema": "livestack.image-depth-dispatch.v1",
+  "source_manifest_sha256": "582c3300a544892c917e8831f4d52dd9e938b1d583970857e9e9a0de254f6323",
+  "token_files": {
+    "fleet": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/fleet.token",
+    "fleet_principals": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/fleet-principals.json",
+    "node_control": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/worker.token",
+    "node_principals": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/node-principals.json",
+    "worker": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/worker.token"
+  },
+  "versions": {
+    "diffusers": "0.40.0",
+    "torch": "2.6.0+cu124"
+  },
+  "wrapper": {
+    "path": "/home/ubuntu/harmony-image/depth-qualification-runs/depth-857e535f0c3abb73-cmz_gr59/owner-wrapper-857e535f0c3abb73.py",
+    "sha256": "fd4433b73e5cbd3a0394ddf88d76333920cc66e2ca607d960f0f92988f4ba903"
+  }
+}
