@@ -20,46 +20,46 @@ _GUIDED_REQUIREMENTS = (
 )
 
 
-def _validate_control_image(control_image, width: int, height: int) -> None:
-    if not isinstance(control_image, dict):
-        raise ValueError("control_image must be a JSON object")
-    if control_image.get("media_type") != "image/png":
-        raise ValueError("control_image.media_type must be image/png")
-    encoded = control_image.get("b64_json")
+def _validate_png(image_field, width: int, height: int, name: str = "control_image") -> None:
+    if not isinstance(image_field, dict):
+        raise ValueError(f"{name} must be a JSON object")
+    if image_field.get("media_type") != "image/png":
+        raise ValueError(f"{name}.media_type must be image/png")
+    encoded = image_field.get("b64_json")
     if not isinstance(encoded, str):
-        raise ValueError("control_image.b64_json must be a base64 string")
+        raise ValueError(f"{name}.b64_json must be a base64 string")
     if len(encoded) > 4 * ((MAX_CONTROL_IMAGE_BYTES + 2) // 3):
-        raise ValueError("control_image exceeds the 8 MiB decoded limit")
+        raise ValueError(f"{name} exceeds the 8 MiB decoded limit")
     try:
         decoded = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise ValueError("control_image.b64_json must be strict base64") from exc
+        raise ValueError(f"{name}.b64_json must be strict base64") from exc
     if base64.b64encode(decoded).decode("ascii") != encoded:
-        raise ValueError("control_image.b64_json must be strict base64")
+        raise ValueError(f"{name}.b64_json must be strict base64")
     if len(decoded) > MAX_CONTROL_IMAGE_BYTES:
-        raise ValueError("control_image exceeds the 8 MiB decoded limit")
-    digest = control_image.get("sha256")
+        raise ValueError(f"{name} exceeds the 8 MiB decoded limit")
+    digest = image_field.get("sha256")
     if not isinstance(digest, str) or _SHA256.fullmatch(digest) is None:
-        raise ValueError("control_image.sha256 must be 64 lowercase hexadecimal characters")
+        raise ValueError(f"{name}.sha256 must be 64 lowercase hexadecimal characters")
     if hashlib.sha256(decoded).hexdigest() != digest:
-        raise ValueError("control_image SHA-256 mismatch")
+        raise ValueError(f"{name} SHA-256 mismatch")
 
     from PIL import Image
     try:
         image = Image.open(io.BytesIO(decoded))
     except (OSError, SyntaxError, ValueError, Image.DecompressionBombError) as exc:
-        raise ValueError("control_image must be one RGB-readable PNG") from exc
+        raise ValueError(f"{name} must be one RGB-readable PNG") from exc
     with image:
         if image.format != "PNG" or getattr(image, "n_frames", 1) != 1:
-            raise ValueError("control_image must contain exactly one PNG image")
+            raise ValueError(f"{name} must contain exactly one PNG image")
         if image.size != (width, height):
-            raise ValueError("control_image dimensions must equal the requested width and height")
+            raise ValueError(f"{name} dimensions must equal the requested width and height")
         try:
             image.load()
             with image.convert("RGB") as rgb:
                 rgb.load()
         except (OSError, SyntaxError, ValueError, Image.DecompressionBombError) as exc:
-            raise ValueError("control_image must be one RGB-readable PNG") from exc
+            raise ValueError(f"{name} must be one RGB-readable PNG") from exc
 
 
 def _validate_guided_requirements(req: dict) -> None:
@@ -97,8 +97,19 @@ def validate_request(body: dict) -> dict:
     req = body.get("harmony_requires", {})
     if not isinstance(req, dict) or req.get("class", "imagegen") != "imagegen":
         raise ValueError("harmony_requires must describe class=imagegen")
-    if req.get("task", "text_to_image") != "text_to_image":
-        raise ValueError("harmony_requires must describe task=text_to_image")
+    # Inpainting is derived from the request, not declared: an `init_image` and a `mask_image` (PNGs of the requested
+    # size; white in the mask is repainted, black kept) make it task=inpaint, served only by units declaring `inpaint`.
+    # Outpainting is the same request with blank canvas under a white mask.
+    inpaint_keys = ("init_image" in body, "mask_image" in body)
+    if any(inpaint_keys) and not all(inpaint_keys):
+        raise ValueError("init_image and mask_image must be paired")
+    task = "inpaint" if all(inpaint_keys) else "text_to_image"
+    if req.get("task", task) != task:
+        raise ValueError(f"harmony_requires must describe task={task}" + (" (send init_image and mask_image to inpaint)" if req.get("task") == "inpaint" else ""))
+    if "inpaint" in req and req["inpaint"] is not (task == "inpaint"):
+        raise ValueError("harmony_requires.inpaint is derived from init_image and mask_image; do not state it otherwise")
+    if task == "inpaint" and ("control_image" in body or "depth_guide" in req):
+        raise ValueError("an inpaint request cannot also be depth-guided")
     if "depth_guide" in req and req["depth_guide"] is not True:
         raise ValueError("harmony_requires.depth_guide must be literal JSON true")
 
@@ -117,13 +128,16 @@ def validate_request(body: dict) -> dict:
         if not valid_scale:
             raise ValueError("controlnet_conditioning_scale must be a finite number from 0.8 through 1.0")
         _validate_guided_requirements(req)
-        _validate_control_image(body["control_image"], dimensions["width"], dimensions["height"])
+        _validate_png(body["control_image"], dimensions["width"], dimensions["height"])
 
     out = dict(body)
     out.update(dimensions)
     out["seed"] = seed
     out["harmony_wait_s"] = wait
-    out["harmony_requires"] = {"class": "imagegen", "task": "text_to_image", **req}
+    if task == "inpaint":
+        for name in ("init_image", "mask_image"):
+            _validate_png(body[name], dimensions["width"], dimensions["height"], name)
+    out["harmony_requires"] = {"class": "imagegen", **req, "task": task, **({"inpaint": True} if task == "inpaint" else {})}
     return out
 
 

@@ -276,3 +276,46 @@ def test_a_refusal_carries_the_planners_own_reason():
     refused = {"granted": False, "reason": "the planner could not place it on any device", "defer_reason": "qwen_image_2512 needs 20.9 GB, gpu1 has 20.1 GB free"}
     with pytest.raises(RuntimeError, match="could not place it on any device: qwen_image_2512 needs 20.9 GB"):
         resolve_worker({}, refused, {})
+
+
+def _inpaint_request():
+    return {"prompt": "the scroll continues", "width": 768, "height": 432, "seed": 7,
+            "init_image": _control_image(), "mask_image": _control_image()}
+
+
+def test_an_image_and_a_mask_make_an_inpaint_request():
+    """Inpainting is derived from what is sent, not declared: an init image and a mask make task=inpaint, which only a
+    unit declaring `inpaint` serves."""
+    out = validate_request(_inpaint_request())
+    assert out["harmony_requires"] == {"class": "imagegen", "task": "inpaint", "inpaint": True}
+    plain = validate_request({"prompt": "a scene"})
+    assert plain["harmony_requires"] == {"class": "imagegen", "task": "text_to_image"}
+
+
+@pytest.mark.parametrize("drop", ["init_image", "mask_image"])
+def test_an_inpaint_image_and_mask_must_be_paired(drop):
+    body = _inpaint_request(); body.pop(drop)
+    with pytest.raises(ValueError, match="init_image and mask_image must be paired"):
+        validate_request(body)
+
+
+def test_stating_inpaint_without_an_image_and_mask_is_refused():
+    with pytest.raises(ValueError, match="task=text_to_image"):
+        validate_request({"prompt": "a scene", "harmony_requires": {"task": "inpaint"}})
+    with pytest.raises(ValueError, match="derived"):
+        validate_request({"prompt": "a scene", "harmony_requires": {"inpaint": True}})
+
+
+def test_inpaint_images_are_checked_like_a_control_image_and_named_in_errors():
+    body = _inpaint_request(); body["mask_image"] = _control_image(_png_bytes(width=512))
+    with pytest.raises(ValueError, match="mask_image dimensions must equal"):
+        validate_request(body)
+    body = _inpaint_request(); body["init_image"]["sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="init_image SHA-256 mismatch"):
+        validate_request(body)
+
+
+def test_an_inpaint_request_cannot_also_be_depth_guided():
+    body = _inpaint_request(); body["harmony_requires"] = {"depth_guide": True}
+    with pytest.raises(ValueError, match="cannot also be depth-guided"):
+        validate_request(body)
