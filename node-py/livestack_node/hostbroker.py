@@ -886,11 +886,15 @@ class HostBroker:
         """
         key = facade_url.rstrip("/")
         existing = next((p for p in self.peers if peer_key(p) == key), None)
-        # The roster first: a refused registration (`RosterFull`) must not leave
-        # a peer object behind that is probed and planned without a roster row.
+        # Peer object first (a peer that cannot be built — e.g. a mesh:// URL
+        # where meshlink is not importable — must not leave a roster row that is
+        # never probed), then the roster, and only then the append: a refused
+        # registration (`RosterFull`) must not leave a peer object behind that is
+        # probed and planned without a roster row.
+        new_peer = make_peer(key) if existing is None else None
         rec = self.roster.register(key, **meta)
-        if existing is None:
-            self.peers.append(make_peer(key))
+        if new_peer is not None:
+            self.peers.append(new_peer)
         return {"peer": key, "source": rec.source,
                 "state": self.roster.state_of(key),
                 "peers": len(self.peers)}

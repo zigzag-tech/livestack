@@ -502,6 +502,19 @@ def test_a_refused_announce_leaves_no_peer_object_behind():
     assert [p.base for p in broker.peers] == [live.base]
 
 
+def test_a_peer_that_cannot_be_built_leaves_no_roster_row():
+    # hostd without meshlink on its path: MeshPeer() raises for a mesh:// announce.
+    broker = HostBroker(devices=[Device("gpu0", "h", capacity={"vram": 24})],
+                        peers=[], clock=Clock())
+
+    def unbuildable(_url):
+        raise RuntimeError("meshlink packages are not importable")
+    with pytest.raises(RuntimeError):
+        broker.register_url("mesh://livestack/tower-tts/livestack", make_peer=unbuildable)
+    assert broker.membership_snapshot() == []
+    assert broker.peers == []
+
+
 def test_pruning_a_seed_drops_its_row_from_the_fleet_view_and_names_why():
     """The field case end to end at the broker: a seed that never answered and a
     registered node gone for the window both leave `/fleet`, a live node stays,
