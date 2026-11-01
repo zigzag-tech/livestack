@@ -124,3 +124,17 @@ def test_negation_is_one_clause_in_every_matcher():
         assert _unit_satisfies(u, req) is ok, req
         assert attrs_meet(attrs, req) is ok, req
         assert all(_clause_meets(attrs, k, w) for k, w in req.items()) is ok, req
+
+
+def test_a_unit_listing_values_offers_each_of_them():
+    """A unit attribute that lists values (`task: [text_to_image, inpaint]`) offers each: a clause naming one of them is
+    met, a negative clause only when the unit offers none of what it excludes, an ordering clause never."""
+    u = _unit({"class": "imagegen", "task": ["text_to_image", "inpaint"]})
+    assert _unit_satisfies(u, {"task": "inpaint"})
+    assert _unit_satisfies(u, {"task": "text_to_image"})
+    assert not _unit_satisfies(u, {"task": "outpaint"})
+    assert _unit_satisfies(u, {"task": ["outpaint", "inpaint"]})
+    assert not _unit_satisfies(u, {"task!=": "inpaint"})
+    assert _unit_satisfies(u, {"task!=": "outpaint"})
+    assert not _unit_satisfies(u, {"task": {"not": ["inpaint"]}})
+    assert not _unit_satisfies(u, {"task>=": 1})

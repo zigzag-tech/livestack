@@ -694,19 +694,19 @@ def _unit_satisfies(u: Unit, requires: Mapping[str, object]) -> bool:
 # device leases; generic image demand ({"params_b>=": 20}) matching it on
 # `class`/`params_b` would place a 32B FLUX.2 run holding both GPUs for ~25 min
 # where a Qwen text-to-image was meant.
-_SPECIALIST_ONLY_ATTRS = ("ocr", "depth_guide")
+# `inpaint`: an image unit that repaints a masked area of a supplied image; only demand that sends an image and a mask
+# (the contract derives `inpaint` from them) is inpainting work.
+# A unit may hold several specialist capabilities (FLUX.2 Fun Union does depth guidance and inpainting with one
+# controller): demand naming ANY of them may use it, demand naming none may not.
+_SPECIALIST_ONLY_ATTRS = ("ocr", "depth_guide", "inpaint")
 
 
 def _specialist_only(u: Unit, requires: Mapping[str, object]) -> bool:
-    """Unit declares a specialist attribute the requirement does not name."""
-    for attr in _SPECIALIST_ONLY_ATTRS:
-        if attr in requires:
-            continue
-        val = (u.attributes or {}).get(attr)
-        if val is True or (isinstance(val, str)
-                           and val.strip().lower() in ("true", "1", "yes")):
-            return True
-    return False
+    """Unit declares specialist capabilities and the requirement names none of them."""
+    def declared(val) -> bool:
+        return val is True or (isinstance(val, str) and val.strip().lower() in ("true", "1", "yes"))
+    held = [attr for attr in _SPECIALIST_ONLY_ATTRS if declared((u.attributes or {}).get(attr))]
+    return bool(held) and not any(attr in requires for attr in held)
 
 
 def candidate_kinds(world: WorldState, req: Request) -> List[str]:
