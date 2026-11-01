@@ -826,6 +826,17 @@ _load_classifier_principals()
 
 
 def _gpu_call(fn):
+    """Run `fn` holding the node's `_lock`. EVERY `manager.ensure` goes through
+    here, so the lock order is always `_lock` then the manager's `_guard`.
+
+    The idle sweep and the facade's warm/evict already did; the proxy's ensure
+    and warm-on-start did not, and took `_guard` first, then `_lock` inside
+    `_load`. xc-tower-ubuntu 2026-11-01 11:38:54: the sweep held `_lock` waiting
+    for `_guard` while a media-corpus request's ensure held `_guard` waiting for
+    `_lock`. Every later warm/evict queued behind them until the 40 AnyIO
+    worker threads were all parked, and from 11:51:48 `/health` and
+    `/livestack/*` stopped answering (chat, async, still routed to the fleet).
+    """
     with _lock:
         return fn()
 
@@ -961,6 +972,12 @@ def _ensure_while_counted(ensure):
     except BaseException:
         _busy.release()
         raise
+
+
+def _ensure_on_gpu(unit: str):
+    """The proxy's ensure: counted (`_ensure_while_counted`) and under
+    `_gpu_call`, which fixes the lock order (see `_gpu_call`)."""
+    return _ensure_while_counted(lambda: _gpu_call(lambda: manager.ensure(unit)))
 
 
 def _release_slot(ctx: dict) -> None:
@@ -1240,7 +1257,7 @@ if WARM_ON_START:
                       f"share this port: give each its own HARMONY_LLM_PORT_OFFSET.", flush=True)
                 continue
             try:
-                manager.ensure(n)
+                _gpu_call(lambda n=n: manager.ensure(n))
                 print(f"[harmony-llm] warm-on-start: {n} resident", flush=True)
             except Exception as e:
                 print(f"[harmony-llm] warm-on-start failed for {n}: {e}", flush=True)
@@ -2421,7 +2438,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             # on a full card). A dedicated pool keeps those waits from also
             # starving the default executor the broker calls use.
             await asyncio.get_running_loop().run_in_executor(
-                _ENSURE_POOL, lambda: _ensure_while_counted(lambda: manager.ensure(unit)))
+                _ENSURE_POOL, lambda: _ensure_on_gpu(unit))
         except Exception as e:
             _release_slot(ctx)
             raise HTTPException(status_code=503, detail=f"{unit} unavailable: {e}")

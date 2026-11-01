@@ -179,7 +179,9 @@ class PeerRecord:
 
 
 class RosterFull(Exception):
-    """Registration refused under a named reason rather than growing."""
+    """Registration refused under a named reason rather than growing: every
+    slot is held by a peer that is not yet `mia` (or by a seed the policy does
+    not let go)."""
 
 
 class PeerRoster:
@@ -189,7 +191,8 @@ class PeerRoster:
     def __init__(self, policy: Optional[MembershipPolicy] = None,
                  clock: Optional[Callable[[], float]] = None,
                  log: Callable[[str], None] = lambda *_: None,
-                 on_transition: Optional[Callable[[PeerRecord, str, str], None]] = None):
+                 on_transition: Optional[Callable[[PeerRecord, str, str], None]] = None,
+                 on_evict: Optional[Callable[[str], None]] = None):
         self.policy = policy or MembershipPolicy()
         self._clock = clock or time.monotonic
         self._log = log
@@ -197,6 +200,10 @@ class PeerRoster:
         # the same edge the log line rides, so a ledger emitter cannot become a
         # per-tick emitter by accident. "Still gone" is not an event here either.
         self._on_transition = on_transition
+        # Called with the key of a peer that gave up its slot to a newcomer
+        # (`_yield_stale_slot`), so the owner can forget whatever else it keeps
+        # per peer — the same cleanup a prune does.
+        self._on_evict = on_evict
         self._records: Dict[str, PeerRecord] = {}
 
     # -- population ----------------------------------------------------------
@@ -212,8 +219,7 @@ class PeerRoster:
         rec = self._records.get(key)
         if rec is None:
             if len(self._records) >= self.policy.max_peers:
-                raise RosterFull(
-                    f"roster is full ({self.policy.max_peers} peers); refusing {key}")
+                self._yield_stale_slot(key)
             rec = PeerRecord(key=key, source=source, last_seen=now, registered_at=now)
             self._records[key] = rec
             self._log(f"[membership] {source} peer joined: {key}")
@@ -246,6 +252,42 @@ class PeerRoster:
 
     def drop(self, key: str) -> None:
         self._records.pop(key, None)
+
+    def _yield_stale_slot(self, newcomer: str) -> None:
+        """A full roster makes room for a newcomer by forgetting its stalest
+        `mia` peer, or refuses (`RosterFull`) when no peer is `mia`.
+
+        The cap exists to bound the roster, not to rank peers by arrival: on
+        xc-tower-ubuntu 2026-11-01 the fleet broker's 32 slots were full, nine
+        of them held by a host that had been down for hours, and the cap turned
+        away a live depth-image facade while the 24 h prune window kept the
+        dead rows. A peer unseen for `mia_after_s` has already lost its
+        placements (only sustained unreachability drops them), so its slot is
+        worth less than a node that is announcing right now.
+
+        The same rows a prune may take are eligible — registered peers, and
+        seeds only where `prune_seeds` says so — and like a prune, the evicted
+        peer comes back the way it arrived: a registered node re-announces, a
+        seed returns with the next broker start. Registered rows go before
+        seeds, the longest unseen first.
+        """
+        now = self._clock()
+        stale = [r for r in self._records.values()
+                 if r.state(now, self.policy) == MIA
+                 and (r.source == SOURCE_REGISTERED or self.policy.prune_seeds)]
+        if not stale:
+            raise RosterFull(
+                f"roster is full ({self.policy.max_peers} peers, none mia); "
+                f"refusing {newcomer}")
+        victim = max(stale, key=lambda r: (r.source == SOURCE_REGISTERED, r.age(now)))
+        del self._records[victim.key]
+        self._log(f"[membership] roster full: {victim.key} ({victim.source}, unseen "
+                  f"{victim.age(now):.0f}s) yields its slot to {newcomer}")
+        if self._on_evict is not None:
+            try:
+                self._on_evict(victim.key)
+            except Exception as exc:
+                self._log(f"[membership] evict hook failed: {exc}")
 
     # -- liveness ------------------------------------------------------------
 

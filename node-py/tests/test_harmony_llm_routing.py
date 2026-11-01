@@ -140,5 +140,4 @@ def test_ensure_never_runs_on_the_event_loop(srv):
     queue full, /health dead for ~30 min)."""
     import inspect
     src = inspect.getsource(srv._proxy_impl)
-    assert "run_in_executor(\n                _ENSURE_POOL" in src
-    assert "_ensure_while_counted(lambda: manager.ensure(unit))\n        except" not in src
+    assert "run_in_executor(\n                _ENSURE_POOL, lambda: _ensure_on_gpu(unit))" in src

@@ -473,7 +473,8 @@ class HostBroker:
         self._capability_observed_at_ms: Dict[str, int] = {}
         self.capability_ttl_s = float(os.environ.get("LIVESTACK_CAPABILITY_TTL", "15"))
         self.roster = PeerRoster(membership, clock=clock or time.monotonic, log=log,
-                                 on_transition=self._emit_transition)
+                                 on_transition=self._emit_transition,
+                                 on_evict=self._forget_peer)
         self._last_probe_error: Dict[str, str] = {}
         # peer key -> the STABLE degradation name (mesh_tunnel_down,
         # relay_quota) of the last probe failure that carried one. Only
@@ -885,9 +886,11 @@ class HostBroker:
         """
         key = facade_url.rstrip("/")
         existing = next((p for p in self.peers if peer_key(p) == key), None)
+        # The roster first: a refused registration (`RosterFull`) must not leave
+        # a peer object behind that is probed and planned without a roster row.
+        rec = self.roster.register(key, **meta)
         if existing is None:
             self.peers.append(make_peer(key))
-        rec = self.roster.register(key, **meta)
         return {"peer": key, "source": rec.source,
                 "state": self.roster.state_of(key),
                 "peers": len(self.peers)}
@@ -900,15 +903,20 @@ class HostBroker:
         gone = self.roster.prunable()
         rows = {r["peer"]: r for r in self.roster.snapshot()} if gone else {}
         for key in gone:
-            self.peers = [p for p in self.peers if peer_key(p) != key]
             self.roster.drop(key)
-            self._last_probe_error.pop(key, None)
-            self._probe_degradation.pop(key, None)
-            self.peer_report.pop(key, None)
+            self._forget_peer(key)
             row = rows.get(key, {})
             self._log(f"[membership] pruned absent peer: {key} "
                       f"({row.get('source', '?')}, unseen {row.get('unseen_seconds', '?')}s)")
         return gone
+
+    def _forget_peer(self, key: str) -> None:
+        """Drop everything kept per peer once the roster has let it go — by a
+        prune, or by yielding its slot to a newcomer (`PeerRoster`)."""
+        self.peers = [p for p in self.peers if peer_key(p) != key]
+        self._last_probe_error.pop(key, None)
+        self._probe_degradation.pop(key, None)
+        self.peer_report.pop(key, None)
 
     def membership_snapshot(self) -> List[dict]:
         """Roster with per-peer state, age, and the last probe error — so
@@ -1576,16 +1584,23 @@ class HostBroker:
             peer = self._peer_for(ev.kind, ev.device_id)
             if peer is not None:
                 self._log(f"[hostbroker] evict {ev.kind}@{ev.device_id}: {ev.reason}")
-                peer.evict(ev.kind)
-                self._telemetry.increment(ev.kind, "evicted")
                 # An evicted unit is no longer arriving, whatever we dispatched
                 # before. Leaving the entry would reserve the card we just freed.
+                # Dropped BEFORE the call, like the warm records its decision
+                # first: an evict that raised used to skip this line, so a
+                # hung node kept a phantom in-flight placement for the full TTL
+                # (llm_general on xc-tower-ubuntu, 2026-11-01 11:51:48).
                 self._in_flight.pop((ev.kind, ev.device_id), None)
                 # An eviction we ordered is not a blink: drop the stickiness so
                 # the card reads free immediately.
                 for remembered in [k for k in self._resident_at
                                    if k[1] == ev.kind and k[2] == ev.device_id]:
                     self._resident_at.pop(remembered, None)
+                # A raise still aborts the plan (the loads after it were planned
+                # into the room this evict was to free); if the unit is in fact
+                # still resident, the node's next report says so.
+                peer.evict(ev.kind)
+                self._telemetry.increment(ev.kind, "evicted")
         for ld in p.of(Load):
             peer = self._peer_for(ld.kind, ld.device_id)
             if peer is None:
@@ -1624,6 +1639,18 @@ class HostBroker:
                     self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id} failed "
                               f"before dispatch ({type(e).__name__}: {e}) — load "
                               f"never started, not tracking it in flight")
+                elif _definite_failure(e):
+                    # The node ANSWERED, and the answer was a failure (an HTTP
+                    # 500 from the load, a 409 refusal). Its warm handler is
+                    # synchronous, so a response means the load is over — not
+                    # running. Keeping the record held the card for the whole
+                    # `in_flight_ttl_s` (900 s) against a load that had already
+                    # died: xc-tower-ubuntu 2026-11-01, sdxl_depth_int8 answered
+                    # 500 at 12:01:16 and blocked GPU1 until 12:16:04.
+                    self._in_flight.pop((ld.kind, ld.device_id), None)
+                    self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id} failed "
+                              f"({type(e).__name__}: {e}) — the node answered, the "
+                              f"load is over; not tracking it in flight")
                 else:
                     # Keep the record. A warm that does not confirm is usually a
                     # warm still running, and assuming otherwise is what duplicates
@@ -2220,6 +2247,21 @@ class HostBroker:
 import json as _json
 
 from . import transport
+
+
+# Statuses that report the ABSENCE of an answer from the node (a proxy or relay
+# that gave up waiting), not the node's own answer. A warm that comes back with
+# one of these may still be loading.
+_NO_ANSWER_STATUSES = frozenset({408, 502, 504})
+
+
+def _definite_failure(exc: BaseException) -> bool:
+    """Did the node itself answer this dispatch with a failure? True for an HTTP
+    error response (other than a gateway timeout); False for a timeout, a reset
+    or anything else where the node's outcome is unknown."""
+    status = getattr(exc, "code", None)
+    return (isinstance(exc, transport.HTTPError) and isinstance(status, int)
+            and status not in _NO_ANSWER_STATUSES)
 
 
 def _http(url, body=None, timeout=5, headers=None):

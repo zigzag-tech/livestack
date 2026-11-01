@@ -335,6 +335,65 @@ def test_roster_refuses_to_grow_past_its_cap():
     assert len(roster.snapshot()) == 2
 
 
+def test_a_full_roster_of_live_peers_still_refuses():
+    roster = PeerRoster(MembershipPolicy(max_peers=2, mia_after_s=600), clock=Clock())
+    roster.register("a")
+    roster.register("b")
+    with pytest.raises(RosterFull, match="none mia"):
+        roster.register("c")
+
+
+def test_a_mia_peer_yields_its_slot_to_a_live_announce():
+    """xc-tower-ubuntu 2026-11-01: fleetd's 32 slots were full, nine held by a
+    host down for hours, and the cap refused a live depth facade (:8217) while
+    the 24 h prune window kept the dead rows."""
+    clock = Clock()
+    evicted = []
+    roster = PeerRoster(MembershipPolicy(max_peers=3, mia_after_s=600),
+                        clock=clock, on_evict=evicted.append)
+    roster.register("old-dead")
+    clock.advance(100)
+    roster.register("dead")
+    roster.register("live")
+    clock.advance(700)              # old-dead unseen 800 s, dead 700 s: both mia
+    roster.mark_seen("live")
+    roster.register("newcomer")
+    keys = [r["peer"] for r in roster.snapshot()]
+    assert sorted(keys) == ["dead", "live", "newcomer"]
+    assert evicted == ["old-dead"], "the longest-unseen mia peer goes first"
+
+
+def test_a_suspect_peer_keeps_its_slot():
+    clock = Clock()
+    roster = PeerRoster(MembershipPolicy(max_peers=1, suspect_after_s=45,
+                                         mia_after_s=600), clock=clock)
+    roster.register("blipping")
+    clock.advance(300)              # suspect, not mia: it may well come back
+    with pytest.raises(RosterFull):
+        roster.register("newcomer")
+
+
+def test_registered_rows_yield_before_seeds_and_seeds_only_when_allowed():
+    clock = Clock()
+    roster = PeerRoster(MembershipPolicy(max_peers=2, mia_after_s=600,
+                                         prune_after_s=86400, prune_seeds=True),
+                        clock=clock)
+    roster.seed("seed")
+    roster.register("announced")
+    clock.advance(700)
+    roster.register("n1")
+    assert {r["peer"] for r in roster.snapshot()} == {"seed", "n1"}
+    roster.mark_seen("n1")
+    roster.register("n2")           # only the mia seed is left to yield
+    assert {r["peer"] for r in roster.snapshot()} == {"n1", "n2"}
+
+    keep = PeerRoster(MembershipPolicy(max_peers=1, mia_after_s=600), clock=clock)
+    keep.seed("operator-said-so")
+    clock.advance(700)
+    with pytest.raises(RosterFull):
+        keep.register("newcomer")   # prune_seeds off: a seed never yields
+
+
 # -- the broker end to end ----------------------------------------------------
 
 def test_a_node_that_announces_itself_becomes_plannable():
@@ -410,6 +469,37 @@ def test_pruning_removes_the_peer_object_too():
     assert broker.prune_absent() == [peer.base]
     assert broker.peers == []
     assert broker.membership_snapshot() == []
+
+
+def test_a_live_announce_to_a_full_broker_displaces_a_dead_peer():
+    clock = Clock()
+    dead = FakePeer("http://100.64.0.3:8100/livestack")
+    broker = HostBroker(devices=[Device("gpu0", "h", capacity={"vram": 24})],
+                        peers=[], clock=clock,
+                        membership=MembershipPolicy(max_peers=1, mia_after_s=600,
+                                                    prune_after_s=86400))
+    broker.register_url(dead.base, make_peer=lambda _: dead)
+    dead.up = False
+    clock.advance(700)
+    fresh = FakePeer("http://100.64.0.18:8217/livestack", kind="image")
+    out = broker.register_url(fresh.base, make_peer=lambda _: fresh)
+    assert out["peer"] == fresh.base
+    assert [p.base for p in broker.peers] == [fresh.base]
+    assert [r["peer"] for r in broker.membership_snapshot()] == [fresh.base]
+    assert "image" in broker.snapshot([]).units
+
+
+def test_a_refused_announce_leaves_no_peer_object_behind():
+    clock = Clock()
+    live = FakePeer("http://a/livestack")
+    broker = HostBroker(devices=[Device("gpu0", "h", capacity={"vram": 24})],
+                        peers=[], clock=clock,
+                        membership=MembershipPolicy(max_peers=1))
+    broker.register_url(live.base, make_peer=lambda _: live)
+    other = FakePeer("http://b/livestack")
+    with pytest.raises(RosterFull):
+        broker.register_url(other.base, make_peer=lambda _: other)
+    assert [p.base for p in broker.peers] == [live.base]
 
 
 def test_pruning_a_seed_drops_its_row_from_the_fleet_view_and_names_why():

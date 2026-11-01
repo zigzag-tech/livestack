@@ -3,6 +3,8 @@ case — polyasr/polytts/chipgen are separate processes). Fake peers stand in fo
 three servers; we assert the broker dispatches the right warm/evict calls."""
 import time
 
+import pytest
+
 from livestack_node.measure import measure_footprint
 from livestack_node.hostbroker import HostBroker, _UnitTelemetry
 from livestack_node.planner import Device, Defer, Grant, Load, Unit, Placement, Request, Residency
@@ -1269,6 +1271,72 @@ def test_a_warm_that_times_out_is_still_remembered_as_in_flight():
         clock["t"] += 60
         broker.plan_and_apply([])
     assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 1
+
+
+def _warm_answers(peer, exc):
+    def warm(kind, device=None, budget=None):
+        peer.calls.append(("warm", kind))
+        raise exc
+    peer.warm = warm
+
+
+def _http_error(code):
+    import io
+    from livestack_node import transport
+    return transport.HTTPError("http://n/livestack/model/warm", code, "err", {},
+                               io.BytesIO(b'{"detail": "load failed"}'))
+
+
+def test_a_warm_the_node_answers_with_a_failure_is_not_in_flight():
+    """xc-tower-ubuntu 2026-11-01: sdxl_depth_int8's warm answered HTTP 500 at
+    12:01:16 and the broker held GPU1 as 'loading' until the 900 s TTL ran out
+    at 12:16:04. A response is the end of a synchronous warm, not a load in
+    progress: the card must read free on the very next cycle."""
+    broker, a, b, clock = _two_card_host()
+    for peer in (a, b):
+        _warm_answers(peer, _http_error(500))
+    broker.plan_and_apply([])
+    assert broker._in_flight == {}, "a definite failure must release its claim"
+    assert broker._in_flight_devices() == {}
+    clock["t"] += 30
+    broker.plan_and_apply([])
+    assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 2, \
+        "with nothing in flight the planner may place the unit again at once"
+
+
+def test_a_gateway_timeout_is_not_a_definite_failure():
+    # 504/502/408 are a proxy or relay saying it got NO answer from the node —
+    # the load may still be running, so it stays in flight like a timeout.
+    broker, a, b, clock = _two_card_host()
+    for peer in (a, b):
+        _warm_answers(peer, _http_error(504))
+    broker.plan_and_apply([])
+    assert broker._in_flight, "an unanswered warm is still treated as in flight"
+
+
+def test_an_evict_that_raises_still_clears_its_in_flight():
+    # 2026-11-01 11:51:48: hostd evicted a still-"loading" llm_general from a
+    # hung node; the evict raised before the in-flight cleanup, so the phantom
+    # placement held the card until the TTL. The raise itself still aborts the
+    # plan (`test_failed_eviction_dispatch_does_not_increment_telemetry`).
+    from livestack_node.planner import Evict, Plan
+    import livestack_node.hostbroker as hb
+    broker, a, b, clock = _two_card_host()
+    broker.plan_and_apply([])
+    loading = next(p for p in (a, b) if ("warm", "llm_title") in p.calls)
+    key = next(iter(broker._in_flight))
+
+    def hung(kind):
+        raise TimeoutError("timed out")
+    loading.evict = hung
+    real_plan = hb.plan
+    try:
+        hb.plan = lambda world, policy: Plan((Evict(key[0], key[1], "test"),))
+        with pytest.raises(TimeoutError):
+            broker.plan_and_apply([])
+    finally:
+        hb.plan = real_plan
+    assert broker._in_flight == {}
 
 
 def test_one_unresponsive_peer_does_not_abandon_the_rest_of_the_plan():
