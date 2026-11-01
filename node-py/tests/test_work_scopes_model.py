@@ -115,7 +115,8 @@ def run(seed, factory, tmp):
                 a = claimed.pop(rnd.randrange(len(claimed)))
                 try:
                     store.complete(a['worker'], a['boot'], a['attempt_id'], a['fence'], input_digest='a'*64,
-                                   outcome='succeeded', result={'exit': 0})
+                                   outcome='succeeded', result={'exit': 0, 'exit_code': 0,
+                                       'resources': {'oom_kill': 0, 'pids_max_events': 0}})
                 except WorkloadError:
                     pass  # fenced: the scope was closed under it, which is the point
             elif op == 'heartbeat' and claimed:

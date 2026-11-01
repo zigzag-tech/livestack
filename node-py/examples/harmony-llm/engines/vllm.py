@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import sys
 import time
 from typing import Mapping, Optional
 
@@ -23,6 +24,22 @@ from . import Engine, LineCapture, terminate_and_wait
 # The harmony-llm directory (the parent of this package), where the deployment
 # keeps its venv — `venv/bin/vllm`.
 SERVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def vllm_bin() -> str:
+    """The `vllm` executable this node launches.
+
+    The deployment's venv is `<server dir>/venv`, but that link is untracked, so a
+    checkout or release directory made from the repo has none (2026-10-19: a
+    release dir of the pinned revision made every start fail with ENOENT, and
+    warm-on-start left the 27B down). The interpreter running this server IS the
+    venv that has vLLM, so its own bin directory is the next place to look. When
+    neither exists the conventional path is returned, so the error names it."""
+    conventional = os.path.join(SERVER_DIR, "venv", "bin", "vllm")
+    if os.path.exists(conventional):
+        return conventional
+    beside = os.path.join(os.path.dirname(sys.executable), "vllm")
+    return beside if os.path.exists(beside) else conventional
+
 
 # vLLM's documented default for `--max-num-seqs` (256 since v0.5). A unit that
 # names the flag gets its number; one that does not gets this, because that IS
@@ -117,6 +134,17 @@ def device_total_bytes() -> float:
     return 0.0
 
 
+def device_free_bytes() -> float:
+    """Free VRAM on the card this node speaks for right now, or 0 when unknowable."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return float(torch.cuda.mem_get_info(0)[0])
+    except Exception:
+        pass
+    return 0.0
+
+
 class VllmEngine(Engine):
     name = "vllm"
 
@@ -138,12 +166,40 @@ class VllmEngine(Engine):
                 # Leave the tail of the grant unclaimed: the budget is what is
                 # free, and an engine that takes every last byte leaves nothing
                 # for the allocator's own overhead.
-                fraction = f"{max(0.10, min(0.97, (want * 0.94) / total)):.3f}"
+                # A grant only ever sizes a unit DOWN. A 3 GiB embedder granted a
+                # whole 23.6 GiB card was started at 0.94 of it, which vLLM
+                # refuses while any other tenant holds memory (rc=1,
+                # 2026-10-21); the configured fraction is the unit's own need.
+                sized = min(0.97, (want * 0.94) / total)
+                # ...and never above what the card has free right now: the
+                # planner's budget is its ledger, not a measurement, and other
+                # tenants' contexts are not always in it.
+                free = device_free_bytes()
+                if free > 0:
+                    sized = min(sized, (free * 0.94) / total)
+                fraction = f"{max(0.10, min(float(spec['gpu_fraction']), sized)):.3f}"
                 print(f"[harmony-llm] {spec['name']}: planner granted "
                       f"{want/(1<<30):.1f} GiB -> --gpu-memory-utilization {fraction}",
                       flush=True)
+        elif not budget:
+            # NO GRANT TO SIZE TO (boot warm-up, or a start the planner did not
+            # plan). `gpu_fraction` is still a fraction of the WHOLE card, and
+            # vLLM refuses to start when the card has less free than that:
+            # llm_general asked 0.96 (22.6 GiB) of a card holding 2.5 GiB of
+            # other tenants' contexts and exited 4x (2026-10-19). Never claim more
+            # than the card has free now; a configured fraction already below it
+            # is left alone.
+            total = float(total_bytes or 0) or device_total_bytes()
+            free = device_free_bytes()
+            if total > 0 and free > 0:
+                cap = max(0.10, min(0.97, (free * 0.94) / total))
+                if cap < float(fraction):
+                    print(f"[harmony-llm] {spec['name']}: no planner grant and "
+                          f"{free/(1<<30):.1f} GiB free -> --gpu-memory-utilization "
+                          f"{cap:.3f} (configured {fraction})", flush=True)
+                    fraction = f"{cap:.3f}"
         cmd = [
-            os.path.join(SERVER_DIR, "venv", "bin", "vllm"),
+            vllm_bin(),
             "serve", spec["model"],
             "--port", str(spec["port"]),
             "--host", "127.0.0.1",

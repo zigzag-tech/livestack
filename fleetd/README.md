@@ -1,12 +1,14 @@
 # `@livestack/fleetd` — the fleet supervision loop
 
-One tick: read the fleet, ask the broker for a plan, and carry each action that
-costs money through a jingway wovine whose gates read **correlated facts**.
+One tick: read complete, fresh host facts from the authenticated
+`harmony.fleet/1` account stream, ask the broker for a plan, and carry each action
+that costs money through a jingway wovine whose gates read **correlated facts**.
 
-The loop supervises; it does not decide. Every placement comes from
-`POST /fleet/plan`; every effect goes through `POST /fleet/operations`. It holds
-no capacity state of its own, so restarting it costs nothing — the claim is
-already on the broker's disk before the money is spent.
+The loop supervises; it does not decide. Fleet observation comes from the
+authenticated Hub stream; every placement comes from `POST /fleet/plan`, and
+every effect goes through `POST /fleet/operations`. It holds no capacity state
+of its own, so restarting it costs nothing — the claim is already on the
+broker's disk before the money is spent.
 
 ## The green path is free
 
@@ -49,11 +51,44 @@ own `zod`: a `Handback`'s schemas are jingway `ZodType`s, and two zod instances
 in one process produce schemas that are structurally identical and fail
 `instanceof` — which surfaces as validation that silently never matches.
 
+### Authenticated fleet observation
+
+The service caller starts one stream source before invoking `fleetTick()` and
+passes it as `fleetSource` on every tick:
+
+```ts
+const fleetSource = makeConfiguredFleetStreamSource({ log });
+await fleetSource.start();
+try {
+  await fleetTick({ client, fleetSource, jobs, log });
+} finally {
+  await fleetSource.stop();
+}
+```
+
+`FLEETD_STREAM_ACCOUNT_ID` is required and must name the account reported by
+`benchday client whoami`. Enroll the Benchday resident for that account using
+its existing credential store; FleetD passes no credentials in CLI arguments.
+`FLEETD_BENCHDAY_BIN` selects the CLI path (default `benchday`), and
+`FLEETD_BENCHDAY_INSTANCE` selects its dedicated resident instance (default
+`livestack-fleetd`). The source subscribes with Hub route, account scope, and
+`harmony.fleet/1`, then renews every 10 seconds. Hub binds each source envelope
+to `subject.machine`; the catalog key `node` describes body-level node facts.
+The consumer caps each committed or staged generation at 256 partials and 1 MiB,
+with each partial at 4,096 serialized bytes. During replacement, both generations
+can coexist, so the actual retained maximum is 512 partials and 2 MiB total.
+Warm cached receipts remain stale until live samples replace every expected
+source. Any stale, refused, degraded, incomplete or over-limit observation
+blocks the planning route with a named `unknown`, `stale`, `degraded` or `gap`
+state. The host-level bodies are preserved as published, including the absence
+of worker rows.
+
 ## Where the pieces are
 
 | File | What it owns |
 |---|---|
 | `client.ts` | The broker's three routes, typed. A refusal is a value (`OperationRefused`), and a transport failure (`BrokerUnreachable`) is never flattened into one. |
+| `fleetStream.ts` | The authenticated, account-scoped `harmony.fleet/1` consumer and its bounds / named observation states. |
 | `gates.ts` | The deterministic floor. Correlated facts only. |
 | `workflows.ts` | What code does about a failure it already understands. Nothing here spends. |
 | `handbacks.ts` | The closed effect surface a repair turn may drive. |

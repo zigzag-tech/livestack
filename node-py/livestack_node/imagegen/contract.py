@@ -90,6 +90,10 @@ def validate_request(body: dict) -> dict:
     seed = body.get("seed", 42)
     if type(seed) is not int or not 0 <= seed < 2**63:
         raise ValueError("seed must be an integer between 0 and 2**63-1")
+    # How long the caller can wait for Harmony to find room (seconds): a busy or just-restarted fleet is not a refusal.
+    wait = body.get("harmony_wait_s", 0)
+    if type(wait) not in (int, float) or not 0 <= wait <= 3600:
+        raise ValueError("harmony_wait_s must be a number of seconds between 0 and 3600")
     req = body.get("harmony_requires", {})
     if not isinstance(req, dict) or req.get("class", "imagegen") != "imagegen":
         raise ValueError("harmony_requires must describe class=imagegen")
@@ -118,6 +122,7 @@ def validate_request(body: dict) -> dict:
     out = dict(body)
     out.update(dimensions)
     out["seed"] = seed
+    out["harmony_wait_s"] = wait
     out["harmony_requires"] = {"class": "imagegen", "task": "text_to_image", **req}
     return out
 
@@ -129,7 +134,10 @@ def satisfies(attributes: dict, requirements: dict) -> bool:
 def resolve_worker(view: dict, grant: dict, requirements: dict) -> dict:
     """Resolve the planner's grant, verifying its advertised requirements again."""
     if not grant.get("granted") or not grant.get("device_id") or not grant.get("kind"):
-        raise RuntimeError(grant.get("reason") or "Harmony did not grant a concrete image unit")
+        # The planner says WHY it deferred (`defer_reason`); a bare "could not place it" leaves the caller guessing between
+        # a registration gap, a full device and a refusal to respect.
+        why = grant.get("defer_reason")
+        raise RuntimeError((grant.get("reason") or "Harmony did not grant a concrete image unit") + (f": {why}" if why else ""))
     matches = []
     for host, data in view.get("hosts", {}).items():
         for node in data.get("nodes", []):

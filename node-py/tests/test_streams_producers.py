@@ -26,6 +26,7 @@ from livestack_node.streams.request_authority import (RequestAuthority, referenc
 from livestack_node.streams.runtime import FLEET, FLEET_RANK, HOST, REQUEST, WORKLOAD, StreamsRuntime  # noqa: E402
 from livestack_node.streams.workload_authority import (IntentLedger, WorkloadAuthority, classify_job,  # noqa: E402
                                                        rung_of)
+from livestack_node.workloads import causes  # noqa: E402
 
 DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
 REF = {"ref": "oss://b/spec.json", "digest": "sha256:" + "a" * 64, "bytes": 120, "media": "application/json"}
@@ -196,7 +197,9 @@ class WorkloadTests(Base):
         self.assertEqual((first["body"]["status"], first["epoch"], first["body"]["kind"]), ("admitted", 7, "ok"))
         self.assertTrue(await fake.settle(lambda: fake.bodies(WORKLOAD, "i-ok") and fake.bodies(WORKLOAD, "i-ok")[-1]["status"] == "done"))
         self.assertEqual([b["status"] for b in fake.bodies(WORKLOAD, "i-ok")], ["submitted", "admitted", "placed", "running", "done"])
-        self.assertNotIn("attribution", fake.bodies(WORKLOAD, "i-ok")[-1])
+        self.assertEqual((fake.bodies(WORKLOAD, "i-ok")[-1]["attribution"],
+                          fake.bodies(WORKLOAD, "i-ok")[-1]["reason"]),
+                         ("unknown", "success_evidence_unavailable"))
 
     async def test_every_terminal_cause_carries_attribution_and_a_reason(self):
         fake, _, _, backend = await self.start()
@@ -230,6 +233,23 @@ class WorkloadTests(Base):
         self.assertEqual(classify_job({"state": "expired", "reason": "execution deadline expired"})["attribution"], "unknown")
         self.assertEqual(classify_job({"state": "failed"})["attribution"], "unknown")
         self.assertEqual(rung_of({"id": "j", "state": "queued"})[0], "admitted")
+
+    def test_done_classification_uses_only_persisted_clean_receipt(self):
+        receipt = {"exit_code": 0, "resources": {"oom_kill": 0, "pids_max_events": 0}}
+        metadata = causes.success_metadata(receipt)
+        job = {"id": "j", "state": "succeeded", "result": {
+            "outcome": "succeeded", "result": receipt, **metadata}}
+        status, extra = rung_of(job)
+        self.assertEqual(status, "done")
+        self.assertEqual((extra["attribution"], extra["reason"]),
+                         ("workload", "handler_exit_code_zero"))
+
+        legacy = {"id": "legacy", "state": "succeeded", "result": {
+            "outcome": "succeeded", "result": {}}}
+        status, extra = rung_of(legacy)
+        self.assertEqual(status, "done")
+        self.assertEqual((extra["attribution"], extra["reason"]),
+                         ("unknown", "success_evidence_unavailable"))
 
     async def test_idempotent_submit_returns_the_current_partial_and_a_different_body_is_refused(self):
         fake, _, _, _ = await self.start()

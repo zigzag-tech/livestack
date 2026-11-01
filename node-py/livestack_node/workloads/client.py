@@ -9,8 +9,13 @@ import urllib.request
 
 from livestack_node import transport
 
+from .handler_release import MAX_MANIFEST_BYTES
 from .origin import stamp
 from .model import WorkloadError, encode, name
+
+# The staging request carries a whole package manifest (one entry per file); the server accepts it up to
+# this size (http.MAX_HANDLER_STAGE_REQUEST_BYTES), so the client must not cap it at the ordinary record size.
+STAGE_REQUEST_BYTES = MAX_MANIFEST_BYTES + 64 * 1024
 
 
 class WorkloadClient:
@@ -57,7 +62,8 @@ class WorkloadClient:
             _status, _headers, data = dial(
                 target, 'POST' if body is not None else 'GET', path,
                 headers=headers,
-                body=encode(body).encode() if body is not None else None,
+                body=encode(body, STAGE_REQUEST_BYTES if route == 'handler-releases/stage' else 65536).encode()
+                if body is not None else None,
                 timeout=self.timeout)
             if len(data) > 8*1024*1024:
                 raise WorkloadError('authority response exceeds byte limit', 502)

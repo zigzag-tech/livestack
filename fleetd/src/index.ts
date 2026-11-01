@@ -2,6 +2,7 @@ export * from './client.js';
 export * from './classify.js';
 export * from './corpus.js';
 export * from './escalation.js';
+export * from './fleetStream.js';
 export * from './gates.js';
 export * from './incident.js';
 export * from './handbacks.js';

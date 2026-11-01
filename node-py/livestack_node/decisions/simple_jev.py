@@ -159,18 +159,59 @@ def score_branch(plan: Mapping[str, Any], alternatives: list[Mapping[str, Any]],
     return answer
 
 
-async def classify(payload: Mapping[str, Any], invoke_chat: Callable[[dict], Awaitable[dict]]) -> dict:
+def _head_for(name: Any, heads: Mapping[str, str] | None, request: Mapping[str, Any]) -> dict:
+    """options.head: a label head this node registers (a unit's `decision_heads`), for choice questions."""
+    from . import label_head
+    path = (heads or {}).get(name) if isinstance(name, str) else None
+    if path is None:
+        raise SimpleJevError(f"decision head {name!r} is not registered on this node")
+    if any(q["type"] != "choice" for q in request["questions"].values()):
+        raise SimpleJevError("a decision head scores choice questions only")
+    try:
+        return label_head.load(path)
+    except label_head.HeadError as exc:
+        raise SimpleJevError(str(exc)) from exc
+
+
+def _head_model(model: str, name: str) -> str:
+    """A requirement gains `head=<name>`, so it is served by the unit that registers the head."""
+    return f"{model},head={name}" if str(model).startswith("require:") else model
+
+
+def _with_head(head: Mapping[str, Any], plan: Mapping[str, Any], alternatives: list, response: Mapping[str, Any]) -> list:
+    """The labels' logprobs plus the head's term, as alternatives score_branch reads."""
+    from . import label_head
+    logits = {item.get("token"): float(item["logprob"]) for item in alternatives
+              if isinstance(item, Mapping) and isinstance(item.get("token"), str) and "logprob" in item}
+    if not logits:
+        raise SimpleJevError("model response did not contain next-token logprobs")
+    # Strata does not enforce structured_outputs, so an unlikely label can fall past the top logprobs; the
+    # lowest returned bounds it from above. The head was trained with the same floor.
+    floor = min(logits.values())
+    labels = plan["labels"]
+    try:
+        extra = label_head.adjust(head, response.get("model"), response["choices"][0].get("strata_hidden"), len(labels))
+    except label_head.HeadError as exc:
+        raise SimpleJevError(str(exc)) from exc
+    return [{"token": label, "logprob": logits.get(label, floor) + delta} for label, delta in zip(labels, extra)]
+
+
+async def classify(payload: Mapping[str, Any], invoke_chat: Callable[[dict], Awaitable[dict]],
+                   heads: Mapping[str, str] | None = None) -> dict:
+    """`heads`: the decision heads this node registers, name -> file (label_head.py); options.head picks one."""
     request = validate_request(payload)
     options = request.get("options") or {}
     if options.get("template") == "jemm":
         return await _classify_jemm(request, options, invoke_chat)
+    head = _head_for(options["head"], heads, request) if "head" in options else None
     answers = {}
     input_tokens = 0
     served_model = None
     for qid in request["questions"]:
         messages, plan = compile_branch(request, qid)
         response = await invoke_chat({
-            "model": request.get("model", "local"), "messages": messages,
+            "model": _head_model(request.get("model", "local"), options["head"]) if head is not None
+            else request.get("model", "local"), "messages": messages,
             "continue_final_message": True, "add_generation_prompt": False,
             "chat_template_kwargs": {"enable_thinking": False},
             "temperature": 0, "max_tokens": 1, "logprobs": True,
@@ -179,12 +220,15 @@ async def classify(payload: Mapping[str, Any], invoke_chat: Callable[[dict], Awa
             # Unrestricted top-k can omit low-probability Noul digits, making a
             # conditional distribution impossible to compute.
             "structured_outputs": {"choice": plan["labels"]},
+            **({"strata_hidden": True} if head is not None else {}),
         })
         try:
             token = response["choices"][0]["logprobs"]["content"][0]
             alternatives = token["top_logprobs"]
         except (KeyError, IndexError, TypeError) as exc:
             raise SimpleJevError("model response did not contain next-token logprobs") from exc
+        if head is not None:
+            alternatives = _with_head(head, plan, alternatives, response)
         answers[qid] = score_branch(plan, alternatives, raw_logits=bool((request.get("options") or {}).get("raw_logits")))
         input_tokens += int((response.get("usage") or {}).get("prompt_tokens") or 0)
         model = response.get("model")
@@ -192,6 +236,7 @@ async def classify(payload: Mapping[str, Any], invoke_chat: Callable[[dict], Awa
             raise SimpleJevError("question branches were served by different model revisions")
         served_model = model
     return {"model": served_model or request.get("model", "local"), "template_version": "v1",
+            **({"head": options["head"]} if head is not None else {}),
             "answers": answers, "usage": {"input_tokens": input_tokens, "output_tokens": len(answers)}}
 
 

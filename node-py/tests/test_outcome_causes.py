@@ -22,7 +22,8 @@ def register(store, worker='w1', host='h1', boot='b1', labels=None, handlers=('t
 
 def finish(store, a, outcome='succeeded', result=None):
     return store.complete(a['worker'], a['boot'], a['attempt_id'], a['fence'], input_digest='a'*64,
-                          outcome=outcome, result=result or {'exit_code': 0})
+                          outcome=outcome, result=result or {'exit_code': 0, 'resources': {
+                              'oom_kill': 0, 'pids_max_events': 0}})
 
 
 @pytest.fixture
@@ -34,7 +35,7 @@ def harness(tmp_path):
 # ---- derivation: one case per kind the authority can name -------------------------------------------------
 
 @pytest.mark.parametrize('outcome,result,kind,retry', [
-    ('succeeded', {'exit_code': 0}, 'succeeded', 'no'),
+    ('succeeded', {'exit_code': 0, 'resources': {'oom_kill': 0, 'pids_max_events': 0}}, 'succeeded', 'no'),
     ('product_failure', {'exit_code': 2}, 'handler_failed', 'no'),
     ('infrastructure', {'error': 'WorkloadError', 'detail': 'execution lease lost', 'resources': {}}, 'lease_lost', 'elsewhere'),
     ('infrastructure', {'error': 'abandoned', 'detail': 'execution lease expired'}, 'worker_lost', 'elsewhere'),
@@ -57,6 +58,26 @@ def test_unreadable_evidence_is_never_guessed_to_be_an_oom_kill():
     assert 'memory.events' in cause['evidence']['unreadable'] and 'unit properties' in cause['evidence']['unreadable']
     assert cause['evidence']['detail'] == 'execution stopped without a result'
     assert causes.derive('infrastructure', {}, fence=2, attempts=2)['retry'] == 'no', 'advice stops with the attempts'
+
+
+def test_success_metadata_requires_explicit_zero_counters():
+    assert causes.success_metadata({'exit_code': 0, 'resources': {
+        'oom_kill': 0, 'pids_max_events': 0}})['reason'] == 'handler_exit_code_zero'
+    for receipt in ({'exit_code': 0, 'resources': {'oom_kill': 0}},
+                    {'exit_code': 0, 'resources': {'oom_kill': 0, 'pids_max_events': True}},
+                    {'exit_code': 0, 'resources': {'oom_kill': 0, 'pids_max_events': 1}},
+                    {'exit_code': 0, 'resources': {'oom_kill': 0, 'pids_max_events': 0,
+                                                   'resource_evidence': 'none'}}):
+        assert causes.success_metadata(receipt) is None
+    assert causes.completion_success_metadata({'outcome': 'succeeded', 'result': {}}) == {
+        'attribution': 'unknown', 'reason': 'success_evidence_unavailable',
+        'cause': {'kind': 'unknown', 'retry': 'no',
+                  'evidence': {'unreadable': ['exit_code', 'resources.oom_kill', 'resources.pids_max_events']}}}
+
+
+def test_success_reason_requires_integer_receipt_counters():
+    assert causes.reason_of({'kind': 'succeeded', 'retry': 'no',
+                             'evidence': {'exit_code': False, 'oom_kill': 0, 'pids_max_events': 0}}) is None
 
 
 def test_unknown_reported_kind_keeps_its_name_bounded():
@@ -314,8 +335,10 @@ def lifecycle(seed, store_factory, tmp):
             elif op == 'done' and claimed:
                 a = claimed.pop(rnd.randrange(len(claimed)))
                 outcome = rnd.choice(('succeeded', 'product_failure', 'infrastructure'))
-                finish(store, a, outcome, {'exit_code': 0 if outcome == 'succeeded' else 1,
-                                           **({'resources': {'oom_kill': 1}} if rnd.random() < .3 else {})})
+                result = ({'exit_code': 0, 'resources': {'oom_kill': 0, 'pids_max_events': 0}}
+                          if outcome == 'succeeded' else
+                          {'exit_code': 1, **({'resources': {'oom_kill': 1}} if rnd.random() < .3 else {})})
+                finish(store, a, outcome, result)
             elif op == 'cancel' and jobs:
                 store.cancel('o', rnd.choice(jobs))
             elif op == 'withdraw' and jobs:

@@ -270,7 +270,8 @@ def test_writer_is_exclusive_and_environment_receipt_parks_after_cleanup(tmp_pat
     receipt = environment_receipt(first['environment_handle'], 1)
     receipt['phase_timings']['compile'] = {'seconds': None, 'reason': 'timer_unavailable'}
     completed = store.complete(attempt_worker, 'boot', attempt['attempt_id'], attempt['fence'],
-        input_digest=SOURCE, outcome='succeeded', result={'artifacts': []}, environment_receipt=receipt)
+        input_digest=SOURCE, outcome='succeeded', result={'exit_code': 0,
+            'resources': {'oom_kill': 0, 'pids_max_events': 0}, 'artifacts': []}, environment_receipt=receipt)
     assert completed['state'] == 'succeeded'
     assert completed['result']['environment_receipt']['reuse_outcome'] == 'created'
     recorded_attempt = next(row for row in completed['attempts']
@@ -306,7 +307,8 @@ def test_writer_is_exclusive_and_environment_receipt_parks_after_cleanup(tmp_pat
     assert view['state'] == 'parked' and view['generation'] == 1
     assert view['replicas'][0]['host'] == 'host-a'
     assert store.complete(attempt_worker, 'boot', attempt['attempt_id'], attempt['fence'],
-        input_digest=SOURCE, outcome='succeeded', result={'artifacts': []},
+        input_digest=SOURCE, outcome='succeeded', result={'exit_code': 0,
+            'resources': {'oom_kill': 0, 'pids_max_events': 0}, 'artifacts': []},
         environment_receipt=receipt)['id'] == first['id'], 'completion replay returns same receipt'
     assert len([record for record in ledger.read()
                 if record.get('parent_decision_id') == attempt['decision_id']]) == 1
@@ -341,7 +343,8 @@ def test_registration_preserves_parked_generation_for_same_host_writer(
     first_attempt = store.claim('worker-a', 'boot')
     assert first_attempt['environment']['generation'] == 1
     store.complete('worker-a', 'boot', first_attempt['attempt_id'], first_attempt['fence'],
-        input_digest=SOURCE, outcome='succeeded', result={'artifacts': []},
+        input_digest=SOURCE, outcome='succeeded', result={'exit_code': 0,
+            'resources': {'oom_kill': 0, 'pids_max_events': 0}, 'artifacts': []},
         environment_receipt=environment_receipt(first['environment_handle'], 1))
 
     replica = dict(handle=first['environment_handle'], profile='linux-rust',

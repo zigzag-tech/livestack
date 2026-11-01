@@ -34,7 +34,7 @@ class InputTransfer:
     """
 
     def __init__(self, client, *, max_bytes=2*1024**3, relay=None, relay_key=None, relay_parallel=4,
-                 routes=None, region=None, cross_region=None, doors=None):
+                 routes=None, region=None, cross_region=None, doors=None, authority_parallel=1):
         if (relay is None) != (relay_key is None):
             raise ValueError('relay and relay_key are configured together')
         if doors is not None and relay is not None:
@@ -63,7 +63,7 @@ class InputTransfer:
             built.append(route_kinds.HttpRoute(
                 RouteDescriptor('authority', 'http', client.url, cost='free', priority=1,
                                 options={'degraded_path': 'authority_fallthrough'} if has_door else None),
-                client))
+                client, parallel=authority_parallel))
             routes = RouteSet(built)
         self.routes = routes
         self.cross_region = cross_region

@@ -1,11 +1,12 @@
 """Real SQLite transactions and independent clients, no emulated lease store."""
 from concurrent.futures import ThreadPoolExecutor
 import json
+import json
 import sqlite3
 
 import pytest
 
-from livestack_node.workloads.model import Limits, WorkloadError
+from livestack_node.workloads.model import Limits, WorkloadError, encode
 from livestack_node.workloads.store import WorkloadStore
 
 
@@ -31,7 +32,8 @@ def register(store, worker='w1', host='host1', boot='boot1', *, cpu=4, ram=8, ha
 def complete(store, a, outcome='succeeded', **kwargs):
     return store.complete(a['worker'], a['boot'], a['attempt_id'], a['fence'],
                           input_digest=kwargs.get('digest', 'a'*64), outcome=outcome,
-                          result=kwargs.get('result', {'exit': 0}))
+                          result=kwargs.get('result', {'exit_code': 0, 'resources': {
+                              'oom_kill': 0, 'pids_max_events': 0}}))
 
 
 def test_durable_idempotent_submission_and_principal_scope(harness):
@@ -121,7 +123,8 @@ def test_authority_restart_requires_reconciliation_and_keeps_claim(harness):
     register(reopened, ram=4, handlers=['test.v1'])
     assert reopened.claim('w1', 'boot1')['attempt_id'] == a['attempt_id']
     assert complete(reopened, a)['state'] == 'succeeded'
-    assert reopened.get('owner', j['id'])['result']['result'] == {'exit': 0}
+    assert reopened.get('owner', j['id'])['result']['result'] == {
+        'exit_code': 0, 'resources': {'oom_kill': 0, 'pids_max_events': 0}}
 
 
 def test_expiry_fences_results_and_retains_capacity_until_cleanup(harness):
@@ -248,7 +251,104 @@ def test_wrong_digest_or_modified_completion_is_rejected(harness):
     assert complete(store, a)['state'] == 'succeeded'
     assert complete(store, a)['state'] == 'succeeded'
     with pytest.raises(WorkloadError, match='fenced'):
-        complete(store, a, result={'exit': 1})
+        complete(store, a, result={'exit_code': 0, 'resources': {
+            'oom_kill': 0, 'pids_max_events': 0}, 'marker': 'modified'})
+
+
+@pytest.mark.parametrize('result', [
+    {'exit_code': 0, 'resources': {'oom_kill': 0}},
+    {'exit_code': 0, 'resources': {'oom_kill': False, 'pids_max_events': 0}},
+    {'exit_code': True, 'resources': {'oom_kill': 0, 'pids_max_events': 0}},
+    {'exit_code': 0, 'resources': []},
+    {'exit_code': 0, 'resources': {'oom_kill': 0, 'pids_max_events': 1}},
+    {'exit_code': 1, 'resources': {'oom_kill': 0, 'pids_max_events': 0}},
+    {'exit_code': 0, 'resources': {'oom_kill': 0, 'pids_max_events': 0, 'resource_evidence': 'none'}},
+])
+def test_succeeded_requires_a_complete_clean_exit_receipt(harness, result):
+    store, _, _ = harness
+    register(store)
+    job = store.submit('owner', request())
+    attempt = store.claim('w1', 'boot1')
+    with pytest.raises(WorkloadError, match='successful_completion_receipt_invalid'):
+        complete(store, attempt, result=result)
+    assert store.get('owner', job['id'])['state'] == 'running'
+    assert store.get('owner', job['id'])['attempts'][0]['state'] == 'running'
+
+
+def test_succeeded_rejects_a_disk_limit_breach(harness):
+    store, _, _ = harness
+    store.register('w1', 'host1', 'boot1', {
+        'capacity': {'cpu': 4, 'ram': 8, 'disk_bytes': 20},
+        'available': {'cpu': 4, 'ram': 8, 'disk_bytes': 20},
+        'labels': {'os': 'linux'}, 'handlers': ['test.v1', 'build.v1'], 'ready': True,
+    })
+    job = store.submit('owner', request(need={'cpu': 2, 'ram': 4, 'disk_bytes': 10}))
+    attempt = store.claim('w1', 'boot1')
+    with pytest.raises(WorkloadError, match='successful_completion_receipt_invalid'):
+        complete(store, attempt, result={'exit_code': 0, 'resources': {
+            'oom_kill': 0, 'pids_max_events': 0, 'disk_delta_bytes': 10}})
+    assert store.get('owner', job['id'])['state'] == 'running'
+
+
+def test_success_metadata_is_persisted_with_the_exact_receipt(harness):
+    store, _, _ = harness
+    register(store)
+    job = store.submit('owner', request())
+    attempt = store.claim('w1', 'boot1')
+    completed = complete(store, attempt)
+    metadata = {'attribution': 'workload', 'reason': 'handler_exit_code_zero', 'cause': {
+        'kind': 'succeeded', 'retry': 'no',
+        'evidence': {'exit_code': 0, 'oom_kill': 0, 'pids_max_events': 0}}}
+    assert completed['state'] == 'succeeded'
+    assert {key: completed['result'][key] for key in metadata} == metadata
+    assert completed['cause'] == metadata['cause']
+    assert completed['reason'] == metadata['reason']
+
+
+def test_legacy_clean_success_projects_metadata_without_replay(harness):
+    store, _, path = harness
+    register(store)
+    job = store.submit('owner', request())
+    attempt = store.claim('w1', 'boot1')
+    completed = complete(store, attempt)
+    legacy_completion = {key: value for key, value in completed['result'].items()
+                         if key not in ('attribution', 'reason', 'cause')}
+    with store.transaction() as db:
+        db.execute('UPDATE attempts SET result=? WHERE id=?',
+                   (encode(legacy_completion, store.limits.record_bytes), attempt['attempt_id']))
+        db.execute('UPDATE jobs SET result=?,reason=NULL,cause=? WHERE id=?',
+                   (encode(legacy_completion, store.limits.record_bytes),
+                    encode({'kind': 'succeeded', 'retry': 'no', 'evidence': {}}, 2048), job['id']))
+
+    projected = store.get('owner', job['id'])
+    assert projected['result']['attribution'] == 'workload'
+    assert projected['result']['reason'] == projected['reason'] == 'handler_exit_code_zero'
+    assert projected['cause']['evidence'] == {'exit_code': 0, 'oom_kill': 0, 'pids_max_events': 0}
+    with sqlite3.connect(path) as db:
+        stored = json.loads(db.execute('SELECT result FROM jobs WHERE id=?', (job['id'],)).fetchone()[0])
+    assert 'attribution' not in stored and 'cause' not in stored
+
+
+def test_replayed_legacy_success_upgrades_from_its_persisted_receipt(harness):
+    store, _, _ = harness
+    register(store)
+    job = store.submit('owner', request())
+    attempt = store.claim('w1', 'boot1')
+    completed = complete(store, attempt)
+    legacy_completion = {key: value for key, value in completed['result'].items()
+                         if key not in ('attribution', 'reason', 'cause')}
+    with store.transaction() as db:
+        db.execute('UPDATE attempts SET result=? WHERE id=?',
+                   (encode(legacy_completion, store.limits.record_bytes), attempt['attempt_id']))
+        db.execute('UPDATE jobs SET result=?,reason=NULL,cause=? WHERE id=?',
+                   (encode(legacy_completion, store.limits.record_bytes),
+                    encode({'kind': 'succeeded', 'retry': 'no', 'evidence': {}}, 2048), job['id']))
+
+    replayed = complete(store, attempt)
+    assert replayed['state'] == 'succeeded'
+    assert replayed['result']['attribution'] == 'workload'
+    assert replayed['result']['reason'] == 'handler_exit_code_zero'
+    assert replayed['cause']['evidence'] == {'exit_code': 0, 'oom_kill': 0, 'pids_max_events': 0}
 
 
 def test_cancel_fences_but_requires_cleanup(harness):
