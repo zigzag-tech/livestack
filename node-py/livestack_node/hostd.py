@@ -362,6 +362,12 @@ def build_app(broker: HostBroker):
                       # from an anonymous caller to LIFT an owner — it only
                       # annotates whichever owner the credential path resolved.
                       owner_asserted=bool(payload.get("owner_asserted")))
+        try:
+            wait_s = float(payload.get("wait_s", 0) or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "'wait_s' must be a number of seconds")
+        if not 0 <= wait_s <= ADMIT_WAIT_MAX_S:
+            raise HTTPException(400, f"'wait_s' must be between 0 and {ADMIT_WAIT_MAX_S:g}")
         exclusive = payload.get("exclusive_device", False)
         if type(exclusive) is not bool:
             raise HTTPException(400, "exclusive_device must be a boolean")
@@ -378,10 +384,14 @@ def build_app(broker: HostBroker):
             min_free_bytes = payload.get("min_free_bytes")
             if type(min_free_bytes) is not int or min_free_bytes <= 0:
                 raise HTTPException(400, "exclusive acquisition requires positive min_free_bytes")
+            # `wait_s` on an exclusive admission is how long the caller will
+            # queue behind ANOTHER request's lease on the device (FIFO per
+            # device); `wait_timeout_s` then bounds draining its tenants.
             try:
                 return broker.acquire_exclusive(
                     req, req.selector.get("device_id"), min_free_bytes,
-                    payload.get("wait_timeout_s", 240.0), payload.get("ttl_seconds", 120.0))
+                    payload.get("wait_timeout_s", 240.0), payload.get("ttl_seconds", 120.0),
+                    queue_wait_s=wait_s)
             except Exception as e:
                 return {"granted": False, "exclusive_device": True,
                         "reason": str(e), "device_id": req.selector.get("device_id")}
@@ -417,12 +427,6 @@ def build_app(broker: HostBroker):
         # each pass renews the unmet-demand signal the reconcile loop prepares
         # room from. Waiters for the same requirement are served in arrival
         # order; a different requirement is never held up behind them.
-        try:
-            wait_s = float(payload.get("wait_s", 0) or 0)
-        except (TypeError, ValueError):
-            raise HTTPException(400, "'wait_s' must be a number of seconds")
-        if not 0 <= wait_s <= ADMIT_WAIT_MAX_S:
-            raise HTTPException(400, f"'wait_s' must be between 0 and {ADMIT_WAIT_MAX_S:g}")
 
         def attempt():
             try:

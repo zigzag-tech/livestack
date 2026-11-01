@@ -302,7 +302,7 @@ def test_exclusive_unit_leases_cover_the_worker_call(setup, monkeypatch, device_
         "ttl_seconds": 120,
     }}
     profile = config["exclusive_units"]["qwen_image_2512_depth_nf4"]
-    body = _guided_body()
+    body = {**_guided_body(), "harmony_wait_s": 1800}
     original_call = _guided_call(body, [])
     events = []
     forwarded = []
@@ -348,6 +348,8 @@ def test_exclusive_unit_leases_cover_the_worker_call(setup, monkeypatch, device_
         profile["min_free_bytes"][device] for device in device_ids]
     assert all(event["brokers"] == ["http://host-broker"] and event["owner_id"] == "harmony-image"
                for event in acquisitions)
+    # The caller's harmony_wait_s carries over: a busy device queues, not refuses.
+    assert all(0 < event["queue_wait_s"] <= body["harmony_wait_s"] for event in acquisitions)
     order = [event if isinstance(event, str) else "acquire" for event in events]
     assert order.index("/fleet") < order.index("acquire")
     assert order.index("/v1/images/generations") < order.index("exit:" + device_ids[0])

@@ -69,7 +69,7 @@ Each service is a CPU-only process-node facade, registered with the host broker 
 python examples/harmony-image/qualify-depth.py --request request.json --guide depth.png --out out/image.png
 ```
 
-Add `"harmony_wait_s": 300` to a request that may wait for Harmony to clear the device (a unit inside its residency floor, a busy tenant). A FLUX.2 run holds both GPUs exclusively for about 25 minutes (qualified 768×432: 149 s load, 1515 s total), so other tenants on this host wait for it.
+Add `"harmony_wait_s": 300` to a request that may wait for Harmony to clear the device (a unit inside its residency floor, a busy tenant). A FLUX.2 run holds both GPUs exclusively for about 25 minutes (qualified 768×432: 149 s load, 1515 s total), so other tenants on this host wait for it. Two depth requests need not be sequenced by the caller: while one holds a device's lease, the next queues for it on the host broker (FIFO per device, bounded by its `harmony_wait_s`; `wait_s` on an exclusive `/admit`) and starts when the lease is released or its holder stops heartbeating and the lease lapses at its TTL. With `harmony_wait_s: 0`, or once the window runs out, it is refused with `state: other_owner` and the reason.
 
 Never start a private broker, worker or gateway for GPU work. The removed `up` lifecycle did that with `LIVESTACK_REGISTER=0`; production Harmony could not see its GPU memory, could not arbitrate, and polytts/polyasr/LLM tenants were refused for 15+ minutes (2026-11-01).
 

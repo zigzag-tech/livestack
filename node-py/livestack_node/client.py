@@ -150,7 +150,8 @@ def _admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "
            exclusive_device: bool = False, device_lease_id: Optional[str] = None,
            device_lease_ids: Optional[list] = None,
            min_free_bytes: Optional[int] = None, wait_timeout_s: Optional[float] = None,
-           request_id: Optional[str] = None, device_id: Optional[str] = None) -> tuple:
+           request_id: Optional[str] = None, device_id: Optional[str] = None,
+           queue_wait_s: Optional[float] = None) -> tuple:
     from .announce import broker_urls
     if device_lease_ids is not None:
         if device_lease_id is not None:
@@ -179,6 +180,8 @@ def _admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "
         body["min_free_bytes"] = min_free_bytes
     if wait_timeout_s is not None:
         body["wait_timeout_s"] = wait_timeout_s
+    if queue_wait_s:
+        body["wait_s"] = queue_wait_s
     if request_id is not None:
         body["id"] = request_id
 
@@ -223,15 +226,20 @@ def exclusive_lease(kind: str, *, device_id: str, min_free_bytes: int,
                     owner_id: str = "node", token: Optional[str] = None,
                     brokers: Optional[list] = None, ttl_seconds: int = 120,
                     wait_timeout_s: float = 240, heartbeat_interval: float = 30,
-                    request_id: Optional[str] = None) -> Iterator[dict]:
-    """Hold an authoritative whole-device lease, renewing it until context exit."""
+                    request_id: Optional[str] = None,
+                    queue_wait_s: float = 0) -> Iterator[dict]:
+    """Hold an authoritative whole-device lease, renewing it until context exit.
+
+    ``queue_wait_s`` is how long to wait in the device's FIFO line behind
+    another request's lease before being refused; ``wait_timeout_s`` then
+    bounds draining the device once this request is at the head."""
     if heartbeat_interval <= 0:
         raise ValueError("heartbeat_interval must be positive")
     res, base = _admit(
         kind, owner_id=owner_id, token=token, brokers=brokers,
-        timeout=wait_timeout_s, exclusive_device=True, device_id=device_id,
+        timeout=queue_wait_s + wait_timeout_s + 30, exclusive_device=True, device_id=device_id,
         min_free_bytes=min_free_bytes, wait_timeout_s=wait_timeout_s,
-        request_id=request_id)
+        request_id=request_id, queue_wait_s=queue_wait_s)
     if res.get("granted") is not True:
         raise LeaseLost(f"exclusive admission refused: {res.get('reason') or res}")
     lease_id = res["lease_id"]
