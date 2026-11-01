@@ -267,6 +267,18 @@ def test_hosted_backends_are_configured_not_discovered():
     assert devs2["qwen-sg"].available is False
 
 
+def test_a_held_device_is_never_planned_on():
+    from livestack_node.hostbroker import HostBroker
+    b = HostBroker(device_config={"gpu1": {"hold": "histo training"}},
+                   default_capacity={"vram_bytes": 24_000_000_000, "reserved": 0})
+    found = {"gpu0": "tower0", "gpu1": "tower0"}
+    assert {d.id for d in b._resolve_devices(found)} == {"gpu0"}
+    b.set_device_hold("gpu0", "reserved")
+    assert b._resolve_devices(found) == []
+    b.set_device_hold("gpu0", None)
+    assert {d.id for d in b._resolve_devices(found)} == {"gpu0"}
+
+
 class _LeakyPeer:
     """A node that has evicted everything and still holds the card — the exact
     shape of the 2026-08-04 outage."""
