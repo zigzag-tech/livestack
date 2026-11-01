@@ -57,6 +57,7 @@ dial.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import threading
 import time
@@ -64,7 +65,7 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Callable, List, Mapping, Optional, Sequence, Tuple
 
-from . import relay_control
+from . import relay_control, transport
 from .hostbroker import RestPeer
 
 mesh_route_py = None
@@ -336,10 +337,13 @@ class MeshPeer(RestPeer):
 
         `url` is always `f"{self.base}/<facade path>"` assembled by RestPeer;
         split it back into (method, facade path, body) and run one ls-h1
-        roundtrip. HTTP >= 400 is NOT special here (RestPeer/`_http` treats any
-        status as a parsed body; the broker's error paths are exception-based),
-        so the (status, headers, body) tuple is folded back into RestPeer's
-        json-parsed-return shape."""
+        roundtrip. The (status, headers, body) tuple is folded back into
+        RestPeer's shape: a parsed body on success, and `transport.HTTPError` on
+        HTTP >= 400 — RestPeer's dial raises exactly that, and the broker tells
+        a node that ANSWERED with a failure (a warm that 500s is over, not
+        loading) from one whose outcome is unknown by it. Returning the error
+        body as if it were a success made a failed mesh warm look like a load in
+        progress for the whole in-flight TTL."""
         parts = urllib.parse.urlsplit(url)
         if parts.scheme != MESH_SCHEME or parts.netloc != self.realm:
             raise ValueError(
@@ -358,9 +362,12 @@ class MeshPeer(RestPeer):
         # one stream per request (the quota lane tests two live streams at
         # once). The Picker — the only shared mutable state — is guarded
         # per-call inside _dial.
-        status, _resp_headers, raw = self._loop.run(
+        status, resp_headers, raw = self._loop.run(
             self._dial(method, facade_path, request_headers, data, timeout),
             timeout)
+        if status >= 400:
+            raise transport.HTTPError(url, status, f"HTTP {status}", resp_headers,
+                                      io.BytesIO(raw or b""))
         return json.loads(raw.decode()) if raw else {}
 
     # -- the tunnel dial ------------------------------------------------------
