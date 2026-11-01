@@ -105,6 +105,9 @@ def test_valid_depth_request_preserves_json_for_forwarding(scale):
     assert request["control_image"] == body["control_image"]
     assert isinstance(request["control_image"]["b64_json"], str)
     assert request["controlnet_conditioning_scale"] == scale
+    # JSON `1` (a JavaScript client's 1.0) must reach diffusers as a float: its SDXL ControlNet
+    # pipeline raises TypeError on an int scale (xc-tower-ubuntu 2026-11-01 12:43:19).
+    assert type(request["controlnet_conditioning_scale"]) is float
     assert request["harmony_requires"] == body["harmony_requires"]
     assert (request["width"], request["height"], request["seed"]) == (768, 432, 1863)
     json.dumps(request, allow_nan=False)

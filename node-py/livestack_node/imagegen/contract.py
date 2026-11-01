@@ -133,6 +133,11 @@ def validate_request(body: dict) -> dict:
     out = dict(body)
     out.update(dimensions)
     out["seed"] = seed
+    if all(guided_keys):
+        # JSON has one number type: a JavaScript client's `1.0` arrives as `1`, an int, and diffusers' SDXL
+        # ControlNet pipeline rejects a non-float scale with a TypeError mid-request (xc-tower-ubuntu
+        # 2026-11-01 12:43:19, HTTP 500 through the ingress). Normalise once here, for every runtime.
+        out["controlnet_conditioning_scale"] = float(body["controlnet_conditioning_scale"])
     out["harmony_wait_s"] = wait
     if task == "inpaint":
         for name in ("init_image", "mask_image"):
