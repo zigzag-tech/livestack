@@ -31,6 +31,8 @@ Config via env:
     LIVESTACK_BROKER_PORT default 8799
     LIVESTACK_DEVICES    hosted devices, e.g. {"buildhost-a": {"hosted": true,
                          "concurrency": 1, "labels": {"arch": "linux/amd64"}}}
+                         A held device is reserved for a human and never planned on:
+                         {"host-a/gpu0": {"hold": "histo training"}}
     LIVESTACK_UNITS      kinds no peer reports, e.g. {"build": {"priority": 20}}
     LIVESTACK_DEVICE_METERS JSON device ID -> logical CUDA index for local devices
                          without a model facade; supplies lease memory measurements
@@ -516,6 +518,13 @@ def build_app(broker: HostBroker):
         if lease_id.startswith("device-lease-"):
             return {"ok": broker.exclusive_release(lease_id)}
         return {"ok": broker.hosted_release(lease_id, **extra)}
+
+    @app.post("/devices/{device_id}/hold")
+    def device_hold(device_id: str, payload: dict = Body(...)):
+        """Reserve (``{"reason": "..."}``) or release (``{"reason": null}``) a
+        discovered device for a human. Takes effect on the next snapshot."""
+        broker.set_device_hold(device_id, payload.get("reason"))
+        return {"ok": True, "holds": dict(broker.device_holds)}
 
     @app.post("/devices/{device_id}/health")
     def device_health(device_id: str, payload: dict = Body(...)):
@@ -1429,6 +1438,11 @@ def main():
         # card and leaves it for align/diarize/chipgen. A positive bias makes it
         # overflow-only. Hosted rows carry no vram and are never discovered.
         for did, c in json.loads(dev_env).items():
+            if c.get("hold"):
+                # {"gpu0": {"hold": "histo training"}} — reserved for a human:
+                # the planner never places, evicts from or warms onto it.
+                device_config[did] = {"hold": str(c["hold"])}
+                continue
             if c.get("hosted"):
                 device_config[did] = {k: c[k] for k in
                                       ("hosted", "concurrency", "cost_bias", "labels", "host_id")
