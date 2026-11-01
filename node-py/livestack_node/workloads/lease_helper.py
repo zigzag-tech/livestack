@@ -8,9 +8,12 @@ there even if the handler crashed, so capacity cannot outlive the attempt.
 """
 from __future__ import annotations
 
+import atexit
 import json
 import os
 from pathlib import Path
+import threading
+import time
 import urllib.error
 
 from livestack_node import transport
@@ -108,12 +111,51 @@ def release_leftovers(fleet_url, leases_path, *, status=None, wall_s=None):
     return released
 
 
-def report_progress(phase, *, detail=None, fraction=None):
-    """A Python handler's progress report; the worker forwards progress.json
-    to the authority on its next heartbeat."""
-    value = validate_progress({'phase': phase, **({'detail': detail} if detail else {}),
-                               **({'fraction': fraction} if fraction is not None else {})})
+_progress_state = {'last': 0.0, 'pending': None, 'timer': None}
+_progress_lock = threading.Lock()
+PROGRESS_MIN_INTERVAL = 1.0
+
+
+def _write_progress(value):
     path = Path(os.environ['HARMONY_OUTPUT'])/'progress.json'
     temporary = path.with_suffix('.tmp')
     temporary.write_text(json.dumps(value))
     os.replace(temporary, path)
+    _progress_state['last'] = time.monotonic()
+
+
+def write_progress(value):
+    """Validate and atomically write one document, with no rate limit of its own: for callers (the
+    supervised wrapper) that own the limiter."""
+    _write_progress(validate_progress(value))
+
+
+def _flush_progress():
+    with _progress_lock:
+        value, _progress_state['pending'], _progress_state['timer'] = _progress_state['pending'], None, None
+        if value is not None:
+            _write_progress(value)
+
+
+def report_progress(phase, *, detail=None, fraction=None, done=None, total=None, unit=None, message=None):
+    """A Python handler's progress report (contract v1: phase, done/total/unit, fraction, message);
+    the worker forwards progress.json to the authority on its next heartbeat. At most one write per
+    second: faster calls keep only the latest, written when the second is up (and at exit). `message`
+    is for humans: never put credentials, tokens or URLs with secrets in it. Needs an authority that
+    knows contract v1 for done/total/unit/message; `phase`, `detail`, `fraction` work on any."""
+    fields = dict(detail=detail or None, fraction=fraction, done=done, total=total, unit=unit, message=message)
+    value = validate_progress({'phase': phase, **{k: v for k, v in fields.items() if v is not None}})
+    with _progress_lock:
+        wait = PROGRESS_MIN_INTERVAL - (time.monotonic() - _progress_state['last'])
+        if wait <= 0 and _progress_state['timer'] is None:
+            _write_progress(value)
+            return
+        _progress_state['pending'] = value
+        if _progress_state['timer'] is None:
+            timer = threading.Timer(max(wait, 0), _flush_progress)
+            timer.daemon = True
+            timer.start()
+            _progress_state['timer'] = timer
+
+
+atexit.register(_flush_progress)

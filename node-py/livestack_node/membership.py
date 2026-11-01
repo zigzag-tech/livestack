@@ -30,6 +30,12 @@ SOURCE_SEED = "seed"
 # pruning costs nothing and is what keeps the roster bounded.
 SOURCE_REGISTERED = "registered"
 
+# How long the `hostd` broker lets a peer stay unseen before forgetting it, when
+# `LIVESTACK_PEER_PRUNE_SECONDS` is not set. Long past `mia` (10 minutes), so an
+# overnight outage is still a row an operator can see, and short enough that a
+# renamed or moved node does not sit in `/fleet` as `mia` for a week.
+DEFAULT_PRUNE_AFTER_S = 24 * 3600.0
+
 FRESH = "fresh"
 SUSPECT = "suspect"
 MIA = "mia"
@@ -43,14 +49,52 @@ class MembershipPolicy:
     suspect_after_s: float = 45.0
     mia_after_s: float = 600.0
     # None ⇒ pruning DISABLED. An unset window must never mean "delete on the
-    # next deploy"; that is the rule a delete-shaped bound has to obey.
+    # next deploy"; that is the rule a delete-shaped bound has to obey. (The
+    # `hostd` daemon states its own default, `DEFAULT_PRUNE_AFTER_S`, in code and
+    # logs it; this policy, used bare, still deletes nothing.)
     prune_after_s: Optional[float] = None
+    # Whether a SEED may also be pruned once it has been unseen for the whole
+    # window. Off by default: a seed is the operator's statement that a node
+    # ought to exist. On, a seed that has not answered for the window is treated
+    # as gone, and it is restored the way it first arrived -- the next broker
+    # start re-reads the configuration, or the node announces itself.
+    prune_seeds: bool = False
     max_peers: int = 32
     # Probe cadence by state. Backoff is what makes tolerating absent peers free
     # rather than costly, which is in turn what lets seeds be kept forever.
     fresh_probe_every_s: float = 0.0      # 0 ⇒ every cycle
     suspect_probe_every_s: float = 30.0
     mia_probe_every_s: float = 120.0
+
+
+def policy_from_env(env) -> MembershipPolicy:
+    """The `hostd` broker's thresholds from its environment.
+
+    `LIVESTACK_PEER_PRUNE_SECONDS` deletes rather than rotates, so its default is
+    a stated number (`DEFAULT_PRUNE_AFTER_S`, 24 h) that `hostd` logs at start,
+    not an implied one: before it, a node that moved or was renamed stayed in
+    `/fleet` as `mia` for as long as the broker ran (a week, in the field) and
+    every consumer paid for the row. `0`/`off` disables it; anything else that is
+    not a positive number RAISES rather than guessing. Seeds are pruned on the
+    same window and come back with the next start of the broker, or when the
+    node announces itself.
+    """
+    raw = (env.get("LIVESTACK_PEER_PRUNE_SECONDS") or "").strip().lower()
+    if raw in ("0", "off", "none", "disabled"):
+        prune_after_s: Optional[float] = None
+    else:
+        prune_after_s = float(raw) if raw else DEFAULT_PRUNE_AFTER_S
+        if not prune_after_s > 0:
+            raise ValueError(
+                "LIVESTACK_PEER_PRUNE_SECONDS must be a positive number of seconds, "
+                f"or 0/off to disable; got {raw!r}")
+    return MembershipPolicy(
+        suspect_after_s=float(env.get("LIVESTACK_PEER_SUSPECT_SECONDS", "45")),
+        mia_after_s=float(env.get("LIVESTACK_PEER_MIA_SECONDS", "600")),
+        prune_after_s=prune_after_s,
+        prune_seeds=prune_after_s is not None,
+        max_peers=int(env.get("LIVESTACK_MAX_PEERS", "32")),
+    )
 
 
 def classify(age_s: float, policy: MembershipPolicy) -> str:
@@ -321,11 +365,13 @@ class PeerRoster:
     # -- bounds --------------------------------------------------------------
 
     def prunable(self) -> List[str]:
-        """Registered peers gone long enough to forget. Seeds are never
-        returned, and an unset window disables pruning entirely."""
+        """Peers gone long enough to forget: registered ones, and seeds only
+        where the policy says so (`prune_seeds`). An unset window disables
+        pruning entirely."""
         window = self.policy.prune_after_s
         if window is None:
             return []
         now = self._clock()
         return [r.key for r in self._records.values()
-                if r.source == SOURCE_REGISTERED and r.age(now) >= window]
+                if (r.source == SOURCE_REGISTERED or self.policy.prune_seeds)
+                and r.age(now) >= window]

@@ -9,7 +9,8 @@
 What each process publishes (see openspec services-own-their-streams):
 
 * every hostd:            harmony.host/1 (unit-declaration digest), harmony.request/1 (host scope)
-* the fleet broker only   harmony.fleet/1                       (LIVESTACK_DISPATCH=observe)
+* the fleet broker only   harmony.fleet/1 and configured
+                           harmony.fleet-rank/1                (LIVESTACK_DISPATCH=observe)
 * the workload authority  harmony.jobs/1 and harmony.workload/1  (livestack_node.workloads.service)
 
 The planner is the existing one: candidates are chosen by `planner._unit_satisfies` and the
@@ -29,6 +30,8 @@ from .streams import fleet_facts
 from .streams.host_facts import HostFacts, UnitDeclarations, globs_from_env
 from .streams.request_authority import RequestAuthority, request_ledger
 from .streams.runtime import MAX_JOB_SUBJECTS, StreamsRuntime
+from .streams import fleet_rank_stream
+from .streams.identity_facts import FLEET_IDENTITY_FACTS, WORKLOAD_IDENTITY_FACTS
 from .streams.workload_authority import IntentLedger, StoreBackend, WorkloadAuthority
 
 
@@ -75,21 +78,49 @@ def broker_units(broker: Any) -> Callable[[str, Optional[str]], List[dict]]:
 def _run_in_thread(runtime: StreamsRuntime, log: Callable[[str], None]) -> None:
     def main() -> None:
         loop = asyncio.new_event_loop()
+        runtime._loop = loop
         asyncio.set_event_loop(loop)
-        runtime.start()
         try:
+            runtime.start()
             loop.run_forever()
         except Exception as error:  # noqa: BLE001
             log(f"streams: runtime thread ended: {error!r}")
-    threading.Thread(target=main, name="harmony-streams", daemon=True).start()
+        finally:
+            try:
+                loop.run_until_complete(runtime.stop())
+            except Exception as error:  # noqa: BLE001
+                log(f"streams: shutdown failed: {error!r}")
+            finally:
+                loop.close()
+    thread = threading.Thread(target=main, name="harmony-streams", daemon=True)
+    runtime._thread = thread
+    thread.start()
 
 
-def start_for_hostd(broker: Any, host_id: str, observe: bool, log: Callable[[str], None]) -> Optional[StreamsRuntime]:
+def stop_streams_runtime(runtime: Optional[StreamsRuntime], timeout_s: float = 10.0) -> None:
+    """Stop a producer loop on its owner thread and wait for its async cleanup."""
+    if runtime is None:
+        return
+    loop = getattr(runtime, "_loop", None)
+    thread = getattr(runtime, "_thread", None)
+    if loop is not None and loop.is_running():
+        loop.call_soon_threadsafe(loop.stop)
+    if thread is not None and thread is not threading.current_thread():
+        thread.join(timeout_s)
+        if thread.is_alive():
+            runtime.log("streams: shutdown timed out while stopping producer thread")
+
+
+def start_for_hostd(broker: Any, host_id: str, observe: bool, log: Callable[[str], None],
+                    identity_publisher: Any = None) -> Optional[StreamsRuntime]:
     """Called from hostd.main() just before the server starts. Returns None when the switch is off."""
     if not enabled():
         return None
     state = _state_dir(host_id)
-    runtime = StreamsRuntime(os.environ.get("HARMONY_STREAMS_SOCKET") or None, log, host_id)
+    rank_pairs = fleet_rank_stream.parse_pairs(os.environ.get("BENCHDAY_FLEET_RANK_PAIRS", ""), log) if observe else []
+    rank_every_s = fleet_rank_stream.interval_seconds(os.environ.get("BENCHDAY_FLEET_RANK_SECONDS"), log)
+    runtime = StreamsRuntime(os.environ.get("HARMONY_STREAMS_SOCKET") or None, log, host_id,
+                             fleet_rank_s=rank_every_s)
     facts = HostFacts(host_id, UnitDeclarations(globs_from_env()), os.path.join(state, "host_facts.json"),
                       runtime.host_publisher(), log=log)
 
@@ -106,7 +137,28 @@ def start_for_hostd(broker: Any, host_id: str, observe: bool, log: Callable[[str
     request = RequestAuthority(request_ledger(os.path.join(state, "requests.sqlite")), host_id, broker_units(broker),
                                runtime.intent_publisher("harmony.request/1"), f"harmony-{'fleet' if observe else 'host'}:{host_id}",
                                candidates=planner_candidates, log=log)
-    runtime.attach(host_facts=facts, fleet_reader=fleet_reader if observe else None, request=request)
+    identity_reader = None
+    if observe:
+        from .identity_facts import IdentitySnapshotPublisher, fleet_identity_cut, valid_identity
+        raw_authority_id = os.environ.get("LIVESTACK_IDENTITY_AUTHORITY_ID", "").strip()
+        if identity_publisher is None and valid_identity(raw_authority_id, max_bytes=220):
+            identity_publisher = IdentitySnapshotPublisher("livestack", raw_authority_id)
+        if identity_publisher is not None:
+            identity_reader = lambda: fleet_identity_cut(broker, identity_publisher)
+        else:
+            outcome = ("identity_authority_id_invalid" if raw_authority_id
+                       else "identity_authority_not_configured")
+            log(f"streams: {outcome}; fleet identity contract unavailable")
+    runtime.attach(
+        host_facts=facts,
+        fleet_reader=fleet_reader if observe else None,
+        fleet_rank_pairs=rank_pairs,
+        identity_reader=identity_reader,
+        identity_contract=FLEET_IDENTITY_FACTS if identity_reader is not None else None,
+        identity_authority_id=(identity_publisher.authority_id if identity_reader is not None else None),
+        identity_namespace="harmony:node" if identity_reader is not None else None,
+        request=request,
+    )
     _run_in_thread(runtime, log)
     log(f"streams: HARMONY_STREAMS=1; {'fleet broker' if observe else 'host broker'} producers starting (state {state})")
     return runtime
@@ -147,7 +199,9 @@ def _workload_spec_resolver(blobs: Any) -> Optional[Callable[[str, dict], dict]]
 def start_for_workload_authority(store: Any, host_id: str, state_dir: str,
                                  resolve_spec: Optional[Callable[[str, dict], dict]] = None,
                                  log: Callable[[str], None] = print, blobs: Any = None,
-                                 public_base_url: Optional[str] = None) -> Optional[StreamsRuntime]:
+                                 public_base_url: Optional[str] = None,
+                                 identity_reader: Optional[Callable[[], dict]] = None,
+                                 identity_authority_id: Optional[str] = None) -> Optional[StreamsRuntime]:
     """Called from workloads.service.main() after the store is recovered. None when the switch is off.
 
     `resolve_spec` fetches and digest-verifies a by-reference spec into a store submission request. When no
@@ -165,7 +219,21 @@ def start_for_workload_authority(store: Any, host_id: str, state_dir: str,
     def jobs_reader() -> List[dict]:
         return authority.backend.recent_jobs(MAX_JOB_SUBJECTS)
 
-    runtime.attach(jobs_reader=jobs_reader, workload=authority)
+    from .identity_facts import valid_identity
+    if identity_reader is None or not valid_identity(identity_authority_id, max_bytes=220):
+        outcome = ("identity_authority_id_invalid" if identity_authority_id
+                   else "identity_authority_not_configured")
+        log(f"streams: {outcome}; workload identity contract unavailable")
+        identity_reader = None
+        identity_authority_id = None
+    runtime.attach(
+        jobs_reader=jobs_reader,
+        identity_reader=identity_reader,
+        identity_contract=WORKLOAD_IDENTITY_FACTS if identity_reader is not None else None,
+        identity_authority_id=identity_authority_id,
+        identity_namespace="livestack:worker" if identity_reader is not None else None,
+        workload=authority,
+    )
     _run_in_thread(runtime, log)
     log("streams: HARMONY_STREAMS=1; workload authority producers starting")
     return runtime

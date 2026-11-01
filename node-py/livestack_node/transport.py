@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import http.client
 import io
+import socket
 import threading
 import urllib.error
 import urllib.parse
@@ -113,6 +114,20 @@ _STALE = (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError,
           ConnectionAbortedError)
 
 
+def _keepalive(sock) -> None:
+    """Probe an idle kept connection so a peer that vanished without a FIN/RST
+    (authority host down, NAT/tunnel state dropped) fails the next call within
+    about a minute instead of sitting half-open. Best effort: platforms without
+    the knobs keep the per-call socket timeout, which already bounds every read."""
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        for name, value in (("TCP_KEEPIDLE", 30), ("TCP_KEEPINTVL", 10), ("TCP_KEEPCNT", 3)):
+            if hasattr(socket, name):
+                sock.setsockopt(socket.IPPROTO_TCP, getattr(socket, name), value)
+    except OSError:
+        pass
+
+
 class KeptConnection:
     """One persistent HTTP/1.1 connection to `target`, response buffered.
 
@@ -153,6 +168,7 @@ class KeptConnection:
         if self._conn is None:
             self._conn = self._cls(self._netloc, timeout=self.timeout)
             self._conn.connect()
+            _keepalive(self._conn.sock)
             self.connects += 1
         self._conn.request(method, path, body=body, headers=headers)
         response = self._conn.getresponse()

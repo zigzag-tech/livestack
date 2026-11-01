@@ -24,6 +24,41 @@ HERE = Path(__file__).resolve().parents[1] / "examples" / "harmony-llm" / "serve
 
 # -- the queue itself --------------------------------------------------------
 
+def test_immediate_slots_share_capacity_and_release_idempotently():
+    q = Queues()
+    first = q.try_acquire("llm", 1)
+    assert first is not None
+    assert q.try_acquire("llm", 1) is None
+    assert q.status("llm", 1)["waiting"] == 0
+    first.release()
+    first.release()
+    second = q.try_acquire("llm", 1)
+    assert second is not None
+    assert q.status("llm", 1)["in_flight"] == 1
+    second.release()
+
+
+def test_immediate_admission_does_not_skip_a_legacy_fifo_waiter():
+    q = UnitQueue("llm", 1)
+    held = q.acquire()
+    received = []
+    waiter = threading.Thread(target=lambda: received.append(q.acquire()))
+    waiter.start()
+    try:
+        # The real condition wait is bounded by the held slot. Observe the
+        # public status, not a fake queue, before exercising immediate admission.
+        until = time.monotonic() + 1
+        while q.status()["waiting"] != 1 and time.monotonic() < until:
+            time.sleep(0.005)
+        assert q.status()["waiting"] == 1
+        assert q.try_acquire() is None
+    finally:
+        held.release()
+        waiter.join(1)
+        for slot in received:
+            slot.release()
+    assert len(received) == 1 and q.status()["in_flight"] == 0
+
 def test_at_most_max_concurrent_in_flight_and_the_rest_wait():
     q = UnitQueue("llm", max_concurrent=1)
     a = q.acquire()

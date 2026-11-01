@@ -61,7 +61,7 @@ def world(tmp_path):
     git(repo, 'init', '-q', '-b', 'main')
     (repo / 'node-py' / 'scripts').mkdir(parents=True)
     shutil.copy(SCRIPT, repo / 'node-py' / 'scripts' / 'build-worker-release.py')
-    base = commit(repo, {'LICENSE': 'x', 'node-py/livestack_node/__init__.py': '',
+    base = commit(repo, {'LICENSE': 'x', 'tools/supervised-handlers.json': '{}', 'node-py/livestack_node/__init__.py': '',
                          'node-py/livestack_node/m.py': 'def f():\n    return 1\n',
                          'node-py/tests/test_ok.py': GOOD_TEST}, when=1000)
     source = tmp_path / 'releases'
@@ -201,6 +201,40 @@ def test_kill_switch_and_dry_run_do_nothing(world):
     world['cfg']['enabled'] = True
     assert world['auto'].run_once(dry_run=True)['outcome'] == 'would_build'
     assert groups_units(world)['e2e'] == world['old_id'] and world['sent'] == []
+
+
+def test_a_test_that_fails_once_and_passes_on_its_own_re_run_does_not_block_the_candidate(world, tmp_path):
+    marker = tmp_path / 'ran-once'
+    flaky = ('import os\n\n\ndef test_load_flake():\n    m = %r\n    first = not os.path.exists(m)\n'
+             '    open(m, "w").close()\n    assert not first\n') % str(marker)
+    runtime_commit(world, tests=flaky)
+    assert world['auto'].run_once()['outcome'] == 'proposed'
+    assert marker.exists()
+
+
+def test_the_gate_tree_carries_repo_root_tools(world, tmp_path):
+    # tests/test_workload_supervised.py reads tools/supervised-handlers.json; a gate tree without tools/ failed at
+    # collection ("1 error") on every commit and no new unit was ever proposed.
+    dest = tmp_path / 'gate-tree'
+    dest.mkdir()
+    ua.Repo(world['repo'], fetch=False).export(world['base'], dest)
+    assert (dest / 'tools' / 'supervised-handlers.json').is_file()
+
+
+def test_a_prebuilt_release_dir_whose_recorded_hash_is_not_the_trees_is_refused(world):
+    # fc8b905a: tools/build-authority-release.sh had already made the directory with its own hash scheme; the unit
+    # copied that hash and every worker refused the staged tree (staged_content_hash_mismatch).
+    sha = runtime_commit(world)
+    rel = world['source'] / f'livestack-{sha[:8]}'
+    subprocess.run([sys.executable, str(world['repo'] / 'node-py/scripts/build-worker-release.py'), 'build', sha, '--out', str(rel)],
+                   check=True, capture_output=True)
+    meta_path = rel / 'node-py' / 'RELEASE.json'
+    meta = json.loads(meta_path.read_text())
+    meta['content_hash'] = '0' * 64
+    meta_path.write_text(json.dumps(meta))
+    result = world['auto'].run_once()
+    assert result['outcome'] == 'failed' and 'different_content_hash' in json.dumps(result)
+    assert groups_units(world)['e2e'] == world['old_id']
 
 
 def test_excluded_test_files_do_not_gate(world):

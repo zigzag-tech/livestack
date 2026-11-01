@@ -110,6 +110,10 @@ def validate_request(payload: Mapping[str, Any], *, now_ms: Optional[int] = None
                 raise ContractError("unsupported_profile", f"choice {q['id']} has more than 8 options")
             if len(crit) != len(set(crit)):
                 raise ContractError("invalid_input", f"choice {q['id']} has duplicate option ids")
+        elif q["type"] == "extraction":
+            from .extraction_contract import PROFILE_ID
+            if payload["profile_id"] != PROFILE_ID or len(ids) != 1 or q["id"] != "ask":
+                raise ContractError("unsupported_profile", "extraction requires one ask under the pinned pane-ask profile")
         elif q["type"] != "noul":
             raise ContractError("unsupported_profile", f"unsupported question type {q['type']}")
     return payload
@@ -179,6 +183,14 @@ def validate_result(
             if float(probs[reported]) < max(float(v) for v in probs.values()) - 1e-12:
                 raise ContractError("invalid_output", f"{qid} choice is not argmax")
             del argmax
+        elif ans.get("type") == "extraction":
+            from .extraction_contract import PROFILE_ID, validate_extraction
+            if payload["profile_id"] != PROFILE_ID:
+                raise ContractError("invalid_output", "extraction result has the wrong profile")
+            validate_extraction(ans.get("value"))
+            execution = payload.get("execution", {})
+            if not execution.get("model_revision") or execution.get("qualification_hash") in (None, "", "unqualified"):
+                raise ContractError("invalid_output", "extraction has no qualified model identity")
         else:
             raise ContractError("invalid_output", f"{qid} unknown answer type")
     return payload

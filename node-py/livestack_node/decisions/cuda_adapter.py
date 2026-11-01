@@ -63,8 +63,10 @@ class CudaLayaAdapter:
         return {qid: map_upstream_answer(ans) for qid, ans in raw["answers"].items()}
 
     def infer(self, request: Mapping[str, Any], *, now_ms: int) -> Dict[str, Any]:
-        torch = self._torch()
         validate_request(request, now_ms=now_ms)
+        if any(q["type"] == "extraction" for q in request["questions"]):
+            raise ContractError("profile_unavailable", "retired Laya adapter cannot serve nominal 27B extraction", 503)
+        torch = self._torch()
         if not torch.cuda.is_available():
             raise ContractError("unhealthy", "CUDA is unavailable; CPU fallback is refused", 503)
         device = torch.device(f"cuda:{self.device_index}")

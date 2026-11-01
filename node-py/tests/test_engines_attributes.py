@@ -88,7 +88,7 @@ def test_max_concurrent_is_the_engines_admission_limit():
     assert StrataEngine().launch_attributes(s2)["max_concurrent"] == 4
 
 
-def test_strata_never_invents_thinking_tools_or_vision():
+def test_strata_never_invents_thinking_or_tools():
     s = {"name": "flash_next", "model": "qwen/Q2_0", "port": 8191,
          "extra_args": [], "attributes": {}}
     attrs = StrataEngine().launch_attributes(s)
@@ -97,10 +97,11 @@ def test_strata_never_invents_thinking_tools_or_vision():
     assert attrs["tools"] is False
     assert attrs["vision"] is False
     # ...and a units-file declaration is honoured: only its operator knows what
-    # the build serves.
+    # the build serves. Not for vision: that is the run config's encoder
+    # (tests/test_engines_strata.py), and there is no config here.
     s2 = {**s, "attributes": {"tools": True, "vision": True}}
     attrs2 = StrataEngine().launch_attributes(s2)
-    assert attrs2["tools"] is True and attrs2["vision"] is True
+    assert attrs2["tools"] is True and attrs2["vision"] is False
     assert attrs2["thinking"] is False
 
 

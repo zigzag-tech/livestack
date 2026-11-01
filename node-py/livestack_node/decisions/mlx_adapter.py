@@ -43,8 +43,10 @@ class MlxLayaAdapter:
         return {qid: map_upstream_answer(ans) for qid, ans in raw["answers"].items()}
 
     def infer(self, request: Mapping[str, Any], *, now_ms: int) -> Dict[str, Any]:
-        mx = _import_mlx()
         validate_request(request, now_ms=now_ms)
+        if any(q["type"] == "extraction" for q in request["questions"]):
+            raise ContractError("profile_unavailable", "retired Laya adapter cannot serve nominal 27B extraction", 503)
+        mx = _import_mlx()
         profile = load_profile(
             "pane-chips-v1.json" if str(request["profile_id"]).startswith("pane-chips") else "pane-attention-v1.json"
         )

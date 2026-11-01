@@ -1,4 +1,4 @@
-typed-decision-contract-v1.0.0
+typed-decision-contract-v1.1.0
 schema_version: benchday.decision.v1
 packing_version: decision-pack-v1
 linked_livestack_plan: _plans/typed-decision-inference.md

@@ -28,6 +28,7 @@ import os
 import queue
 import re
 import threading
+import time
 from typing import Callable, Optional
 
 from .ledger import JsonlLedger
@@ -35,6 +36,15 @@ from .ledger import JsonlLedger
 _TAIL_BYTES = 16 * 1024
 _PROMPT = re.compile(rb'"prompt_tokens"\s*:\s*(\d+)')
 _COMPLETION = re.compile(rb'"completion_tokens"\s*:\s*(\d+)')
+# llama.cpp's `timings` (Strata emits it on every answer): the engine's own
+# decode and prefill rates, measured inside the engine — better evidence than
+# anything a proxy can time.
+_DECODE_RATE = re.compile(rb'"predicted_per_second"\s*:\s*([0-9.]+)')
+# The first chunk that carries generated text (answer or reasoning) — what a
+# caller waits for. A role-only opening delta is not a token.
+_FIRST_TEXT = re.compile(rb'"(?:content|reasoning|reasoning_content)"\s*:\s*"[^"]')
+# Fewer generated tokens than this and a stream-timed rate is mostly noise.
+_MIN_TIMED_TOKENS = 8
 
 
 def owner_namespace(owner: Optional[str]) -> Optional[str]:
@@ -61,8 +71,17 @@ class UsageTail:
     def __init__(self, limit: int = _TAIL_BYTES) -> None:
         self._buf = b""
         self._limit = limit
+        self.streamed: Optional[bool] = None
+        self.first_text_at: Optional[float] = None
+        self.last_at: Optional[float] = None
 
-    def feed(self, chunk: bytes) -> None:
+    def feed(self, chunk: bytes, now: Optional[float] = None) -> None:
+        now = time.time() if now is None else now
+        if self.streamed is None and chunk.strip():
+            self.streamed = chunk.lstrip().startswith(b"data:")
+        if self.first_text_at is None and self.streamed and _FIRST_TEXT.search(chunk):
+            self.first_text_at = now
+        self.last_at = now
         self._buf = (self._buf + chunk)[-self._limit:]
 
     def tokens(self):
@@ -70,6 +89,122 @@ class UsageTail:
             found = pat.findall(self._buf)
             return int(found[-1]) if found else None
         return last(_PROMPT), last(_COMPLETION)
+
+    def speed(self, sent_at: Optional[float] = None) -> dict:
+        """`{decode_tok_s, first_token_ms, speed_source}` for this response,
+        each None when it cannot be known — never a guess.
+
+        Decode rate: the engine's own `timings.predicted_per_second` when the
+        engine reports one; otherwise, for a STREAM, generated tokens after the
+        first over the time from the first text chunk to the last chunk. A
+        non-streamed answer arrives all at once, so the proxy cannot separate
+        prefill from decode in it and says nothing. First token: a stream's
+        first text chunk minus `sent_at` (when the request reached the engine,
+        so a queue wait is not counted as the engine's latency)."""
+        found = _DECODE_RATE.findall(self._buf)
+        decode, source = None, None
+        if found:
+            try:
+                decode, source = float(found[-1]), "engine-timings"
+            except ValueError:
+                decode = None
+        if decode is None and self.streamed and self.first_text_at and self.last_at:
+            _, completion = self.tokens()
+            span = self.last_at - self.first_text_at
+            if completion and completion >= _MIN_TIMED_TOKENS and span > 0:
+                decode, source = (completion - 1) / span, "stream-timed"
+        first = None
+        if self.streamed and self.first_text_at and sent_at:
+            first = max(0.0, (self.first_text_at - sent_at) * 1000)
+        return {"decode_tok_s": round(decode, 2) if decode and decode > 0 else None,
+                "first_token_ms": round(first, 1) if first is not None else None,
+                "speed_source": source}
+
+
+class SpeedStats:
+    """What a unit has MEASURED itself doing, per request: decode tokens/s and
+    time to first token, for `prefer` (`llm.decode_tok_s`, `llm.first_token_ms`).
+
+    Each sample carries how many requests the unit had in flight when it ran.
+    A batched engine decodes each stream slower than a solo one, so a solo and a
+    burst rate are different numbers and averaging them describes neither: the
+    published figure is the median of SOLO samples (cohort `solo`), and only a
+    unit that has never run alone publishes the all-samples median under cohort
+    `any`. Medians, so one stalled request cannot move the evidence. The sample
+    count is real, so `min_samples` in a preference means what it says."""
+
+    def __init__(self, window: int = 200) -> None:
+        self._window = window
+        self._by_unit: "dict[str, list[tuple[float, Optional[float], Optional[float], int]]]" = {}
+        self._lock = threading.Lock()
+
+    def observe(self, unit: str, decode_tok_s: Optional[float],
+                first_token_ms: Optional[float], in_flight: int = 1,
+                ts: Optional[float] = None) -> None:
+        if not unit or (decode_tok_s is None and first_token_ms is None):
+            return
+        with self._lock:
+            rows = self._by_unit.setdefault(unit, [])
+            rows.append((time.time() if ts is None else ts, decode_tok_s,
+                         first_token_ms, max(1, int(in_flight or 1))))
+            del rows[:-self._window]
+
+    def summary(self, unit: str) -> dict:
+        """The `fitted`-shaped row `selection.unit_inventory` reads, plus the
+        cohort and the burst rate for an explanation. Empty when nothing was
+        measured — silence, never a zero."""
+        with self._lock:
+            rows = list(self._by_unit.get(unit) or [])
+        if not rows:
+            return {}
+        solo = [r for r in rows if r[3] <= 1]
+        use, cohort = (solo, "solo") if solo else (rows, "any")
+        out: dict = {"cohort": cohort, "measured_at": max(r[0] for r in use)}
+        for i, key in ((1, "decode_tok_s"), (2, "first_token_ms")):
+            vals = [r[i] for r in use if r[i] is not None]
+            if vals:
+                out[key] = _median(vals)
+                out[f"{key}_samples"] = len(vals)
+        burst = [r[1] for r in rows if r[3] > 1 and r[1] is not None]
+        if burst:
+            out["decode_tok_s_burst"] = _median(burst)
+            out["decode_tok_s_burst_samples"] = len(burst)
+        return out
+
+    def seed(self, path: str, max_bytes: int = 4 * 1024 * 1024) -> int:
+        """Re-read measured rows from a demand log, so a restart does not wipe
+        the evidence a node earned. Returns how many samples were read."""
+        try:
+            with open(path, "rb") as fh:
+                fh.seek(0, os.SEEK_END)
+                fh.seek(max(0, fh.tell() - max_bytes))
+                lines = fh.read().splitlines()
+        except OSError:
+            return 0
+        n = 0
+        for line in lines:
+            if b"decode_tok_s" not in line and b"first_token_ms" not in line:
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            rec = rec.get("record", rec) if isinstance(rec, dict) else {}
+            if rec.get("outcome") not in (None, "ok"):
+                continue
+            if rec.get("decode_tok_s") is None and rec.get("first_token_ms") is None:
+                continue
+            self.observe(str(rec.get("unit") or ""), rec.get("decode_tok_s"),
+                         rec.get("first_token_ms"), int(rec.get("in_flight") or 1),
+                         ts=float(rec.get("ts") or time.time()))
+            n += 1
+        return n
+
+
+def _median(vals: "list[float]") -> float:
+    s = sorted(vals)
+    mid = len(s) // 2
+    return round(s[mid] if len(s) % 2 else (s[mid - 1] + s[mid]) / 2, 2)
 
 
 class DemandLog:
@@ -166,6 +301,68 @@ def read_demand(path: str, since: float, limit: int = 50_000) -> list:
             continue
     rows.sort(key=lambda r: r.get("ts") or 0)
     return rows[-limit:]
+
+
+class LoadTimes:
+    """How long each unit's engine took from start to serving, per load on
+    this host — what a cold unit costs before it answers anything.
+
+    Kept in its own small JSONL, not the demand log: a load is not a request,
+    and the demand log's readers (replay, composition) count records as
+    requests. Bounded: rewritten to the last `keep` loads when it grows past
+    `keep * 4` lines. The published figure is the median of the last `window`
+    loads of a unit, so one load from a cold disk cache does not define it."""
+
+    def __init__(self, path: str, window: int = 10, keep: int = 200) -> None:
+        self.path = path
+        self._window = window
+        self._keep = keep
+        self._lock = threading.Lock()
+        d = os.path.dirname(path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+
+    def _rows(self) -> "list[dict]":
+        rows = []
+        try:
+            with open(self.path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(row, dict) and isinstance(row.get("load_s"), (int, float)):
+                        rows.append(row)
+        except FileNotFoundError:
+            pass
+        return rows
+
+    def observe(self, unit: str, load_s: float, ts: Optional[float] = None) -> None:
+        if not unit or not load_s or load_s <= 0:
+            return
+        row = {"unit": unit, "load_s": round(float(load_s), 1),
+               "ts": time.time() if ts is None else ts}
+        with self._lock:
+            with open(self.path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, sort_keys=True) + "\n")
+            rows = self._rows()
+            if len(rows) > self._keep * 4:
+                tmp = self.path + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    for r in rows[-self._keep:]:
+                        fh.write(json.dumps(r, sort_keys=True) + "\n")
+                os.replace(tmp, self.path)
+
+    def summary(self, unit: str) -> dict:
+        """`{"load_s", "load_s_samples", "load_measured_at"}`, or empty when this
+        unit has never been loaded here — silence, never a zero."""
+        with self._lock:
+            rows = [r for r in self._rows() if r.get("unit") == unit][-self._window:]
+        if not rows:
+            return {}
+        return {"load_s": _median([r["load_s"] for r in rows]),
+                "load_s_samples": len(rows),
+                "load_measured_at": max(float(r.get("ts") or 0) for r in rows)}
 
 
 class UnitCostStore:

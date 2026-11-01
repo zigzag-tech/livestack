@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import closing
 import hashlib
 import json
+import logging
 from pathlib import PurePosixPath
 import re
 import sqlite3
@@ -254,6 +255,15 @@ class HandlerReleaseRegistry:
         checked = validate_manifest(request['manifest'], request['release_digest'])
         manifest = checked['manifest']
         handler, digest = manifest['handler_id'], checked['release_digest']
+        if 'progress_contract' not in manifest:
+            if self.store.progress_policy['strict_contract']:
+                with self.store.transaction() as db:
+                    self._event(db, actor, handler, digest, request.get('archive_digest'),
+                                request.get('archive_bytes', 0) if type(request.get('archive_bytes', 0)) is int else 0,
+                                'refused_no_progress_contract')
+                raise WorkloadError('handler_progress_contract_missing', 400)
+            logging.warning('handler %s release %s declares no progress_contract (attempt_progress.strict_contract is off)',
+                            handler, digest[:12])
         policy = self.policy.get(handler)
         if (policy is None or not policy.get('enabled', True) or handler not in self.store.handlers or
                 manifest['runtime_id'] not in policy.get('runtime_ids', []) or

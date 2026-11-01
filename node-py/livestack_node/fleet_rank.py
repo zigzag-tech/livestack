@@ -41,7 +41,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from .preferences import preference_key
+from .preferences import observation, preference_key
+from .requirements import clause_meets
 
 from .ledger import distance_band
 
@@ -91,6 +92,9 @@ class RankedTarget:
     # first time somebody clones a voice.
     inventory: Optional[Dict[str, Any]] = None
     preferences: Optional[List[Dict[str, Any]]] = None
+    # Expected seconds to a finished answer (`finish_estimate`), when the
+    # finish-time rule priced this target; None otherwise.
+    finish_s: Optional[float] = None
 
     def to_wire(self) -> dict:
         result = {"target_id": self.target_id, "node": self.node,
@@ -100,6 +104,7 @@ class RankedTarget:
                   "distance_band": self.distance_band,
                   "load": self.load, "rank": self.rank, "reason": self.reason}
         result["preferences"] = self.preferences
+        result["finish_s"] = self.finish_s
         return result
 
 
@@ -171,7 +176,11 @@ def distance_to(view: dict, node_host: Optional[str], node_row: dict,
             if isinstance(ms, (int, float)):
                 links.append(float(ms))
         if not links:
-            return None
+            # A node on the region's OWN host is in the region: nothing needs
+            # measuring to know that, as with `host:<id>` to itself. (Only when
+            # the region has no measured pair at all; otherwise the median stands.)
+            own = (view.get("hosts") or {}).get(node_host) or {}
+            return 0.0 if node_host and _host_region(own) == name else None
         # Median (statistics.median): one fast outlier host must not define a
         # region, and an even member count averages rather than picks the
         # larger.
@@ -205,7 +214,8 @@ def _serves(node_row: dict, kind: str) -> bool:
     return kind in kinds
 
 
-def warm_for(node: dict, kind: str) -> Optional[bool]:
+def warm_for(node: dict, kind: str,
+             require: Optional[Dict[str, Any]] = None) -> Optional[bool]:
     """Is this node holding something that can serve `kind` RIGHT NOW?
 
     `True` it is, `False` it provably is not, and `None` when the node does not
@@ -220,6 +230,12 @@ def warm_for(node: dict, kind: str) -> Optional[bool]:
     upstream through a serialising proxy. Single calls answered in 0.9 s and
     every external check said healthy; at 25 concurrent, p50 was 7.5 s and 10 of
     25 blew an 8 s deadline. The node was warm. It was not warm FOR LLM.
+
+    The same holds one level down: with `require`, the resident unit must meet
+    it. A node whose resident 27B serves a 24K window is not warm for a request
+    that needs 131K — the unit that can serve it there is cold, and calling the
+    node warm hands it the request ahead of a fleet where the right unit
+    costs the same load and evicts nothing anyone is using.
     """
     units = node.get("units")
     if not isinstance(units, list) or not units:
@@ -229,45 +245,54 @@ def warm_for(node: dict, kind: str) -> Optional[bool]:
     if not classed:
         return None                      # nothing to judge on; today's behaviour
     return any(u.get("resident") and (u.get("attributes") or {}).get("class") == kind
+               and all(_clause_meets(u.get("attributes") or {}, key, want)
+                       for key, want in (require or {}).items())
                for u in classed)
+
+
+def _unit_evidence(node: dict, require: Optional[Dict[str, Any]],
+                   prefer: Optional[List[Dict[str, Any]]], now: float):
+    """The inventory `prefer` should read for this node: the BEST unit that can
+    serve the request, when the node publishes per-unit evidence.
+
+    A node's `inventory["units"]` maps unit name to that unit's own `prefer`
+    inventory (`{"llm": {"decode_tok_s": observation, ...}}`). Speed is a fact
+    about a unit on its hardware, not about a node: a node holding a fast 27B
+    and a slow 125B has no single decode rate, and averaging them would rank it
+    for neither. Only units meeting `require` count, and among them the one
+    with the best preference key — the unit the node would choose. Falls back
+    to the node-level inventory (a node that predates per-unit evidence)."""
+    inv = node.get("inventory") if isinstance(node.get("inventory"), dict) else None
+    per_unit = (inv or {}).get("units")
+    if not isinstance(per_unit, dict) or not prefer:
+        return inv
+    best = None
+    for u in node.get("units") or []:
+        if not isinstance(u, dict):
+            continue
+        attrs = u.get("attributes") or {}
+        if not all(_clause_meets(attrs, key, want) for key, want in (require or {}).items()):
+            continue
+        unit_inv = per_unit.get(u.get("kind"))
+        if not isinstance(unit_inv, dict):
+            continue
+        key, _ = preference_key(unit_inv, prefer, now)
+        if best is None or key < best[0]:
+            best = (key, unit_inv)
+    return best[1] if best else inv
 
 
 _CMPS = (">=", "<=", "!=", ">", "<")
 
+# A row eliminated by the caller's region policy starts with this, so a reader
+# (and the /fleet/rank `region_policy.rejected` list) can tell it from other filters.
+REGION_FILTERED = "filtered: by region policy: "
+
 
 def _clause_meets(attributes: Dict[str, Any], key: str, want: Any) -> bool:
-    """Does one unit attribute satisfy one `require` clause?
-
-    The clause language is the planner's `requires` (planner._unit_satisfies),
-    for the same reason the load rule mirrors the client picker: two places
-    answering "does this unit fit this ask" must not disagree. A key may carry
-    a comparison suffix (`context_len>=`); a bare key is equality. A clause
-    naming an attribute the unit does not declare is NOT met — silence is not
-    a yes, or an unlabelled unit would satisfy everything.
-    """
-    op, name = "", key
-    for c in _CMPS:
-        if key.endswith(c):
-            op, name = c, key[: -len(c)]
-            break
-    name = name.strip()
-    if name not in attributes:
-        return False
-    have = attributes[name]
-    try:
-        if op == "":
-            return bool(have == want)
-        if op == "!=":
-            return bool(have != want)
-        if op == ">=":
-            return float(have) >= float(want)
-        if op == ">":
-            return float(have) > float(want)
-        if op == "<=":
-            return float(have) <= float(want)
-        return float(have) < float(want)      # "<"
-    except (TypeError, ValueError):
-        return False                    # non-numeric where a number was needed
+    """One `require` clause against one unit's attributes: the shared evaluator
+    (livestack_node.requirements), so the ranker and the planner cannot disagree."""
+    return clause_meets(attributes, key, want)
 
 
 def _render_clause(key: str, want: Any) -> str:
@@ -299,11 +324,56 @@ def _requirement_gap(node: dict, require: Dict[str, Any]) -> Optional[str]:
     return ", ".join(_render_clause(key, require[key]) for key in named)
 
 
+# Preferences that make a request a question about TIME TO AN ANSWER, the only
+# ones that can justify paying a model load to get a faster unit.
+_SPEED_METRICS = frozenset({"llm.decode_tok_s", "llm.first_token_ms"})
+
+
+def _measured(inventory: Optional[Dict[str, Any]], metric: str,
+              now: float) -> Optional[float]:
+    value, _ = observation(inventory, {"metric": metric, "min_samples": 1}, now)
+    return value
+
+
+def finish_estimate(inventory: Optional[Dict[str, Any]], tokens: int, cold: bool,
+                    now: float) -> Optional[Dict[str, float]]:
+    """Expected seconds until a `tokens`-long answer is finished here:
+    load (cold only) + first token + tokens / decode rate — or None when any
+    term this target needs was never measured. Silence never becomes a
+    default: an unpriced target is not compared on price at all.
+
+    First token missing counts as 0 rather than None: it is a fraction of a
+    second beside a load and a decode, and a unit that published a decode rate
+    but no first-token figure (an older engine) is still priceable."""
+    decode = _measured(inventory, "llm.decode_tok_s", now)
+    if not decode or decode <= 0:
+        return None
+    load = 0.0
+    if cold:
+        load = _measured(inventory, "llm.load_s", now)
+        if load is None:
+            return None
+    first = (_measured(inventory, "llm.first_token_ms", now) or 0.0) / 1000.0
+    total = load + first + tokens / decode
+    return {"finish_s": round(total, 1), "load_s": round(load, 1),
+            "decode_tok_s": decode}
+
+
 def rank(view: dict, kind: str, vantage: str = "direct",
          now: Optional[float] = None, ttl_s: float = DEFAULT_TTL_S,
          prefer: Optional[List[Dict[str, Any]]] = None,
-         require: Optional[Dict[str, Any]] = None) -> dict:
+         require: Optional[Dict[str, Any]] = None,
+         expected_tokens: Optional[int] = None,
+         allow_regions: Optional[List[str]] = None,
+         allow_unknown_region: bool = False) -> dict:
     """Order the fleet's nodes for one `(kind, vantage)`.
+
+    `allow_regions` is the caller's region policy and is applied HERE, before
+    warm/cold is decided: a warm node in a forbidden region must not suppress a
+    cold one in an allowed region (the "warm first" rule below would otherwise
+    empty the list, then a post-filter would find nothing). A filtered row names
+    the clause. A node with no declared region is excluded unless
+    `allow_unknown_region`; silence is not a match.
 
     `require` is the request's hard clause map (`{"class": "llm",
     "context_len>=": 131072}` — the planner's `Request.requires` language),
@@ -313,11 +383,17 @@ def rank(view: dict, kind: str, vantage: str = "direct",
     `prefer`) — it is what the work NEEDS, and a warm node that cannot serve it
     must never be the fallback it becomes on distance alone.
 
+    `expected_tokens` turns on the FINISH-TIME RULE for a request whose
+    `prefer` asks for speed: a cold target that would finish a
+    `expected_tokens`-long answer sooner than every warm one, its MEASURED load
+    included, competes with them (see the comment at "Warm first").
+
     Returns every candidate, winner and losers alike, each with the reason it
     landed where it did — the response takes the `ranked`/`chosen` rows and the
     ledger takes all of them.
     """
     now = time.time() if now is None else now
+    allow_regions = sorted({r.strip().lower() for r in allow_regions or [] if r.strip()}) or None
     rows: List[RankedTarget] = []
     eligible: List[RankedTarget] = []
     # Fresh, serving this kind, and holding nothing yet. Used only when no warm
@@ -335,7 +411,7 @@ def rank(view: dict, kind: str, vantage: str = "direct",
                 target_id=target_id, node=peer, host_id=host_id,
                 region=node.get("region"),
                 device_id=node.get("device_id"), state=node.get("state", "mia"),
-                inventory=node.get("inventory") if isinstance(node.get("inventory"), dict) else None,
+                inventory=_unit_evidence(node, require, prefer, now),
                 ready=bool(node.get("ready")), distance_ms=dist,
                 distance_band=band, load=load,
                 inputs_at=view.get("generated_at"),
@@ -348,6 +424,19 @@ def rank(view: dict, kind: str, vantage: str = "direct",
                                          reason=f"filtered: does not host {kind}",
                                          **common))
                 continue
+            if allow_regions:
+                reg = (node.get("region") or "").strip().lower() or None
+                if reg is None and not allow_unknown_region:
+                    rows.append(RankedTarget(outcome="filtered",
+                                             reason=f"{REGION_FILTERED}no region declared",
+                                             **common))
+                    continue
+                if reg is not None and reg not in allow_regions:
+                    rows.append(RankedTarget(
+                        outcome="filtered",
+                        reason=f"{REGION_FILTERED}region {reg}, wanted {'/'.join(sorted(allow_regions))}",
+                        **common))
+                    continue
             # What the request NEEDS. Applied before the health rules because
             # "can it serve this at all" is the question a reader asks first —
             # and it gates the cold path too: a node whose declared units fail
@@ -384,7 +473,7 @@ def rank(view: dict, kind: str, vantage: str = "direct",
             # embedding model is cold for `llm` however ready it reports, and
             # the existing "warm first, always" rule below then keeps it out of
             # the running whenever a genuinely warm node exists.
-            if warm_for(node, kind) is False:
+            if warm_for(node, kind, require) is False:
                 held = ", ".join(sorted(
                     u.get("kind", "?") for u in (node.get("units") or [])
                     if isinstance(u, dict) and u.get("resident"))) or "nothing"
@@ -395,34 +484,79 @@ def rank(view: dict, kind: str, vantage: str = "direct",
                 continue
             eligible.append(RankedTarget(outcome="ranked", reason="", **common))
 
-    # Warm first, always. A cold node is a candidate only when there is no warm
-    # one anywhere — preferring it otherwise would pay a model load to avoid a
-    # few milliseconds of distance.
+    # Warm first — UNLESS THE LOAD PAYS FOR ITSELF IN THIS ANSWER. A cold node
+    # is otherwise a candidate only when there is no warm one anywhere:
+    # preferring it would pay a model load to avoid a few milliseconds of
+    # distance. But a caller that asked for speed asked for the answer SOONER,
+    # and a 4K-token answer at 116 tok/s after a 12 s load (47 s) beats the
+    # same answer at 41 tok/s on a warm card (100 s). So, for a speed
+    # preference, every target is priced by `finish_estimate` and a cold one
+    # that beats EVERY warm one joins them. Each term must be measured, warm
+    # and cold alike; one unpriced warm target and the old rule stands, since
+    # "faster than something we cannot price" is not a finding. This prices
+    # ONE answer: it does not count the requests that follow onto the loaded
+    # unit, nor what an eviction there costs its other users.
+    speed = (expected_tokens and expected_tokens > 0
+             and any(isinstance(c, dict) and c.get("metric") in _SPEED_METRICS
+                     for c in (prefer or [])))
+    finish: Dict[str, Optional[Dict[str, float]]] = {}
+    if speed:
+        for t in eligible:
+            finish[t.target_id] = finish_estimate(t.inventory, expected_tokens, False, now)
+        for t in cold:
+            finish[t.target_id] = finish_estimate(t.inventory, expected_tokens, True, now)
+    warm_count = len(eligible)
+    best_warm = None
+    if speed and eligible and cold and all(finish[t.target_id] for t in eligible):
+        best_warm = min(finish[t.target_id]["finish_s"] for t in eligible)
+        beats = [c for c in cold if finish[c.target_id]
+                 and finish[c.target_id]["finish_s"] < best_warm]
+        eligible += beats
+        cold = [c for c in cold if c not in beats]
     if not eligible and cold:
         eligible = cold
         cold = []
+    def _held_back(c: RankedTarget) -> str:
+        est = finish.get(c.target_id)
+        if best_warm is None:
+            return f"filtered: not ready ({c.reason})"
+        if not est:
+            return (f"filtered: not ready ({c.reason}); its finish time is "
+                    f"unpriced (no measured load or decode rate)")
+        return (f"filtered: not ready ({c.reason}); finish≈{est['finish_s']}s "
+                f"with its {est['load_s']}s load, not sooner than warm "
+                f"{best_warm}s")
+
     rows.extend(RankedTarget(**{**c.__dict__, "outcome": "filtered",
-                                "reason": f"filtered: not ready ({c.reason})"})
+                                "finish_s": (finish.get(c.target_id) or {}).get("finish_s"),
+                                "reason": _held_back(c)})
                 for c in cold)
 
     lv = {t.target_id: load_value(t.load) for t in eligible}
 
     preference_receipts = {}
 
+    # Which of the candidates is cold, so the answer says the caller is paying
+    # for a model load rather than presenting it as an ordinary placement.
+    cold_ids = {t.target_id for t in eligible if t.reason.startswith("cold")}
+    # Once a cold target is in the running, the order IS the finish time: the
+    # preference key compares decode rates and would ignore the load it pays.
+    # Unpriced targets sort after priced ones.
+    by_finish = bool(speed and cold_ids)
+
     def key(t: RankedTarget):
         v = lv[t.target_id]
         pref_key, receipt = preference_key(t.inventory, prefer or [], now)
         preference_receipts[t.target_id] = receipt
-        return (pref_key,
+        est = finish.get(t.target_id) if by_finish else None
+        return ((0, est["finish_s"]) if est else (1, 0.0) if by_finish else (),
+                pref_key,
                 _BAND_ORDER.get(t.distance_band, 4),
                 0 if v is not None else 1,      # an opinion outranks silence
                 v if v is not None else 0.0,
                 t.target_id)
 
     eligible.sort(key=key)
-    # Which of the winners is cold, so the answer says the caller is paying for
-    # a model load rather than presenting it as an ordinary placement.
-    cold_ids = {t.target_id for t in eligible if t.reason.startswith("cold")}
     out: List[RankedTarget] = []
     for i, t in enumerate(eligible):
         v = lv[t.target_id]
@@ -438,13 +572,20 @@ def rank(view: dict, kind: str, vantage: str = "direct",
             if t.load.get("pressure") is not None:
                 bits.append(f"pressure={t.load['pressure']}")
             why += "; " + ", ".join(bits) if bits else f"; load={v:.2f}"
+        est = finish.get(t.target_id)
         if t.target_id in cold_ids:
-            why = f"cold, and the only {kind}; {why}"
+            why = (f"cold, and its load pays for itself: finish≈{est['finish_s']}s "
+                   f"(load {est['load_s']}s + {expected_tokens} tok at "
+                   f"{est['decode_tok_s']} tok/s); {why}"
+                   if est and warm_count else f"cold, and the only {kind}; {why}")
+        elif by_finish and est:
+            why = f"finish≈{est['finish_s']}s at {est['decode_tok_s']} tok/s; {why}"
         receipt = preference_receipts.get(t.target_id, [])
         if receipt:
             decisive = next((p for p in receipt if p.get("matched") or p.get("comparable")), None)
             why = f"preference={decisive or 'no opinion'}; " + why
         out.append(RankedTarget(**{**t.__dict__, "preferences": receipt,
+                                   "finish_s": est["finish_s"] if est else None,
                                    "rank": i + 1,
                                    "outcome": "chosen" if i == 0 else "ranked",
                                    "reason": why}))

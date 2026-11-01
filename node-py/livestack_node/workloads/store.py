@@ -22,7 +22,8 @@ from .model import (Limits, failure_signature, WorkloadError, encode, host_view,
                     RefusedAfterCommit, ScopeClosed, scope_key, scope_lease, submission)
 from .environment_receipts import validate as validate_environment_receipt
 from .decision_records import completion_record
-from .model import progress as validate_progress
+from .model import (DEFAULT_BUCKET, activity as validate_activity, progress as validate_progress,
+                    progress_policy as validate_progress_policy)
 
 TERMINAL = ("succeeded", "failed", "cancelled", "expired")
 
@@ -116,8 +117,9 @@ class WorkloadStore:
 
     def __init__(self, path, *, handlers, limits=None, clock=time.time, compilation_policy=None,
                  execution_providers=None, remote_hosts=None, environment_handlers=None,
-                 decision_ledger=None, decision_emitter_id='workload-authority'):
+                 decision_ledger=None, decision_emitter_id='workload-authority', progress_policy=None):
         self.path = str(path)
+        self.progress_policy = validate_progress_policy(progress_policy)
         self.handlers = set(handlers)
         self.limits = limits or Limits()
         self.clock = clock
@@ -159,7 +161,14 @@ class WorkloadStore:
                 db.execute("ALTER TABLE jobs ADD COLUMN scope TEXT")
             db.execute("CREATE INDEX IF NOT EXISTS jobs_scope ON jobs(owner,scope,state)")
             for table, column, declaration in (("jobs", "cause", "TEXT"), ("jobs", "placement", "TEXT"),
-                                               ("attempts", "progress_changed", "REAL")):
+                                               ("attempts", "progress_changed", "REAL"),
+                                               ("attempts", "progress_reported", "REAL"),
+                                               ("attempts", "phase_started", "REAL"),
+                                               ("attempts", "activity_at", "REAL"),
+                                               ("attempts", "progress_pending", "TEXT"),
+                                               ("attempts", "progress_dropped", "INTEGER"),
+                                               ("attempts", "bucket_tokens", "REAL"),
+                                               ("attempts", "bucket_at", "REAL")):
                 if column not in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
             db.execute("CREATE INDEX IF NOT EXISTS jobs_environment ON jobs(environment_handle,state)")
@@ -477,12 +486,38 @@ class WorkloadStore:
         if not result.get('environment_handle'):
             result.pop('environment_handle', None)
         result["labels"] = json.loads(result["labels"] or "{}")
-        # Only the latest reported progress is kept; absent means never reported.
-        latest = db.execute("SELECT progress FROM attempts WHERE job=? AND progress IS NOT NULL "
-                            "ORDER BY fence DESC LIMIT 1", (job_id,)).fetchone()
+        # Only the latest reported progress is kept; absent means never reported. The times in it are
+        # the authority's own clock, never the handler's (openspec attempt-progress-reporting).
+        latest = db.execute("SELECT progress,progress_reported,progress_changed,phase_started,progress_dropped FROM attempts "
+                            "WHERE job=? AND progress IS NOT NULL ORDER BY fence DESC LIMIT 1", (job_id,)).fetchone()
         if latest:
             result["progress"] = json.loads(latest["progress"])
+            for key, column in (("reported_at", "progress_reported"), ("changed_at", "progress_changed"),
+                                ("phase_started_at", "phase_started")):
+                if latest[column] is not None:
+                    result["progress"][key] = latest[column]
+            # Reports over the attempt's token bucket: coalesced (latest wins), never refused.
+            result["progress"]["dropped"] = latest["progress_dropped"] or 0
+        # Where the newest attempt is and since when. `activity_at` is the authority time of the last
+        # heartbeat that saw the attempt's log files grow (no text), for handlers that report no progress.
+        newest = db.execute("SELECT created,worker,fence,activity_at FROM attempts WHERE job=? "
+                            "ORDER BY fence DESC LIMIT 1", (job_id,)).fetchone()
+        if newest:
+            result["attempt"] = dict(started_at=newest["created"], worker=newest["worker"],
+                                     fence=newest["fence"])
+            if newest["activity_at"] is not None:
+                result["attempt"]["activity_at"] = newest["activity_at"]
         result["spec"] = json.loads(result["spec"])
+        if "attempt" in result:
+            result["attempt"]["handler"] = result["spec"].get("handler")
+            result["progress_verdict"] = self._progress_verdict(db, result, result["spec"], self.clock())
+            if result["progress_verdict"] is None:
+                del result["progress_verdict"]
+            if result["state"] == "running":
+                bound, source = self.attempt_wall_clock(result["spec"])
+                elapsed = self.clock() - result["attempt"]["started_at"]
+                result["wall_clock"] = dict(limit_seconds=bound, source=source, elapsed_seconds=round(elapsed, 1),
+                                            remaining_seconds=round(max(0.0, bound - elapsed), 1))
         result["result"] = json.loads(result["result"]) if result["result"] else None
         result["cause"] = json.loads(result["cause"]) if result.get("cause") else None
         if result["cause"] is None and result["state"] in TERMINAL:
@@ -536,7 +571,12 @@ class WorkloadStore:
         forbidden = sorted(handler for handler, policy in environment_handlers.items()
                            if handler in allowed and policy['purpose'] in ('full_e2e', 'publishing', 'release'))
         result = dict(versions=[1, 2, 3, 4], causes=dict(version=1, kinds=sorted(causes.KINDS)),
-            deadlines=dict(version=1, max_queue_seconds=[30, 86400], progress_deadline_seconds=[30, 86400]),
+            deadlines=dict(version=1, max_queue_seconds=[30, 86400], progress_deadline_seconds=[30, 86400],
+                           max_attempt_seconds=[30, self.limits.attempt_ceiling(None)[0]]),
+            wall_clock=dict(version=1, max_attempt_seconds=self.limits.max_attempt_seconds,
+                            max_queue_age_seconds=self.limits.max_queue_age_seconds,
+                            exceptions={h: e['max_attempt_seconds'] for h, e in
+                                        sorted(self.limits.wall_clock_exceptions.items())}),
             scopes=dict(
             version=1, lease_default_seconds=self.limits.scope_lease_default_seconds,
             lease_min_seconds=self.limits.scope_lease_min_seconds,
@@ -1190,8 +1230,9 @@ class WorkloadStore:
                         resources=json.loads(attempt['need']), execution_resources=spec['need'],
                         expires=attempt['expires'])
 
-    def heartbeat(self, worker, boot, attempt_id, fence, *, progress=None):
+    def heartbeat(self, worker, boot, attempt_id, fence, *, progress=None, activity=None):
         now = self.clock()
+        activity = validate_activity(activity) if activity is not None else None
         latest = encode(validate_progress(progress), self.limits.record_bytes) if progress is not None else None
         with self.transaction() as db:
             self._expire(db, now)
@@ -1201,15 +1242,47 @@ class WorkloadStore:
             if not attempt:
                 raise WorkloadError("execution lease is no longer valid", 409)
             self._compilation_live(db, attempt, now)
+            # A valid lease heartbeat is proof of life. The worker's main thread sends no worker/report while it
+            # prepares an attempt (input transfer, source unpack, task-environment build: minutes), so without this a
+            # worker that just claimed a job reads as offline after `fresh_seconds` and a rollout soak, the roster and
+            # claim freshness all take busy for silent. Only `seen` moves: the report (capacity, handlers) stays as
+            # the worker last sent it.
+            db.execute("UPDATE workers SET seen=? WHERE id=? AND boot=? AND seen<?", (now, worker, boot, now))
             expires = now + self.limits.lease_seconds
             # A heartbeat without progress leaves the last reported value in
             # place; progress is an overwrite, never an append.
             # `progress_changed` is when the reported progress last DIFFERED: the clock of the opt-in
             # progress deadline. A heartbeat repeating the same document does not move it.
-            changed = latest is not None and latest != attempt["progress"]
+            # Per-attempt token bucket (size from the handler's max_per_period, else DEFAULT_BUCKET):
+            # a report over budget is held as the single pending document, the latest winning, and
+            # published when a token returns; it is counted in `dropped`, never refused.
+            period = self._contract(db, json.loads(db.execute("SELECT spec FROM jobs WHERE id=?",
+                                                              (attempt["job"],)).fetchone()["spec"])
+                                    ).get("max_per_period", DEFAULT_BUCKET)
+            capacity, rate = period["count"], period["count"]/period["seconds"]
+            tokens = attempt["bucket_tokens"]
+            tokens = capacity if tokens is None else min(capacity, tokens + max(0, now - (attempt["bucket_at"] or now))*rate)
+            candidate, pending, dropped = latest, attempt["progress_pending"], attempt["progress_dropped"] or 0
+            if candidate is None:
+                candidate = pending
+            if candidate is not None and candidate == attempt["progress"]:
+                pending = None  # a repeat of the published document: nothing to publish, no token spent
+            elif candidate is not None and tokens >= 1:
+                tokens, pending = tokens - 1, None
+            elif candidate is not None:
+                pending, candidate = candidate, None
+                dropped += 1 if latest is not None else 0
+            changed = candidate is not None and candidate != attempt["progress"]
+            phase_moved = candidate is not None and (
+                attempt["progress"] is None or json.loads(attempt["progress"])["phase"] != json.loads(candidate)["phase"])
             db.execute("UPDATE attempts SET expires=?,progress=COALESCE(?,progress),"
-                       "progress_changed=CASE WHEN ? THEN ? ELSE progress_changed END WHERE id=?",
-                       (expires, latest, changed, now, attempt_id))
+                       "progress_changed=CASE WHEN ? THEN ? ELSE progress_changed END,"
+                       "progress_reported=CASE WHEN ? THEN ? ELSE progress_reported END,"
+                       "phase_started=CASE WHEN ? THEN ? ELSE phase_started END,"
+                       "activity_at=CASE WHEN ? THEN ? ELSE activity_at END,"
+                       "progress_pending=?,progress_dropped=?,bucket_tokens=?,bucket_at=? WHERE id=?",
+                       (expires, candidate, changed, now, candidate is not None, now, phase_moved, now,
+                        activity is not None, now, pending, dropped, tokens, now, attempt_id))
             return {"expires": expires, "lease_remaining": self.limits.lease_seconds}
 
     def complete(self, worker, boot, attempt_id, fence, *, input_digest, outcome, result,
@@ -1311,8 +1384,10 @@ class WorkloadStore:
             elif outcome == "infrastructure" and fence < self.limits.attempts:
                 state, reason = "queued", "infrastructure retry"
             if state != "queued":
-                cause = encode(causes.derive(outcome, result, breach=breach, fence=fence, attempts=self.limits.attempts),
-                               causes.CAUSE_BYTES)
+                derived = causes.derive(outcome, result, breach=breach, fence=fence, attempts=self.limits.attempts)
+                # A handler that failed on its own code says what broke instead of leaving `reason` empty.
+                reason = reason or causes.reason_of(derived)
+                cause = encode(derived, causes.CAUSE_BYTES)
             db.execute("UPDATE jobs SET state=?,result=?,reason=?,cause=?,updated=? WHERE id=?",
                        (state, job_raw, reason, cause, now, job["id"]))
             result_job = self._job(db, job["id"])
@@ -1538,6 +1613,98 @@ class WorkloadStore:
         for a in list(db.execute("SELECT * FROM attempts WHERE state='running' AND expires<=?", (now,))):
             self._abandon(db, a, now, "execution lease expired")
 
+    def _contract(self, db, spec):
+        """The progress contract that governs a job's handler: the operator's `attempt_progress.handlers`
+        entry over the one the handler release declared at enrolment. {} when neither exists."""
+        handler = spec.get("handler")
+        contract = {}
+        digest = (spec.get("handler_release") or {}).get("release_digest")
+        if digest:
+            row = db.execute("SELECT manifest FROM handler_releases WHERE release_digest=?", (digest,)).fetchone()
+            if row:
+                contract.update(json.loads(row["manifest"]).get("progress_contract") or {})
+        contract.update(self.progress_policy["handlers"].get(handler, {}))
+        return contract
+
+    def _progress_limit(self, db, spec):
+        """(seconds, source, mode) of the silence limit for a job, or None. `source` is `spec` for the
+        submitter's progress_deadline_seconds and `contract` for the handler's max_silence_seconds.
+        A spec limit keeps today's behaviour (enforce) unless policy says report; a contract-derived
+        limit only reports unless an operator flips that handler to enforce."""
+        contract = self._contract(db, spec)
+        override = contract.get("deadline_mode")
+        if spec.get("progress_deadline_seconds") is not None:
+            return (spec["progress_deadline_seconds"], "spec",
+                    override or self.progress_policy["deadline_mode"])
+        if contract.get("max_silence_seconds") is not None:
+            return contract["max_silence_seconds"], "contract", override or "report"
+        return None
+
+    def _progress_verdict(self, db, job, spec, now):
+        """The read-side stall verdict of a running job. Never changes state: in `report` mode this is
+        all that happens; in `enforce` mode the same limit fails the job (see _job_verdict)."""
+        if job["state"] != "running":
+            return None
+        limit = self._progress_limit(db, spec)
+        if limit is None:
+            return None
+        attempt = db.execute("SELECT created,progress_changed,activity_at FROM attempts WHERE job=? AND state='running' "
+                             "ORDER BY fence DESC LIMIT 1", (job["id"],)).fetchone()
+        if attempt is None:
+            return None
+        quiet = now - (attempt["progress_changed"] or attempt["created"])
+        verdict = dict(state="overdue" if quiet > limit[0] else "ok", mode=limit[2], source=limit[1],
+                       limit_seconds=limit[0], quiet_seconds=round(quiet, 1))
+        if attempt["activity_at"] is not None:
+            verdict["activity_quiet_seconds"] = round(now - attempt["activity_at"], 1)
+        return verdict
+
+    def attempt_wall_clock(self, spec):
+        """(seconds, source) of the wall-clock bound on one attempt of this job: the authority's bound for its
+        handler (global or a named exception), lowered by the submitter's own `max_attempt_seconds`."""
+        seconds, source = self.limits.attempt_ceiling(spec.get("handler"))
+        asked = spec.get("max_attempt_seconds")
+        if asked is not None and asked < seconds:
+            return asked, "submitter"
+        return seconds, source
+
+    def _wall_clock_verdict(self, db, job, spec, now):
+        """The authority-wide wall-clock bounds (Limits.max_attempt_seconds, max_queue_age_seconds).
+
+        They exist because shared capacity is not the owner's to hold indefinitely: a job that outlives them
+        is too large or stuck, and the fix is the owner's (split it), so both fail with a cause that says
+        `after_change`, never a silent retry. Unlike the opt-in `max_queue_seconds`, the queue bound
+        counts a job that already had attempts: a job requeued after infrastructure failures ages too."""
+        if job["state"] == "running":
+            attempt = db.execute("SELECT created FROM attempts WHERE job=? AND state='running' "
+                                 "ORDER BY fence DESC LIMIT 1", (job["id"],)).fetchone()
+            if attempt is None:
+                return None
+            limit, source = self.attempt_wall_clock(spec)
+            elapsed = now - attempt["created"]
+            if elapsed <= limit:
+                return None
+            return "failed", (f"attempt ran {elapsed:.0f}s, over the {source} wall-clock bound of {limit:g}s "
+                              "(max_attempt_seconds): split the work into smaller jobs"), causes.make(
+                "attempt_wall_clock_exceeded", {"limit_seconds": limit, "elapsed_seconds": round(elapsed),
+                                                "source": source, "handler": spec.get("handler"),
+                                                "guidance": "split the job; capacity is shared"})
+        if job["state"] == "queued":
+            limit = self.limits.max_queue_age_seconds
+            waited = now - job["created"]
+            if waited <= limit:
+                return None
+            attempts = db.execute("SELECT count(*) FROM attempts WHERE job=?", (job["id"],)).fetchone()[0]
+            placement = json.loads(job["placement"]) if job["placement"] else None
+            return "expired", (f"queued {waited:.0f}s, over the {limit:g}s authority queue bound "
+                               "(max_queue_age_seconds)"), causes.make(
+                "queue_age_exceeded", {"limit_seconds": limit, "waited_seconds": round(waited),
+                                       "attempts": attempts, "handler": spec.get("handler"),
+                                       "last_placement": placement and {
+                                           "blockers": placement.get("blockers", [])[:4],
+                                           "since": placement.get("since")}})
+        return None
+
     def _job_verdict(self, db, job, spec, now):
         """(terminal state, reason, cause) when a queued or running job's own clock has run out, else None.
 
@@ -1553,6 +1720,9 @@ class WorkloadStore:
                 return "expired", ("estimated execution cannot fit remaining deadline "
                                    f"({max(0, deadline-now):.0f}s < {estimate:.0f}s)"), \
                     causes.make("deadline_expired", {"deadline": deadline, "estimate_seconds": estimate})
+        wall = self._wall_clock_verdict(db, job, spec, now)
+        if wall is not None:
+            return wall
         queue_limit = spec.get("max_queue_seconds")
         if (queue_limit is not None and job["state"] == "queued" and now - job["created"] > queue_limit and
                 not db.execute("SELECT 1 FROM attempts WHERE job=? LIMIT 1", (job["id"],)).fetchone()):
@@ -1561,14 +1731,16 @@ class WorkloadStore:
                 "unplaceable", {"max_queue_seconds": queue_limit, "waited_seconds": round(now - job["created"]),
                                 "last_placement": placement and {"blockers": placement.get("blockers", [])[:4],
                                                                  "since": placement.get("since")}})
-        stall_limit = spec.get("progress_deadline_seconds")
-        if stall_limit is not None and job["state"] == "running":
+        limit = self._progress_limit(db, spec) if job["state"] == "running" else None
+        if limit is not None and limit[2] == "enforce":
+            stall_limit = limit[0]
             attempt = db.execute("SELECT created,progress_changed FROM attempts WHERE job=? AND state='running' "
                                  "ORDER BY fence DESC LIMIT 1", (job["id"],)).fetchone()
             if attempt is not None:
                 quiet = now - (attempt["progress_changed"] or attempt["created"])
                 if quiet > stall_limit:
-                    return "failed", f"no progress for {quiet:.0f}s (progress_deadline_seconds {stall_limit:g})", \
+                    key = "progress_deadline_seconds" if limit[1] == "spec" else "max_silence_seconds"
+                    return "failed", f"no progress for {quiet:.0f}s ({key} {stall_limit:g})", \
                         causes.make("stalled_no_progress", {"progress_deadline_seconds": stall_limit,
                                                             "quiet_seconds": round(quiet)})
         return None

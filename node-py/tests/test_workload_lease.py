@@ -66,6 +66,21 @@ def test_authority_refusal_revokes_without_waiting_for_expiry(tmp_path):
         lease.close()
 
 
+def test_authority_refusal_during_completion_handoff_is_not_a_lost_lease(tmp_path):
+    client = LeaseClient([.6, WorkloadError('attempt is already complete', 409)])
+    lease = LeaseKeeper(client, {'boot':'b', 'attempt_id':'a', 'fence':1},
+                        tmp_path/'lease', interval=.02).start()
+    try:
+        lease.begin_handoff()
+        assert lease.thread
+        lease.thread.join(timeout=.3)
+        assert not lease.thread.is_alive()
+        assert client.calls == 2
+        assert not lease.lost.is_set()
+    finally:
+        lease.close()
+
+
 def test_unreachable_authority_cannot_extend_the_existing_lease(tmp_path):
     client = LeaseClient([.12, *[TimeoutError() for _ in range(20)]])
     lease = LeaseKeeper(client, {'boot':'b', 'attempt_id':'a', 'fence':1},

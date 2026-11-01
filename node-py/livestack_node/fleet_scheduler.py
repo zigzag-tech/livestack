@@ -475,6 +475,15 @@ def _feasible_candidates(fleet: _Fleet, job: Job, policy: SchedulerPolicy, *,
     It exists so the policy reference (``policy_runtime.choose_target_reference``)
     reuses THIS function rather than a copy of it that could drift."""
     dl = effective_deadline(job, policy)
+    # A DERIVED deadline (created_at + the SLA slack) is an urgency target, not a promise
+    # the caller made. Once it has lapsed there is nothing left to meet, and filtering on
+    # it would make the job unplaceable on every target for ever: a BATCH job that waited
+    # past its 12 h slack (an attune.produce_item sat queued for 5 days with an idle,
+    # eligible worker, reason "no target can meet deadline" although it stated no deadline)
+    # is the most urgent job in the queue (EDF already sorts it first), so it is placed on
+    # any feasible target. An EXPLICIT deadline stays a hard filter, and so does an
+    # INTERACTIVE one: that class means "fast or not at all" and its caller has gone.
+    overdue = job.deadline is None and job.sla != Sla.INTERACTIVE and fleet.now > dl + _EPS
     cands: List[_Cand] = []
     for t in fleet.state.targets:
         if not _selector_matches(t, job.selector):
@@ -482,7 +491,7 @@ def _feasible_candidates(fleet: _Fleet, job: Job, policy: SchedulerPolicy, *,
                 rejected.append((t.id, "filtered:selector"))
             continue
         eta = _eta(t, job)
-        if fleet.now + eta > dl + _EPS:                # cannot meet the deadline
+        if not overdue and fleet.now + eta > dl + _EPS:   # cannot meet the deadline
             if rejected is not None:
                 rejected.append((t.id, "filtered:deadline"))
             continue

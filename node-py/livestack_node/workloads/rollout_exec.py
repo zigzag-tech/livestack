@@ -405,6 +405,9 @@ class Executor:
         if self.clock() - active['step_started'] < active['soak_seconds']:
             return 'wait'
         state['failures'][active['group']] = 0
+        # A finished roll clears its own attempt count. Aborted earlier tries (an idle_timeout on a busy worker) would
+        # otherwise leave the cap reached on a worker that IS on the release and report "gave up" for it forever.
+        state['attempts'].pop(f"{worker}|{active['release']}", None)
         state['active'] = None
         self.note('done', worker=worker, release=active['release'], previous=active['previous_release'])
         self.tell(cfg, f'rollout done: {worker} runs {active["release"]} (was {active["previous_release"]})')
