@@ -199,7 +199,7 @@ def create_app(config=None, call=json_call):
 def main():
     import uvicorn
     config = json.loads(Path(os.environ["HARMONY_IMAGE_GATEWAY_CONFIG"]).read_text())
-    uvicorn.run(create_app(config), host="0.0.0.0", port=config.get("port", 8211))
+    uvicorn.run(create_app(config), host=os.environ.get("LIVESTACK_LISTEN_HOST", "0.0.0.0"), port=config.get("port", 8211))
 
 
 if __name__ == "__main__":

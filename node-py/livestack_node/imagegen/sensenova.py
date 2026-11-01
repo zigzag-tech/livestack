@@ -129,7 +129,7 @@ def main():
     from .worker import create_app
     config = json.loads(Path(os.environ["HARMONY_IMAGE_CONFIG"]).read_text())
     uvicorn.run(create_app(config, runtime_factory=partial(SenseNovaRuntime, config=config)),
-                host="0.0.0.0", port=config["port"])
+                host=os.environ.get("LIVESTACK_LISTEN_HOST", "0.0.0.0"), port=config["port"])
 
 
 if __name__ == "__main__":

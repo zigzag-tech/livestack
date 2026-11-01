@@ -103,7 +103,7 @@ def main():
     import uvicorn
     from livestack_node.imagegen.worker import create_app
     config = json.loads(Path(os.environ["HARMONY_IMAGE_CONFIG"]).read_text())
-    uvicorn.run(create_app(config, runtime_factory=KleinRuntime), host="0.0.0.0", port=config["port"])
+    uvicorn.run(create_app(config, runtime_factory=KleinRuntime), host=os.environ.get("LIVESTACK_LISTEN_HOST", "0.0.0.0"), port=config["port"])
 
 
 if __name__ == "__main__":
