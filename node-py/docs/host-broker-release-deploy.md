@@ -27,3 +27,22 @@ overrides, `0`/`off` disables, a bad value refuses to start; the daemon sets `pr
 pruning is on). Startup logs `[hostd] peer prune window: 86400s`. A pruned seed returns at the next
 broker start; a registered peer returns when it announces. The previous release is
 `sensenova-base-16575876`.
+
+## Deployed: inpainting through Harmony (commits b1da9c93, 724ec228), 2026-11-02
+
+An image request that sends `init_image` and `mask_image` is task=inpaint (derived by the contract, with the
+specialist requirement `inpaint: true`); the FLUX.2 Fun Union unit serves it with the controller it already loads.
+
+- Fleet broker (planner): release `admit-wait-on-regional-3ea2476f-depth-specialist-2ce0c3c6-inpaint-b1da9c93` =
+  the previous release plus b1da9c93's `requirements.py` (a unit attribute listing values offers each) and its
+  `_specialist_only` change (`inpaint` joins `ocr`/`depth_guide`; a unit holding several specialist capabilities is
+  served by demand naming any of them), applied by hand where the release's comment differed. Its planner and
+  requirement tests plus the two new ones passed in the release before the switch. Drop-in
+  `livestack-fleetd.service.d/zzzz-depth-specialist.conf`; backup `/etc/systemd/system/zzzz-depth-specialist.conf.fleetd.before-inpaint-20261102`.
+- Image gateway and the FLUX.2 depth unit: release `imagegen-20261102-724ec228` (main at 724ec228). Gateway drop-in
+  `harmony-image-gateway.service.d/50-depth-units.conf` (backup `/etc/systemd/system/50-depth-units.conf.gateway.before-inpaint-20261102`);
+  process-node config `~/.local/share/harmony-process-node/harmony-image-flux2-depth.json` now points there and its
+  unit declares `task: [text_to_image, inpaint]` and `inpaint: true` (backup beside it, `.before-inpaint-20261102`).
+
+Roll back by restoring the three backups, `daemon-reload`, and restarting `livestack-fleetd`,
+`harmony-image-gateway` and `harmony-image-flux2-depth`. The SDXL and Qwen image units are unchanged.
