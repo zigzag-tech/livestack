@@ -1,4 +1,5 @@
-"""FLUX.2 Fun Union depth runtime with INT8 transformer and configured offload."""
+"""FLUX.2 Fun Union runtime with INT8 transformer and configured offload: depth-guided generation, and inpainting
+(an image and a mask, `task=inpaint`; outpainting is the same with blank canvas under the mask) with the same controller."""
 from __future__ import annotations
 
 import gc
@@ -158,7 +159,58 @@ class Flux2ImageRuntime:
             transformer=transformer, scheduler=scheduler)
         self.offload = offload
 
+    # The Fun Union controller's weight on the supplied image when inpainting (VideoX-Fun's own inpaint example).
+    INPAINT_CONTEXT_SCALE = 0.75
+
+    def _inpaint(self, request: dict):
+        """Repaints the white area of `mask_image` in `init_image` (both already validated by the contract), as
+        VideoX-Fun's examples/flux2_fun/predict_i2i_inpaint.py does: the image as RGB in 0..1, the mask as one channel."""
+        import base64
+        import hashlib
+        import io
+        import numpy as np
+        from PIL import Image
+        torch = self.torch
+        def tensor(field, channels):
+            raw = base64.b64decode(request[field]["b64_json"])
+            with Image.open(io.BytesIO(raw)) as picture:
+                array = np.asarray(picture.convert("RGB"), dtype=np.float32) / 255.0
+            return torch.from_numpy(array).permute(2, 0, 1)[:channels].unsqueeze(0), hashlib.sha256(raw).hexdigest()
+        image, image_sha256 = tensor("init_image", 3)
+        mask, mask_sha256 = tensor("mask_image", 1)
+        started = time.monotonic()
+        torch.cuda.reset_peak_memory_stats()
+        with torch.inference_mode():
+            embeds, _ = self.pipe.encode_prompt(request["prompt"], device=torch.device("cpu"))
+            encoded = time.monotonic()
+            free_cuda()
+            result = self.pipe(
+                prompt=None, prompt_embeds=embeds.to(self.device, dtype=torch.bfloat16),
+                inpaint_image=image, mask_image=mask, control_image=None,
+                control_context_scale=self.INPAINT_CONTEXT_SCALE,
+                width=request["width"], height=request["height"],
+                num_inference_steps=self.steps, guidance_scale=self.guidance_scale,
+                generator=torch.Generator(self.device).manual_seed(request["seed"])).images[0]
+        if result.size != (request["width"], request["height"]):
+            raise RuntimeError("inpainted image dimensions do not match the request")
+        validate_image(result)
+        return result, {
+            "steps": self.steps, "quantization": self.quantization, "quantization_backend": self.quantization_backend,
+            "offload": self.offload, "offload_map": self.offload_map, "text_encoder": "CPU INT8",
+            "inpaint": {"image_sha256": image_sha256, "mask_sha256": mask_sha256,
+                        "context_scale": self.INPAINT_CONTEXT_SCALE, "controlnet_model": self.depth_guide["model"],
+                        "controlnet_revision": self.depth_guide["revision"]},
+            "prompt_encoding_s": round(encoded - started, 3),
+            "generation_s": round(time.monotonic() - encoded, 3),
+            "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
+            "generation_settings": {"steps": self.steps, "guidance_scale": self.guidance_scale,
+                                    "negative_prompt": self.negative_prompt, "text_encoder": "CPU INT8",
+                                    "quantization_backend": self.quantization_backend},
+        }
+
     def generate(self, request: dict):
+        if request["harmony_requires"].get("task") == "inpaint":
+            return self._inpaint(request)
         torch = self.torch
         guide, image_sha256 = _decode_control_image(
             request["control_image"], request["width"], request["height"])
