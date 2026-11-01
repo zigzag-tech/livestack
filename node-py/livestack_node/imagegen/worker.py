@@ -319,7 +319,7 @@ def create_app(config: dict | None = None, runtime_factory=ImageRuntime):
 def main():
     import uvicorn
     config = json.loads(Path(os.environ["HARMONY_IMAGE_CONFIG"]).read_text())
-    uvicorn.run(create_app(config), host="0.0.0.0", port=config["port"])
+    uvicorn.run(create_app(config), host=os.environ.get("LIVESTACK_LISTEN_HOST", "0.0.0.0"), port=config["port"])
 
 
 if __name__ == "__main__":
