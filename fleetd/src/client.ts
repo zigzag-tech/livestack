@@ -92,9 +92,15 @@ export interface FleetNode {
   load?: { in_flight?: number } | null;
 }
 
+/** Raw host-level facts from the fleet stream. A producer may omit worker rows. */
+export interface FleetHostFacts {
+  nodes?: unknown[];
+  [key: string]: unknown;
+}
+
 export interface FleetView {
   generated_at: number;
-  hosts: Record<string, { nodes?: FleetNode[] }>;
+  hosts: Record<string, FleetHostFacts>;
   pools?: unknown[];
   operations?: { active: Operation[]; observability_degraded: string[] };
 }
@@ -133,7 +139,6 @@ export class BrokerUnreachable extends Error {
 }
 
 export interface FleetClient {
-  view(): Promise<FleetView>;
   plan(input: { jobs: JobRequest[]; regions?: string }): Promise<FleetPlan>;
   startOperation(input: {
     action: ActingAction;
@@ -194,7 +199,6 @@ export function httpFleetClient(options: HttpClientOptions): FleetClient {
   }
 
   return {
-    view: () => call('/fleet') as Promise<FleetView>,
     plan: (input) =>
       call('/fleet/plan', {
         method: 'POST',

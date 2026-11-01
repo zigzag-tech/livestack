@@ -73,6 +73,13 @@ def expand_clause(key: str, val) -> "list[tuple[str, object]]":
         if not name:
             raise ValueError("adapter= names no adapter")
         return [(f"adapter.{name}", True)]
+    # `head=pane-status-v1` asks for a unit that registers that decision head
+    # (a unit's `decision_heads`), the same way.
+    if key == "head":
+        name = str(val).strip()
+        if not name:
+            raise ValueError("head= names no head")
+        return [(f"head.{name}", True)]
     if isinstance(val, str):
         m = _INTERVAL_RE.match(val)
         if m:

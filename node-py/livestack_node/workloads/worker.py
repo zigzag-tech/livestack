@@ -24,6 +24,7 @@ from ..host_ledger import HostLedger
 from ..hostview import HostView, cgroup_nonreclaimable
 from .archive import relative_path, unpack
 from . import docker_cache
+from . import causes
 from . import log_excerpt
 from . import dependency_cache
 from .docker_runtime import RuntimeCleanupRefused, remove_data
@@ -179,6 +180,12 @@ class WorkloadWorker:
             dict(name=d.name, client=WorkloadClient(d.url, config['token'], timeout=transfer_timeout,
                                                     edge_key=config.get('edge_key')),
                  key=d.key, parallel=d.parallel) for d in doors])
+        # Blocks in flight on the direct authority route. A lossy long-RTT path caps one TCP stream
+        # (xc-win-1 to the authority: 0.9 MB/s single, 4.6 MB/s over eight); default stays sequential.
+        authority_parallel = config.get('authority_parallel', 1)
+        if isinstance(authority_parallel, bool) or not isinstance(authority_parallel, int) or not 1 <= authority_parallel <= 8:
+            raise WorkloadError('authority_parallel must be an integer 1..8')
+        transfer_options['authority_parallel'] = authority_parallel
         limit = transfer_byte_limit(config)
         logging.info('object transfer ceiling is %d bytes', limit)
         self.transfer = InputTransfer(transfer_client, max_bytes=limit, **transfer_options)
@@ -931,10 +938,27 @@ class WorkloadWorker:
         handler = self._handler_for_assignment(assignment, verify=False)
         code = result['exit_code']
         resources = result.get('resources', {})
-        resource_failure = resources.get('oom_kill', 0) > 0 or resources.get('pids_max_events', 0) > 0
-        outcome = ('succeeded' if code == 0 else
-            'infrastructure' if resource_failure or code in handler.get('infrastructure_exit_codes', []) or
-            (handler.get('backend') in ('rootless-docker', 'rootless-docker-native') and code == 75) else 'product_failure')
+        counters = (resources.get('oom_kill'), resources.get('pids_max_events')) if isinstance(resources, dict) else ()
+        counters_valid = len(counters) == 2 and all(type(value) is int and value >= 0 for value in counters)
+        resource_failure = counters_valid and any(value > 0 for value in counters)
+        code_valid = type(code) is int
+        need = assignment.get('spec', {}).get('need') if isinstance(assignment.get('spec'), dict) else None
+        resource_breach = code_valid and code == 0 and causes.limit_breach(result, need) is not None
+        success_evidence_missing = (code_valid and code == 0 and
+                                    (not counters_valid or not isinstance(resources, dict) or
+                                     resources.get('resource_evidence') == 'none'))
+        success_valid = code_valid and code == 0 and causes.success_metadata(result, need=need) is not None
+        infrastructure = (resource_failure or resource_breach or success_evidence_missing or not code_valid or
+                          code in handler.get('infrastructure_exit_codes', []) or
+                          (handler.get('backend') in ('rootless-docker', 'rootless-docker-native') and code == 75))
+        outcome = 'succeeded' if success_valid and not resource_failure and not resource_breach else (
+            'infrastructure' if infrastructure else 'product_failure')
+        if not code_valid:
+            result = dict(result, error='success_exit_code_invalid',
+                          detail='exit receipt did not contain an integer exit code')
+        elif success_evidence_missing:
+            result = dict(result, error='success_resource_evidence_unavailable',
+                          detail='OOM-kill and process-limit counters were not both available in the exit receipt')
         return dict(outcome=outcome, result=result)
 
     @staticmethod

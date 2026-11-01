@@ -33,6 +33,7 @@ import sys
 import time
 
 import httpx
+from unit_queue import wait_budget
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -246,6 +247,10 @@ async def _route(path: str, request: Request, raw: bytes, ctx: dict):
             body = json.loads(raw)
         except Exception:
             body = None
+    try:
+        budget = wait_budget(body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     requirement, prefer, kind = _plan(path, body)
     ctx["requirement_hash"] = requirement_hash(requirement)
     if kind == "embed":
@@ -273,7 +278,7 @@ async def _route(path: str, request: Request, raw: bytes, ctx: dict):
     # caller's, never replaced or supplemented by anything of ours.
     headers = {k: v for k, v in request.headers.items()
                if k.lower() not in {"host", "content-length", fr.ROUTED_HEADER}}
-    timeout = httpx.Timeout(float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300")))
+    timeout = httpx.Timeout(budget + float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300")))
     try:
         resp, client = await fr.send_routed(
             first=(target, rec.get("expect") or "cold"), rechoose=rechoose,

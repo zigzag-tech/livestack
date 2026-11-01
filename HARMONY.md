@@ -893,6 +893,16 @@ show the committed generation; status reports defaults, worker-effective
 generations, installed digests, and recent refusals. Rollback selects a retained
 digest in a new generation and affects future acceptance only.
 
+The bundle `stage` reads is produced by the application-neutral builder `python
+-m livestack_node.workloads.handler_package_builder --root <files> --out
+<bundle-dir> --spec <spec.json>` (or `build_bundle()` from Python). The spec names
+`release_version`, `platform`, `architecture` and, per handler id, `runtime_id`
+(must be in the operator-installed set, default `node22`/`python3`), `entrypoint`,
+`arguments`, `outputs`, `infrastructure_exit_codes` and the payload/result schema
+ids. It refuses links, special files, an unknown runtime, an entry point outside
+the package and an output directory inside the package root, and its digests are
+byte-identical to the shared v1 fixture.
+
 The initial bounds are 64 handler IDs, four releases per handler, 2 GiB per
 package, 16 GiB of authority package bytes, 4 MiB of manifest metadata, 16
 staged candidates, 16 activation receipts, 256 installed worker packages, 260
@@ -1247,12 +1257,12 @@ then local / same-host only) is advice. The **target validates**:
 
 | `x-harmony-routed: <router-id>;expect=warm\|cold;v=<n>` | the target does |
 |---|---|
-| `expect=warm` | serves from a resident, satisfying, unsaturated unit it holds a slot on (pinned against idle eviction while held), else `409 {"error":"route_stale","reason":"not_resident\|unsatisfied\|saturated"}` **before any body byte**; never admits, loads or forwards |
+| `expect=warm` | serves from a resident, satisfying unit, queueing within `harmony_max_wait_s` when batch slots are full; otherwise `409 {"error":"route_stale","reason":"not_resident\|unsatisfied"}` **before any body byte**; never admits, loads or forwards |
 | `expect=cold` or no `expect` | today's behaviour: may admit and load |
 | `v` newer than the target supports | `409 {"error":"route_contract","router_version":…,"supported":…}` |
 
 The router retries **once** on `route_stale`, a connection failure before the
-response, or `429` (a `not_resident` target is dropped from its cached view until
+response (a `not_resident` target is dropped from its cached view until
 the next refresh); never after a body byte has reached the caller. A failure
 answers `{"error":"route_failed","attempts":[…]}` naming every attempt.
 
@@ -1266,7 +1276,7 @@ region and allowance); no allowance is unrestricted. A node with no declared
 region is excluded when a policy is in force.
 
 **What routes.** A speed preference (`trigger: speed`), or no resident,
-unsaturated, in-policy local unit able to serve it (`trigger: no_warm_local`). A
+in-policy local unit able to serve it (`trigger: no_warm_local`). A
 request this node can serve warm never looks at the fleet. Peer shortcut on the
 request path is **same-host and resident only**; warm-on-start keeps the wider
 "resident or loading" holder check.
@@ -1739,3 +1749,36 @@ does not emit, so shadow divergence is expected until it is corrected (set
 `host_id` meanwhile).
 `/peers`, `/status`, `/fleet`, `/fleet/rank`, `/fleet/operations` and `/fleet/ledger` still have callers
 (benchday's poll-mode roster and `fleet_rank`, fleetd) and are NOT removed from hostd's listener.
+
+
+## LLM queue offers and caller wait budgets (2026-10-19)
+
+`harmony_max_wait_s` is the caller's maximum **queue wait**, a finite number
+between 0 and 3600 seconds (default 300; zero means immediate capacity only).
+A warm batch that is full remains an offer: it does not return `route_stale`
+just for saturation. Admission atomically compares the queue's predicted wait
+with the budget, then waits FIFO for an engine slot. Queue bounds still apply.
+An estimate beyond budget gives 429 `wait_budget_exceeded`; an accepted request
+whose actual wait reaches the deadline gives 429 `queue_deadline_exceeded`.
+These are final refusals: routers must not retry them onto a cold replica.
+Cancellation removes the waiter and cannot strand a background thread or slot.
+
+Residence `units[].queue`, per-unit fleet inventory, and `/harmony/route`'s
+`local[].queue_offer` publish `estimated_wait_s`, `estimated_service_s`, queue
+counts, sample count, estimate source, and `approximate: true`. The dry run also
+shows `request_service_s`, the caller's budget and whether the offer fits it.
+When measured decode speed exists, output-token bounds and measured first-token
+latency predict each incoming request's service time. The queue simulates the
+batch slots using active expected finish times and earlier FIFO claims. Actual
+elapsed service time updates an EWMA; with no observations it explicitly says
+`bootstrap_60s`. Estimates can be wrong (prompt size, cache hits and batching
+matter); the actual queue deadline is enforced independently. `finish_estimate`
+adds the advertised wait to cold-load + first-token + decode time. Proxy read
+timeouts include the caller's queue allowance as well as the engine allowance.
+The queue budget is stripped before forwarding to an engine.
+
+Fleet policy: Flash-Next is offered only by zz-whitby. Removing `flash_next`
+from xc-tower-ubuntu's unit declarations prevents the saturation fallback from
+loading another 45-GiB RAM claim there. Other tower LLM units remain declared.
+Pi/Jing explicitly request a 100B-or-larger LLM with a speed preference and a
+300-second queue budget, rather than silently accepting the tower's 27B unit.

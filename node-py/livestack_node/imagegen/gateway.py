@@ -137,16 +137,25 @@ def create_app(config=None, call=json_call):
                     yield grants
             lease_context = contextmanager(lease_context)
         try:
+            # Observe-only fleet planner picks the unit and device; the worker's
+            # local broker is the only authority allowed to load or evict there.
             with lease_context() as device_grants:
                 # One primary placement can hold several same-owner device leases.
+                # A request may say it can wait (`harmony_wait_s`): Harmony then holds it in its own queue until
+                # the planner can place it (a unit still registering, a device being cleared), and answers with the
+                # planner's last reason if the window runs out first. The call outlives the window, so the HTTP
+                # timeout is the window plus a margin.
+                wait_s = request["harmony_wait_s"]
                 admission = {
                     "requires": request["harmony_requires"],
+                    "wait_s": wait_s,
                     "owner": config.get("owner", "acct_harmony-image"),
                 }
                 lease_ids = [grant["lease_id"] for grant in device_grants]
                 if lease_ids:
                     admission["device_lease_ids"] = lease_ids
-                grant = call(config["fleet"], "POST", "/admit", admission, token=fleet_token)
+                grant = call(config["fleet"], "POST", "/admit", admission, token=fleet_token,
+                             timeout=wait_s + 60)
                 view = call(config["fleet"], "GET", "/fleet")
                 target = resolve_worker(view, grant, request["harmony_requires"])
                 endpoint = target["peer"].removesuffix("/livestack")

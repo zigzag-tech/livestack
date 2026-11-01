@@ -124,6 +124,45 @@ The compiler and scorer live in
 `livestack_node.decisions.simple_jev`; applications should call the Harmony
 endpoint rather than copy the prompt contract.
 
+### Decision heads: a trained readout without an adapter
+
+A model that cannot carry a decision LoRA (Flash-Next on Strata loads none) can
+still have its readout trained. A unit registers label heads by name:
+
+```json
+{"name": "flash_next", "engine": "strata", "...": "...",
+ "decision_heads": {"general-v1": "/var/lib/harmony/heads/flash-next-general-v1-head.npz"}}
+```
+
+and a classifier request picks one with `"options": {"head": "general-v1"}`.
+Each choice question then also asks the engine for the hidden state at the
+label position (Strata's `strata_hidden`, zigzag-tech/Strata `zz/logprobs`) and
+adds the head's learned term to every candidate's logprob
+(`livestack_node.decisions.label_head`); the reply carries `"head"`. A head
+records the served model it was trained on and is refused (422) on any other
+reply, on a reply without a hidden state (e.g. stock Strata), on a head this
+node does not register, and on `score`/`noul` questions. Heads are trained by
+`scripts/flash_label_head.py`.
+
+A unit advertises each head it registers as the attribute `head.<name>`, so a
+caller finds the node that serves one by describing it:
+`require:class=llm,head=pane-status-v1`. The classifier adds the same clause to
+the chat request a head question makes, so it is answered only by the unit that
+registers the head.
+
+A head is trained on ONE question shape and only means anything on that shape
+(a head trained across tasks did not transfer: pane-status 0.907 -> 0.841).
+Registered on zz-whitby's `flash_next` (2026-10-19), each significantly better
+than Simple Jev on the same model by an exact McNemar test on held-out data:
+
+| head | question | Simple Jev -> head | fixed / broken, p |
+|---|---|---|---|
+| `pane-status-v1` | benchday's v1 pane status (six criteria, `conversation_tail`); trained by benchday `ml/eval/flash_hidden_probe.py head` | 0.888 -> 0.923 robust, 5-fold CV over 819 rows | 45 / 16, 0.0003 |
+| `tool-routing-v1` | When2Call: state `{"user_request", "available_tools": {name: description}}`, instructions "Which response should the assistant give?", criteria = candidate replies keyed `direct` / `tool_call` / `request_for_info` / `cannot_answer`, in any order; `scripts/flash_label_head.py fit --set when2call` | 0.700 -> 0.827 on 150 held-out | 21 / 2, 7e-5 |
+
+`tool-routing-v1` scores candidate REPLIES, as When2Call's are written; criteria
+that describe the four behaviours instead of drafting them were not measured.
+
 ## Config
 
 `HARMONY_LLM_UNITS_FILE` — a JSON array of unit specs (see

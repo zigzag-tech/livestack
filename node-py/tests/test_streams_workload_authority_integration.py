@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from threading import Thread
+from urllib.request import Request, urlopen
 import unittest
 from unittest.mock import patch
 
@@ -21,8 +23,8 @@ from streams_fake_ingress import FakeIngress  # noqa: E402
 from livestack_node import hostd_streams  # noqa: E402
 from livestack_node.ledger import JsonlLedger  # noqa: E402
 from livestack_node.workloads.blobs import BlobStore  # noqa: E402
-from livestack_node.workloads.http import Principal  # noqa: E402
-from livestack_node.workloads.model import WorkloadError  # noqa: E402
+from livestack_node.workloads.http import Principal, WorkloadServer  # noqa: E402
+from livestack_node.workloads.model import WorkloadError, encode  # noqa: E402
 from livestack_node.workloads.store import WorkloadStore  # noqa: E402
 
 
@@ -47,6 +49,15 @@ class WorkloadAuthorityIntegration(unittest.IsolatedAsyncioTestCase):
         )
         self.store.bind_principals(self.principals)
         self.blobs = BlobStore(self.store, root / "objects", retention_seconds=None)
+
+        self.http = WorkloadServer(("127.0.0.1", 0), self.store, self.principals, blobs=self.blobs)
+        self.http_thread = Thread(target=self.http.serve_forever, daemon=True)
+        self.http_thread.start()
+        def stop_http():
+            self.http.shutdown()
+            self.http_thread.join(timeout=5)
+            self.http.server_close()
+        self.addCleanup(stop_http)
 
         self.ingress = FakeIngress(str(root / "ingress.sock"), realm_epoch=7)
         await self.ingress.start()
@@ -93,6 +104,19 @@ class WorkloadAuthorityIntegration(unittest.IsolatedAsyncioTestCase):
         if not self.decision_path.exists():
             return []
         return [json.loads(line) for line in self.decision_path.read_text().splitlines() if line]
+
+    def fetch_result(self, job_id, *, token="a" * 40):
+        request = Request(f"http://127.0.0.1:{self.http.server_port}/v1/workloads/jobs/{job_id}/result",
+                          headers={"Authorization": f"Bearer {token}"})
+        with urlopen(request, timeout=5) as response:
+            raw = response.read()
+        return json.loads(raw), raw
+
+    def fetch_job(self, job_id, *, token="a" * 40):
+        request = Request(f"http://127.0.0.1:{self.http.server_port}/v1/workloads/jobs/{job_id}",
+                          headers={"Authorization": f"Bearer {token}"})
+        with urlopen(request, timeout=5) as response:
+            return json.loads(response.read())
 
     async def test_factory_resolves_owner_cas_and_replay_reaches_one_real_admission(self):
         self.blobs.put("caller-a", hashlib.sha256(INPUT).hexdigest(), len(INPUT), io.BytesIO(INPUT))
@@ -220,6 +244,62 @@ class WorkloadAuthorityIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(again, cancelled)
         self.assertEqual(self.runtime.workload.ledger.get("intent-cancel")["partial"], cancelled)
         self.assertEqual(self.store.get("caller-a", job_id)["state"], "cancelled")
+
+    async def test_success_partial_and_authenticated_result_manifest_share_receipt_metadata(self):
+        self.blobs.put("caller-a", hashlib.sha256(INPUT).hexdigest(), len(INPUT), io.BytesIO(INPUT))
+        ref = self.reference(json.dumps(self.request()).encode())
+        admitted = await self.submit("intent-success", ref)
+        self.assertEqual(admitted["body"]["status"], "admitted")
+        job_id = self.runtime.workload.ledger.get("intent-success")["job"]
+
+        self.store.register("fixture-worker", "fixture-host", "boot-success", {
+            "capacity": {"cpu": 2}, "available": {"cpu": 2}, "labels": {},
+            "handlers": ["test.v1"], "ready": True,
+        })
+        assignment = self.store.claim("fixture-worker", "boot-success", job_id=job_id)
+        self.assertEqual(assignment["job_id"], job_id)
+        completed = self.store.complete(
+            "fixture-worker", "boot-success", assignment["attempt_id"], assignment["fence"],
+            input_digest=hashlib.sha256(INPUT).hexdigest(), outcome="succeeded",
+            result={"exit_code": 0, "resources": {"oom_kill": 0, "pids_max_events": 0}, "artifacts": []})
+        self.assertEqual(completed["state"], "succeeded")
+
+        self.assertTrue(await self.ingress.settle(
+            lambda: self.ingress.bodies(CONTRACT, "intent-success")[-1]["status"] == "done"))
+        partial = self.ingress.bodies(CONTRACT, "intent-success")[-1]
+        self.assertEqual((partial["attribution"], partial["reason"]),
+                         ("workload", "handler_exit_code_zero"))
+        output = partial["output"]
+        manifest, raw = self.fetch_result(job_id)
+        self.assertEqual(output["digest"], "sha256:" + hashlib.sha256(raw).hexdigest())
+        self.assertEqual(output["bytes"], len(raw))
+        self.assertEqual((manifest["attribution"], manifest["reason"]),
+                         (partial["attribution"], partial["reason"]))
+        self.assertEqual((manifest["result"]["attribution"], manifest["result"]["reason"]),
+                         (partial["attribution"], partial["reason"]))
+        self.assertEqual(manifest["cause"], completed["cause"])
+        self.assertEqual(manifest["cause"]["evidence"], {
+            "exit_code": 0, "oom_kill": 0, "pids_max_events": 0})
+
+        # Recreate a pre-metadata committed row without replaying worker completion.
+        legacy_completion = {key: value for key, value in completed["result"].items()
+                             if key not in ("attribution", "reason", "cause")}
+        with self.store.transaction() as db:
+            db.execute("UPDATE attempts SET result=? WHERE id=?",
+                       (encode(legacy_completion, self.store.limits.record_bytes), assignment["attempt_id"]))
+            db.execute("UPDATE jobs SET result=?,reason=NULL,cause=? WHERE id=?",
+                       (encode(legacy_completion, self.store.limits.record_bytes),
+                        encode({"kind": "succeeded", "retry": "no", "evidence": {}}, 2048), job_id))
+        legacy_job = self.fetch_job(job_id)
+        legacy_manifest, legacy_raw = self.fetch_result(job_id)
+        self.assertEqual((legacy_job["result"]["attribution"], legacy_job["result"]["reason"]),
+                         (partial["attribution"], partial["reason"]))
+        self.assertEqual((legacy_job["cause"]["kind"], legacy_job["cause"]["evidence"]),
+                         ("succeeded", {"exit_code": 0, "oom_kill": 0, "pids_max_events": 0}))
+        self.assertEqual((legacy_manifest["attribution"], legacy_manifest["reason"]),
+                         (legacy_job["result"]["attribution"], legacy_job["result"]["reason"]))
+        self.assertEqual(legacy_manifest["cause"], legacy_job["cause"])
+        self.assertEqual(output["digest"], "sha256:" + hashlib.sha256(legacy_raw).hexdigest())
 
 
 if __name__ == "__main__":

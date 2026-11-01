@@ -1,9 +1,9 @@
 """`harmony.workload/1`: the fleet broker as the one-per-realm authority for workload intents.
 
 The ladder is `submitted < admitted < placed < running < done`; the terminals other than `done` are
-`refused`, `failed`, `cancelled` and `expired`. EVERY non-`done` terminal partial carries an
-`attribution` (`workload` | `infra` | `unknown`) and a `reason`. The service mints every status partial
-after submit; the requester may only submit and (before `placed`) cancel.
+`refused`, `failed`, `cancelled` and `expired`. EVERY terminal partial carries an `attribution`
+(`workload` | `infra` | `unknown`) and a `reason`. The service mints every status partial after submit;
+the requester may only submit and (before `placed`) cancel.
 
 What it does NOT do (design D3, non-goals): it decides nothing about admission or placement. The
 existing workload authority (`livestack_node.workloads`, a `WorkloadStore`) admits, places and runs;
@@ -17,7 +17,8 @@ Mapping of the store's job onto the ladder (`rung_of`) and of its terminal cause
   queued (no attempt)                        -> admitted
   running, no progress reported yet          -> placed
   running, progress reported                 -> running
-  succeeded                                  -> done
+  succeeded with a validated exit receipt    -> done, attribution workload, reason handler_exit_code_zero
+  succeeded without usable receipt           -> done, attribution unknown, reason success_evidence_unavailable
   failed / infrastructure, lease expired,    -> failed,   attribution infra   (worker stopped renewing)
     worker lost, transport lost, other
     infrastructure outcome
@@ -53,6 +54,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from .common import (MAX_BODY_BYTES, REFUSAL_FORBIDDEN_FIELD, REFUSAL_OVERSIZE, REFUSAL_SCHEMA_INVALID,
                      REFUSAL_STEP_NOT_ALLOWED, REFUSAL_UNAVAILABLE, Clock, bounded, body_size, optional)
+from ..workloads.causes import completion_success_metadata
 from ..workloads.result_manifest import workload_result_manifest
 
 REANNOUNCE_PACE_S = 0.025  # <= 40 frames/s: the ingress budget is 50/s per connection
@@ -131,6 +133,11 @@ def rung_of(job: Optional[dict]) -> Tuple[str, Dict[str, Any]]:
     if state == "running":
         return ("running" if job.get("progress") is not None else "placed"), extra
     if state == "succeeded":
+        completion = job.get("result") if isinstance(job.get("result"), dict) else {}
+        spec = job.get("spec") if isinstance(job.get("spec"), dict) else {}
+        metadata = completion_success_metadata(completion, need=spec.get("need"))
+        extra["attribution"] = metadata["attribution"]
+        extra["reason"] = bounded(metadata["reason"], 240)
         output = job.get("output")
         if isinstance(output, dict):
             extra["output"] = output

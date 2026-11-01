@@ -44,3 +44,9 @@ whether or not it already had attempts.
 The capabilities response SHALL state the bounds and exceptions; a running job's view SHALL carry
 `wall_clock {limit_seconds, source, elapsed_seconds, remaining_seconds}`; the roster SHALL warn
 `attempt_near_wall_clock_bound` and `queue_near_age_bound` at 80% of a bound.
+
+#### Scenario: Bounds and approaching deadlines are visible
+- **WHEN** a caller reads capabilities, a running job view, and the roster for a job approaching its configured bound
+- **THEN** capabilities state the authority-wide bounds and any named per-handler exceptions
+- **AND** the running job view carries its limit, source, elapsed time, and remaining time
+- **AND** the roster emits the corresponding near-bound warning when the attempt or queue age reaches 80% of its limit

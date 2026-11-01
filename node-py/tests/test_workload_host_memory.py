@@ -50,8 +50,11 @@ def learn(store, handler, peak, key='learn', need=10*GIB, outcome='succeeded', f
     store.submit('owner', dict(version=1, key=key, handler=handler, input_digest='a'*64,
                                need=dict(cpu=6, memory_bytes=need, disk_bytes=16*GIB)))
     a = store.claim('teacher', 'boot1')
+    resources = {field: peak}
+    if outcome == 'succeeded':
+        resources.update(oom_kill=0, pids_max_events=0)
     store.complete('teacher', 'boot1', a['attempt_id'], a['fence'], input_digest='a'*64, outcome=outcome,
-                   result=dict(exit_code=0 if outcome == 'succeeded' else 75, artifacts=[], resources={field: peak}))
+                   result=dict(exit_code=0 if outcome == 'succeeded' else 75, artifacts=[], resources=resources))
     # The teacher leaves the roster so it cannot take the jobs under test.
     store.register('teacher', 'elsewhere', 'boot1', dict(
         capacity=dict(cpu=1), available=dict(cpu=1), labels={}, handlers=[handler], ready=False))
@@ -295,7 +298,8 @@ def test_the_mean_is_not_a_peak(store):
         a = store.claim('teacher', 'boot1')
         store.complete('teacher', 'boot1', a['attempt_id'], a['fence'], input_digest='a'*64, outcome='succeeded',
                        result=dict(exit_code=0, artifacts=[], resources=dict(
-                           cpu_usage_usec=1_000_000, execution_seconds=10.0, memory_peak_bytes=GIB)))
+                           cpu_usage_usec=1_000_000, execution_seconds=10.0, memory_peak_bytes=GIB,
+                           oom_kill=0, pids_max_events=0)))
     register(store, 'w', host(20*GIB), cpu=2)
     plain(store, 'one', 10*GIB)
     assert store.claim('w', 'boot1') is None

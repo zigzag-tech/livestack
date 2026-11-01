@@ -41,6 +41,13 @@ identity, current attempt identity and compiler grant, plus the handler result w
 and sizes. Artifact bytes remain in the existing content store. The reference digest covers this exact
 manifest, so clients can fetch it once after `done` and verify artifacts without polling job status.
 
+A successful terminal outcome is attributed to `workload` only when the stored supervisor receipt contains
+integer `exit_code: 0` and explicit integer zero values for `resources.oom_kill` and
+`resources.pids_max_events`. The authority preserves that evidence with reason `handler_exit_code_zero` on
+the `done` partial and exposes the same metadata through the ordinary job view and hash-bound result manifest.
+A historical success without a complete receipt remains `unknown` with reason `success_evidence_unavailable`;
+state alone does not prove a clean exit.
+
 The `harmony.jobs/1` reader obtains its capped recent-job set with one SQLite checkout and one query. A cold
 replay spaces publications at 40 frames per second, below the daemon ingress limit.
 

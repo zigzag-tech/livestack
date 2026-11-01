@@ -221,18 +221,17 @@ def test_a_stale_route_is_retried_once_on_the_next_target():
         a.close(), b.close()
 
 
-def test_two_refusals_end_in_a_failure_that_names_both_attempts():
-    a, b = _Target([STALE]), _Target([("429", {"error": "busy"})])
+def test_queue_refusal_is_final_without_cold_retry():
+    a, b = _Target([("429", {"detail": {"error": "wait_budget_exceeded"}})]), _Target([("200", {"ok": 1})])
     try:
         async def go():
             attempts = []
-            with pytest.raises(fleet_route.RouteFailed) as e:
-                await _send((a.base, "warm"), lambda tried: (b.base, "cold"), attempts)
-            return e.value
-        err = _run(go())
-        assert err.status == 429
-        assert [x["target"] for x in err.attempts] == [a.base, b.base]
-        assert len(a.got) == len(b.got) == 1            # one retry, not a loop
+            resp, client = await _send((a.base, "warm"), lambda tried: (b.base, "cold"), attempts)
+            assert resp.status_code == 429
+            await resp.aclose(); await client.aclose()
+            assert len(attempts) == 1
+        _run(go())
+        assert len(a.got) == 1 and b.got == []
     finally:
         a.close(), b.close()
 
@@ -444,16 +443,23 @@ def test_a_resident_unit_that_no_longer_meets_the_requirement_is_unsatisfied(srv
     assert node["admit"] == 0 and node["ensure"] == 0
 
 
-def test_a_saturated_unit_is_refused_not_queued(srv, node, monkeypatch):
+def test_a_saturated_unit_with_zero_wait_budget_gets_final_admission_refusal(srv, node, monkeypatch):
     monkeypatch.setattr(type(srv.manager), "resident", property(lambda self: {"llm_title"}))
     monkeypatch.setattr(srv, "_vllm_up", lambda timeout=2.0, name="": True)
-    monkeypatch.setattr(srv._QUEUES, "try_acquire", lambda *a: None)
-    acquired = []
-    monkeypatch.setattr(srv._QUEUES, "acquire", lambda *a: acquired.append(a))
-    with _client(srv) as c:
-        r = _chat(c, WARM)
-    assert r.status_code == 409 and r.json()["reason"] == "saturated"
-    assert acquired == []                                       # never waits in line
+    from unit_queue import Queues
+    monkeypatch.setattr(srv, "_QUEUES", Queues())
+    slots = [srv._QUEUES.try_acquire("llm_title", srv._max_concurrent("llm_title"))
+             for _ in range(srv._max_concurrent("llm_title"))]
+    try:
+        with _client(srv) as c:
+            r = c.post("/v1/chat/completions", headers=WARM,
+                       json={"model": "local", "harmony_max_wait_s": 0,
+                             "messages": [{"role": "user", "content": "hi"}]})
+        assert r.status_code == 429
+        assert r.json()["detail"]["error"] == "wait_budget_exceeded"
+        assert node["admit"] == 0 and node["ensure"] == 0
+    finally:
+        for slot in slots: slot.release()
 
 
 def test_a_warm_routed_request_is_served_by_the_resident_unit(srv, node, monkeypatch):

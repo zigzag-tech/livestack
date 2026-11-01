@@ -270,3 +270,9 @@ def test_legacy_attributes_do_not_satisfy_a_new_base_revision_requirement():
     legacy = {"class": "imagegen", "task": "text_to_image", "model": "Qwen/Qwen-Image-2512"}
     assert satisfies(legacy, {"class": "imagegen", "task": "text_to_image"})
     assert not satisfies(legacy, {"revision": BASE_REVISION})
+
+
+def test_a_refusal_carries_the_planners_own_reason():
+    refused = {"granted": False, "reason": "the planner could not place it on any device", "defer_reason": "qwen_image_2512 needs 20.9 GB, gpu1 has 20.1 GB free"}
+    with pytest.raises(RuntimeError, match="could not place it on any device: qwen_image_2512 needs 20.9 GB"):
+        resolve_worker({}, refused, {})

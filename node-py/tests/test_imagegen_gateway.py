@@ -349,3 +349,25 @@ def test_exclusive_gateway_leases_cover_fleet_and_worker_calls(setup, monkeypatc
         "device-lease-" + device.rsplit("/", 1)[-1] for device in device_ids], separators=(",", ":"))]
     harmony = response.json()["harmony"]
     assert [grant["device_id"] for grant in harmony["device_grants"]] == device_ids
+
+
+def test_a_request_that_can_wait_says_so_to_harmony_and_is_asked_once(setup):
+    config, calls, call = setup
+    client = TestClient(create_app(config, call=call))
+    body = {"prompt": "x", "harmony_requires": {"params_b>=": 20}, "harmony_wait_s": 60}
+    assert client.post("/v1/images/generations", json=body, headers={"Authorization": "Bearer worker-secret"}).status_code == 200
+    admits = [c for c in calls if c[2] == "/admit"]
+    assert len(admits) == 1 and admits[0][3]["wait_s"] == 60
+
+
+def test_a_request_that_runs_out_of_patience_gets_the_planners_reason(setup):
+    config, _, real = setup
+    def call(base, method, path, body=None, token=None, timeout=None):
+        if path == "/admit":
+            return {"granted": False, "reason": "the planner could not place it on any device", "defer_reason": "no unit satisfies"}
+        return real(base, method, path, body, token)
+    client = TestClient(create_app(config, call=call))
+    body = {"prompt": "x", "harmony_requires": {"params_b>=": 20}, "harmony_wait_s": 12}
+    r = client.post("/v1/images/generations", json=body, headers={"Authorization": "Bearer worker-secret"})
+    assert r.status_code == 503 and "no unit satisfies" in r.json()["detail"]
+    assert client.post("/v1/images/generations", json={**body, "harmony_wait_s": -1}, headers={"Authorization": "Bearer worker-secret"}).status_code == 400

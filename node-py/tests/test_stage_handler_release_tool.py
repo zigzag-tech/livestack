@@ -19,14 +19,16 @@ TOOL = Path(__file__).resolve().parents[2]/'tools'/'stage-handler-release.py'
 ADMIN = 'o'*32
 
 
-def package(tmp_path):
+def package(tmp_path, extra_files=0):
     source = b"print('hi')\n"
     manifest = dict(format='harmony-handler-package.v1', handler_id='native.v1', release_version='1.0.0',
         execution_contract=1, payload_schema='x.request.v1', result_schema='x.result.v1', platform='linux',
         architecture={'x86_64': 'x86_64', 'amd64': 'x86_64', 'aarch64': 'aarch64', 'arm64': 'arm64'}[platform.machine().lower()],
         backend='native', runtime_id='python3', entrypoint='handler.py', arguments=[], outputs=['out.json'],
         infrastructure_outputs=[], infrastructure_exit_codes=[75],
-        files=[dict(path='handler.py', mode=0o444, size=len(source), sha256=hashlib.sha256(source).hexdigest())])
+        files=sorted([dict(path='handler.py', mode=0o444, size=len(source), sha256=hashlib.sha256(source).hexdigest())] +
+                     [dict(path=f'data/file-{n:05d}.txt', mode=0o444, size=len(source), sha256=hashlib.sha256(source).hexdigest())
+                      for n in range(extra_files)], key=lambda item: item['path']))
     release = validate_manifest(manifest)['release_digest']
     directory = tmp_path/'pkg'/'handler-packages'
     directory.mkdir(parents=True)
@@ -36,6 +38,11 @@ def package(tmp_path):
         info.mode, info.size, info.mtime, info.uid, info.gid = 0o444, len(source), 0, 0, 0
         info.uname = info.gname = ''
         tar.addfile(info, io.BytesIO(source))
+        for n in range(extra_files):
+            info = tarfile.TarInfo(f'data/file-{n:05d}.txt')
+            info.mode, info.size, info.mtime, info.uid, info.gid = 0o444, len(source), 0, 0, 0
+            info.uname = info.gname = ''
+            tar.addfile(info, io.BytesIO(source))
     descriptor = directory/'h.json'
     descriptor.write_text(json.dumps(dict(handler_id='native.v1', release_digest=release,
         archive_digest=hashlib.sha256(archive.read_bytes()).hexdigest(),
@@ -80,3 +87,14 @@ def test_a_handler_outside_the_policy_is_refused_by_name(authority, tmp_path):
     server.handler_registry.replace_policy(dict(handlers={}), server.store.handlers)
     result = run(config, descriptor)
     assert result.returncode == 1 and 'handler_release_policy_refused' in result.stderr
+
+
+def test_a_manifest_larger_than_the_ordinary_record_limit_stages_within_the_manifest_limit(authority, tmp_path):
+    """A real application bundle (node_modules, a player, fonts) lists hundreds of files; its manifest is
+    well over the 64 KiB ordinary request limit but far under the registry's 4 MiB manifest limit."""
+    server, config = authority
+    descriptor, release = package(tmp_path, extra_files=700)
+    assert len(descriptor.read_bytes()) > 65536
+    result = run(config, descriptor, '--activate')
+    assert result.returncode == 0, result.stderr
+    assert server.handler_registry.status()['defaults'] == {'native.v1': release}

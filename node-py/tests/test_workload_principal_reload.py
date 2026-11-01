@@ -172,7 +172,8 @@ def test_operator_drain_preserves_live_handoff_and_resumes_same_boot(authority):
     artifact = InputTransfer(client).put(source, assignment=attempt)
     complete = client.request('worker/complete', dict(identity,
         input_digest=authority.digest, outcome='succeeded',
-        result={'artifacts': [dict(name='handoff', **artifact)]}))
+        result={'exit_code': 0, 'resources': {'oom_kill': 0, 'pids_max_events': 0},
+                'artifacts': [dict(name='handoff', **artifact)]}))
     assert complete['state'] == 'succeeded'
     assert authority.client(A).get(second['id'])['state'] == 'queued'
     client.request('worker/report', REPORT)
@@ -496,7 +497,8 @@ def test_one_worker_serves_jobs_of_two_owners_without_leaking_either(authority):
         assert assignment['spec']['labels']['requested_by'] == requester[assignment['job_id']]
         claimed.append(assignment['job_id'])
         w.request('worker/complete', dict(boot='b1', attempt_id=assignment['attempt_id'], fence=assignment['fence'],
-            input_digest=authority.digest, outcome='succeeded', result={}))
+            input_digest=authority.digest, outcome='succeeded',
+            result={'exit_code': 0, 'resources': {'oom_kill': 0, 'pids_max_events': 0}}))
     assert sorted(claimed) == sorted(requester)
     assert authority.client(A).get(first['id'])['state'] == 'succeeded'
     assert authority.client(B).get(second['id'])['state'] == 'succeeded'
