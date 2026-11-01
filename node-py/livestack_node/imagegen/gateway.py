@@ -5,7 +5,7 @@ import json
 import os
 import secrets
 import urllib.error
-from contextlib import ExitStack, contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Body, Header, HTTPException
@@ -77,6 +77,54 @@ def _verify_guided_result(request, actual, target):
             raise RuntimeError(f"worker generation setting mismatch: {key}")
 
 
+def _exclusive_units(config):
+    """Per-unit whole-device lease profiles: {unit kind: {broker, owner, device_ids,
+    min_free_bytes, wait_timeout_s, ttl_seconds}}. Units not listed run without leases."""
+    units = config.get("exclusive_units", {})
+    if not isinstance(units, dict):
+        raise ValueError("exclusive_units must map unit kinds to lease profiles")
+    for kind, profile in units.items():
+        if not isinstance(profile, dict):
+            raise ValueError(f"exclusive_units.{kind} must be a configuration object")
+        for key in ("broker", "owner"):
+            if not isinstance(profile.get(key), str) or not profile[key]:
+                raise ValueError(f"exclusive_units.{kind}.{key} must be a nonempty string")
+        device_ids = profile.get("device_ids")
+        if (not isinstance(device_ids, list) or not device_ids
+                or any(not isinstance(value, str) or not value for value in device_ids)
+                or len(set(device_ids)) != len(device_ids)):
+            raise ValueError(f"exclusive_units.{kind}.device_ids must be a nonempty unique list")
+        minimum = profile.get("min_free_bytes")
+        if isinstance(minimum, dict):
+            if (set(minimum) != set(device_ids)
+                    or any(type(value) is not int or value <= 0 for value in minimum.values())):
+                raise ValueError(f"exclusive_units.{kind}.min_free_bytes must positively cover every device_id")
+        elif type(minimum) is not int or minimum <= 0:
+            raise ValueError(f"exclusive_units.{kind}.min_free_bytes must be positive per device")
+        for key in ("wait_timeout_s", "ttl_seconds"):
+            value = profile.get(key, 240 if key == "wait_timeout_s" else 120)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+                raise ValueError(f"exclusive_units.{kind}.{key} must be positive")
+    return units
+
+
+@contextmanager
+def _device_leases(profile, token):
+    if profile is None:
+        yield []
+        return
+    with ExitStack() as stack:
+        minimum = profile["min_free_bytes"]
+        yield [stack.enter_context(exclusive_lease(
+            "imagegen", owner_id=profile["owner"], token=token, brokers=[profile["broker"]],
+            device_id=device_id,
+            min_free_bytes=minimum[device_id] if isinstance(minimum, dict) else minimum,
+            wait_timeout_s=profile.get("wait_timeout_s", 240),
+            ttl_seconds=profile.get("ttl_seconds", 120),
+            request_id=f"image-gateway-{secrets.token_hex(16)}"))
+            for device_id in profile["device_ids"]]
+
+
 def create_app(config=None, call=json_call):
     config = config or json.loads(Path(os.environ["HARMONY_IMAGE_GATEWAY_CONFIG"]).read_text())
     worker_token = Path(config["worker_token_file"]).read_text().strip()
@@ -84,28 +132,7 @@ def create_app(config=None, call=json_call):
     request_timeout = config.get("request_timeout_s", 1200)
     if isinstance(request_timeout, bool) or not isinstance(request_timeout, (int, float)) or request_timeout <= 0:
         raise ValueError("request_timeout_s must be positive")
-    device_options = config.get("exclusive_device")
-    device_ids = config.get("device_ids", [config["device_id"]] if config.get("device_id") else [])
-    if (not isinstance(device_ids, list)
-            or any(not isinstance(value, str) or not value for value in device_ids)
-            or len(set(device_ids)) != len(device_ids)):
-        raise ValueError("device_ids must be a unique list")
-    if device_options is not None:
-        if not device_ids:
-            raise ValueError("exclusive_device requires at least one device_id")
-        if not isinstance(device_options, dict):
-            raise ValueError("exclusive_device must be a configuration object")
-        minimum = device_options.get("min_free_bytes")
-        if isinstance(minimum, dict):
-            if (set(minimum) != set(device_ids)
-                    or any(type(value) is not int or value <= 0 for value in minimum.values())):
-                raise ValueError("exclusive_device.min_free_bytes must positively cover every device_id")
-        elif type(minimum) is not int or minimum <= 0:
-            raise ValueError("exclusive_device.min_free_bytes must be positive per device")
-        for key in ("wait_timeout_s", "ttl_seconds"):
-            value = device_options.get(key, 240 if key == "wait_timeout_s" else 120)
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-                raise ValueError(f"exclusive_device.{key} must be positive")
+    exclusive_units = _exclusive_units(config)
     app = FastAPI(title="Harmony requirement-routed image generation")
 
     @app.get("/health")
@@ -120,45 +147,30 @@ def create_app(config=None, call=json_call):
             request = validate_request(body)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
-        lease_context = lambda: nullcontext([])
-        if device_options is not None:
-            def lease_context():
-                with ExitStack() as stack:
-                    grants = []
-                    minimum = device_options["min_free_bytes"]
-                    for device_id in device_ids:
-                        grants.append(stack.enter_context(exclusive_lease(
-                            "imagegen", owner_id=config.get("owner", "acct_harmony-image"),
-                            token=fleet_token, brokers=[config["fleet"]], device_id=device_id,
-                            min_free_bytes=minimum.get(device_id) if isinstance(minimum, dict) else minimum,
-                            wait_timeout_s=device_options.get("wait_timeout_s", 240),
-                            ttl_seconds=device_options.get("ttl_seconds", 120),
-                            request_id=f"image-gateway-{secrets.token_hex(16)}")))
-                    yield grants
-            lease_context = contextmanager(lease_context)
         try:
-            # Observe-only fleet planner picks the unit and device; the worker's
+            # The observe-only fleet planner picks the unit and device; the worker's
             # local broker is the only authority allowed to load or evict there.
-            with lease_context() as device_grants:
-                # One primary placement can hold several same-owner device leases.
-                # A request may say it can wait (`harmony_wait_s`): Harmony then holds it in its own queue until
-                # the planner can place it (a unit still registering, a device being cleared), and answers with the
-                # planner's last reason if the window runs out first. The call outlives the window, so the HTTP
-                # timeout is the window plus a margin.
-                wait_s = request["harmony_wait_s"]
-                admission = {
-                    "requires": request["harmony_requires"],
-                    "wait_s": wait_s,
-                    "owner": config.get("owner", "acct_harmony-image"),
-                }
-                lease_ids = [grant["lease_id"] for grant in device_grants]
-                if lease_ids:
-                    admission["device_lease_ids"] = lease_ids
-                grant = call(config["fleet"], "POST", "/admit", admission, token=fleet_token,
-                             timeout=wait_s + 60)
-                view = call(config["fleet"], "GET", "/fleet")
-                target = resolve_worker(view, grant, request["harmony_requires"])
-                endpoint = target["peer"].removesuffix("/livestack")
+            # A request may say it can wait (`harmony_wait_s`): Harmony then holds it in its own queue until
+            # the planner can place it (a unit still registering, a device being cleared), and answers with the
+            # planner's last reason if the window runs out first. The call outlives the window, so the HTTP
+            # timeout is the window plus a margin.
+            wait_s = request["harmony_wait_s"]
+            admission = {
+                "requires": request["harmony_requires"],
+                "wait_s": wait_s,
+                "owner": config.get("owner", "acct_harmony-image"),
+            }
+            grant = call(config["fleet"], "POST", "/admit", admission, token=fleet_token,
+                         timeout=wait_s + 60)
+            view = call(config["fleet"], "GET", "/fleet")
+            target = resolve_worker(view, grant, request["harmony_requires"])
+            endpoint = target["peer"].removesuffix("/livestack")
+            profile = exclusive_units.get(grant["kind"])
+            # A unit declared exclusive runs only while its host broker holds
+            # whole-device leases for it: Harmony drains the other tenants itself
+            # (never an external stop), and other admissions wait for the release.
+            with _device_leases(profile, fleet_token) as device_grants:
+                lease_ids = [lease["lease_id"] for lease in device_grants]
                 lease_evidence = json.dumps(lease_ids, separators=(",", ":")) if lease_ids else None
                 result = call(endpoint, "POST", "/v1/images/generations", request,
                               token=worker_token, timeout=request_timeout,
@@ -170,7 +182,7 @@ def create_app(config=None, call=json_call):
                     raise RuntimeError("worker result does not match the fleet grant")
                 if lease_ids and actual.get("device_leases") != [
                         {"lease_id": value, "device_id": device}
-                        for value, device in zip(lease_ids, device_ids)]:
+                        for value, device in zip(lease_ids, profile["device_ids"])]:
                     raise RuntimeError("worker result does not match every device lease")
                 if request["harmony_requires"].get("depth_guide") is True:
                     _verify_guided_result(request, actual, target)

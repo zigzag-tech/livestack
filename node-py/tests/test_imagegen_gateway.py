@@ -292,14 +292,16 @@ def test_guided_worker_failure_is_not_retried_or_substituted(setup):
 
 
 @pytest.mark.parametrize("device_ids", [["tower/gpu1"], ["tower/gpu1", "tower/gpu0"]])
-def test_exclusive_gateway_leases_cover_fleet_and_worker_calls(setup, monkeypatch, device_ids):
+def test_exclusive_unit_leases_cover_the_worker_call(setup, monkeypatch, device_ids):
     config, _, _ = setup
-    config.update(device_id=device_ids[0], device_ids=device_ids, owner="harmony-image", exclusive_device={
+    config["exclusive_units"] = {"qwen_image_2512_depth_nf4": {
+        "broker": "http://host-broker", "owner": "harmony-image", "device_ids": device_ids,
         "min_free_bytes": {device: 4_000_000_000 + index * 17_000_000_000
                            for index, device in enumerate(device_ids)},
         "wait_timeout_s": 240,
         "ttl_seconds": 120,
-    })
+    }}
+    profile = config["exclusive_units"]["qwen_image_2512_depth_nf4"]
     body = _guided_body()
     original_call = _guided_call(body, [])
     events = []
@@ -323,9 +325,10 @@ def test_exclusive_gateway_leases_cover_fleet_and_worker_calls(setup, monkeypatc
         return Lease(kwargs["device_id"])
 
     def call(base, method, path, request=None, token=None, timeout=None, lease_id=None):
+        events.append(path)
         if path == "/admit":
-            assert request["device_lease_ids"] == [
-                "device-lease-" + device.rsplit("/", 1)[-1] for device in device_ids]
+            # Observe-only fleet admission picks the unit before any lease exists.
+            assert "device_lease_ids" not in request
         result = original_call(base, method, path, request, token=token)
         if path == "/v1/images/generations":
             forwarded.append(lease_id)
@@ -342,13 +345,46 @@ def test_exclusive_gateway_leases_cover_fleet_and_worker_calls(setup, monkeypatc
     acquisitions = [event[1] for event in events if isinstance(event, tuple)]
     assert [event["device_id"] for event in acquisitions] == device_ids
     assert [event["min_free_bytes"] for event in acquisitions] == [
-        config["exclusive_device"]["min_free_bytes"][device] for device in device_ids]
-    assert all(event["brokers"] == [config["fleet"]] and event["owner_id"] == "harmony-image"
+        profile["min_free_bytes"][device] for device in device_ids]
+    assert all(event["brokers"] == ["http://host-broker"] and event["owner_id"] == "harmony-image"
                for event in acquisitions)
+    order = [event if isinstance(event, str) else "acquire" for event in events]
+    assert order.index("/fleet") < order.index("acquire")
+    assert order.index("/v1/images/generations") < order.index("exit:" + device_ids[0])
     assert forwarded == [json.dumps([
         "device-lease-" + device.rsplit("/", 1)[-1] for device in device_ids], separators=(",", ":"))]
     harmony = response.json()["harmony"]
     assert [grant["device_id"] for grant in harmony["device_grants"]] == device_ids
+
+
+def test_units_without_a_lease_profile_never_take_device_leases(setup, monkeypatch):
+    config, calls, call = setup
+    config["exclusive_units"] = {"sdxl_depth_int8": {
+        "broker": "http://host-broker", "owner": "harmony-image",
+        "device_ids": ["tower/gpu1"], "min_free_bytes": 1}}
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("a lease-free unit must not lease a device")
+
+    monkeypatch.setattr("livestack_node.imagegen.gateway.exclusive_lease", refuse)
+    response = TestClient(create_app(config, call=call)).post(
+        "/v1/images/generations", json={"prompt": "x", "harmony_requires": {"params_b>=": 20}},
+        headers={"Authorization": "Bearer worker-secret"})
+    assert response.status_code == 200, response.text
+    assert "device_grants" not in response.json()["harmony"]
+
+
+@pytest.mark.parametrize("profile", [
+    {"owner": "harmony-image", "device_ids": ["a"], "min_free_bytes": 1},
+    {"broker": "http://b", "owner": "harmony-image", "device_ids": [], "min_free_bytes": 1},
+    {"broker": "http://b", "owner": "harmony-image", "device_ids": ["a"], "min_free_bytes": {"b": 1}},
+    {"broker": "http://b", "owner": "harmony-image", "device_ids": ["a"], "min_free_bytes": 1, "ttl_seconds": 0},
+])
+def test_malformed_lease_profiles_are_refused_at_startup(setup, profile):
+    config, _, call = setup
+    config["exclusive_units"] = {"unit": profile}
+    with pytest.raises(ValueError):
+        create_app(config, call=call)
 
 
 def test_a_request_that_can_wait_says_so_to_harmony_and_is_asked_once(setup):
