@@ -19,16 +19,15 @@ Those assumptions are valid for unguided generation but unsafe for depth-guided 
 - The Livestack contract validates bounded payload mechanics. The worker owns decoding and actual pipeline use. The gateway and Histo TypeScript CLI independently verify returned guide evidence and actual pixels.
 - The host broker remains the sole residency authority. A `depth_guide` attribute is a capability constraint, not permission to load directly. Depth/quantization variants use distinct unit kinds so broker aggregation cannot merge them with ordinary workers.
 - Worker configuration owns model snapshot locations, expected ControlNet revision/config hash/weight hash, and declared footprint. No request may select an arbitrary local path or trigger a download.
-- Real qualification uses a dedicated test hostd/gateway/worker with no production peers and a credential-free dispatch handoff. Production broker and wrapper paths are refused.
+- Superseded 2026-11-02: depth generation runs only as Harmony-managed units registered with the production host broker and requested through the production ingress (see `node-py/examples/harmony-image/README.md`, "Production depth units"). The dedicated test hostd/gateway/worker lifecycle was removed: production Harmony could not see its GPU memory and polytts/polyasr/LLM tenants were refused for 15+ minutes.
 - Existing planner, lease, and result ledgers remain authoritative. The worker result adds guide/control evidence; it does not create a parallel routing ledger or claim that grants contain guide fields.
 
 ## Qualification lifecycle and memory
 
 - Exact pairs are `qwen_image_2512_depth_nf4` with NF4 and `qwen_image_2512_depth_int8` with INT8. Crossed pairs are refused before `attach` and again at runtime construction.
-- `qualify-depth.py up --config <owner-variant.json> --output <handoff>` starts a dedicated apply-mode hostd, worker, then gateway with fresh run-scoped credentials and no production peers. `smoke --dispatch <handoff> --request <request.json>` uses an explicit tracked NF4 or INT8 request and `depth-smoke-guide.png` SHA-256. `down --dispatch <handoff>` stops only identity-checked test processes.
+- `qualify-depth.py --request <request.json> --guide <depth.png> --out <image.png>` posts one guided request to the production ingress and verifies the PNG, lease, grant and depth evidence. It has no lifecycle; the `up`/`smoke`/`down` commands are gone.
 - Startup verifies ControlNet config class/hash and weight bytes/hash. Single-device declared footprint is base `resident_bytes + weight_bytes`; split mode charges only the configured primary `resident_bytes` to the primary placement and covers secondary devices with their own leases/budgets. Runtime allocation/reservation measurements still update residency. INT8 plus BF16 ControlNet may exceed 24 GB and must not silently substitute NF4.
 - `fleet_token_file`, when configured, is passed to local `admit` without being logged. Absent configuration preserves unauthenticated admission. Gateway grant checks remain kind/device only; generation settings are checked against the selected unit's advertised attributes.
-- The dispatch handoff carries isolated URLs, model/config revisions, generation settings, runtime versions, wrapper/config/code hashes, and process identities. Resume fingerprints exclude timestamps, grants, PIDs, run-specific ports, and token paths.
 
 ## Test environment and rollback
 
