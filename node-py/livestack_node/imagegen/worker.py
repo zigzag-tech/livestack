@@ -185,6 +185,8 @@ def create_app(config: dict | None = None, runtime_factory=ImageRuntime):
                      text_encoder="CPU FP32" if config["model"] == SDXL_IMAGE_MODEL else "CPU INT8")
     if config["model"] == FLUX2_IMAGE_MODEL:
         attrs["quantization_backend"] = config.get("quantization_backend", "bitsandbytes")
+        # The FLUX.2 runtime also inpaints (flux2.py), so its unit offers both tasks and the specialist `inpaint`.
+        attrs.update(task=["text_to_image", "inpaint"], inpaint=True)
     if offload is not None:
         attrs["offload"] = offload
     if depth is not None:
