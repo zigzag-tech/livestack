@@ -690,7 +690,11 @@ def _unit_satisfies(u: Unit, requires: Mapping[str, object]) -> bool:
 # xc-tower-ubuntu 2026-09-19: a generic {class: llm} request was placed on
 # `ocr_ovis2`, which stopped the resident 27B to do it. Naming the unit still
 # works — an explicit choice never passes through candidate selection.
-_SPECIALIST_ONLY_ATTRS = ("ocr",)
+# `depth_guide`: a depth-ControlNet image unit needs a control image and whole-
+# device leases; generic image demand ({"params_b>=": 20}) matching it on
+# `class`/`params_b` would place a 32B FLUX.2 run holding both GPUs for ~25 min
+# where a Qwen text-to-image was meant.
+_SPECIALIST_ONLY_ATTRS = ("ocr", "depth_guide")
 
 
 def _specialist_only(u: Unit, requires: Mapping[str, object]) -> bool:
