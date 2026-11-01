@@ -843,6 +843,28 @@ A job read back carries `cause` once terminal (`kind` from a closed list, `retry
 Reference: `_plans/durable-workloads.md` ("work scopes, typed causes and structured blockers"); code `workloads/causes.py`,
 `workloads/store.py` (`close_scope`, `_job_verdict`), `workloads/placement.py` (`_wait`).
 
+### Attempt progress (contract v1; openspec `attempt-progress-reporting` in the benchday repo)
+
+A handler writes `$HARMONY_OUTPUT/progress.json` (Python `lease_helper.report_progress`, Node
+`workloads/lease_helper.mjs` `reportProgress`; `supervised/` wraps both, see its `SPEC.md`):
+`{phase, done?, total?, unit?, fraction?, message?, beat?}` (`message` one line <= 200 bytes, `detail` is the legacy alias,
+`beat` a liveness counter). The authority stamps every time itself. A job read carries:
+
+- `progress`: the document plus `reported_at`, `changed_at`, `phase_started_at` (authority clock) and `dropped`
+  (reports coalesced by the per-attempt token bucket). Absent until the first report.
+- `attempt`: `started_at`, `worker`, `handler`, `fence`, and `activity_at`, the worker-owned liveness: the authority time of
+  the last heartbeat that saw the attempt's `*.log` files grow (no text, no sizes). Independent of the handler.
+- `progress_verdict` (running jobs with a silence limit): `{state: ok|overdue, mode: report|enforce, source: spec|contract,
+  limit_seconds, quiet_seconds, activity_quiet_seconds?}`. Read-side only; in `enforce` the same limit fails the job
+  (`stalled_no_progress`).
+
+Authority config `attempt_progress` (restart-only): `strict_contract` (a handler release with no `progress_contract` is
+refused to stage; off by default and the registry logs the ones that lack it), `deadline_mode` (what a submitted
+`progress_deadline_seconds` does; `enforce` today's behaviour), `handlers.<id>` (contract and `deadline_mode`, overriding the
+release manifest's `progress_contract`). A limit derived from a contract's `max_silence_seconds` only reports unless the handler is
+flipped to `enforce`. Token bucket per attempt: `max_per_period` (default 12 per 60 s); reports over budget are held (latest wins)
+and published when a token returns. Conformance: `tools/check-supervised-handlers.py` (ratchet allowlist).
+
 ## Live workload handler releases (initial E2E rollout shipped 2026-10-04)
 
 The durable workload authority and worker remain responsible for admission,
@@ -1024,26 +1046,40 @@ Limits and status:
 ## Engine units — a non-vLLM engine on a card (Strata / flash_next)
 
 An **engine unit** runs a model through an engine that is not `vllm serve`:
-one that sizes its own cache to whatever VRAM is free, keeps its weights in
-host RAM, and refuses to start into a busy card. The first one is
-**Strata** (`architectds/Strata`, llama.cpp lineage) serving
-**Qwen3.8-Flash-Next** on xc-tower-ubuntu card 1. What makes it safe to share a
-host is three declarations and one seam:
+one that keeps its weights in host RAM and sizes its own cache to the VRAM it
+finds. The first one is **Strata** (`Niko1221/Strata`, llama.cpp lineage)
+serving **Qwen3.8-Flash-Next** — on xc-tower-ubuntu card 1, and since
+2026-10-18 on zz-whitby's one card. A Strata unit is DECLARED BY WHAT IT NEEDS,
+like any other unit — no whole-device claim:
 
 | Declaration | Where | What it buys |
 |---|---|---|
 | `"engine": "strata"` | units file | the adapter that drives it (`examples/harmony-llm/engines/strata.py`); never a requestable attribute |
-| `"exclusive_device": true` | units file | charged the WHOLE card; admitted only when every other tenant can leave; its grant is "all of it" |
-| `"ram_gb": 45` | units file | the host-RAM pin, planned against the HOST pool (one pool behind every card) — planning only its VRAM is how a host swaps |
+| `"footprint_gb": 21` | units file | the VRAM it holds. The adapter launches the engine with `--vram-reserve-mib` = free VRAM − min(grant, footprint), cache on `auto`, so the engine holds what it is charged (measured on zz-whitby: 21.17 GiB for 21 declared) |
+| `"ram_gb": 45` | units file | the host-RAM claim, planned against the HOST pool (one pool behind every card) — planning only its VRAM is how a host swaps. Measured on zz-whitby (0.1.45, Q2_0, 2 slots, 128K): 38.4 GiB resident = peak, 33.1 anonymous + ~5.2 shared, 0 locked |
+| `"attributes": {"max_concurrent": 2}` | units file | the engine's batch slots: the Strata adapter writes it as `"parallel"` into the sized config, overriding setup's value, so Harmony's admission and the engine's slots cannot disagree; Harmony's unit queue holds the rest |
+
+`exclusive_device` still exists in the planner for a unit that truly takes a
+whole card, but a Strata unit no longer needs it: it is planned by its size, so
+the planner evicts the card's other tenants because the space is needed (on
+zz-whitby: polyasr and polytts, both UNPINNED), not because a flag said so.
 
 **Launch.** The adapter runs the repo's own server, byte-for-byte what
 `run-<model>.sh` runs: `<root>/.venv/bin/python <root>/serve/server.py --engine
-strata --config strata-*.json --port N --host 127.0.0.1` + `extra_args`. The
-engine command line lives INSIDE the config (setup writes it). Strata sizes its
-cache to the free VRAM itself — no budget translation, no `--gpu-memory-utilization`.
-Pin the engine to ONE card with `--gpu <nvidia-smi index>` in `extra_args`
-(the setup's default is BOTH cards split), or the planner's one-card claim is a
-lie.
+strata --config <sized copy> --port N --host 127.0.0.1` + `extra_args`. The
+engine command line lives INSIDE the config (setup writes it), so the adapter
+writes a sized sibling, `harmony-<unit>.strata.json`, with `--expert-cache auto
+--vram-reserve-mib R` replacing setup's. Auto, not an explicit `--expert-cache
+N`: auto re-checks its fit once the slots are written, an explicit size does
+not, and Strata measured a cache at 0 MiB free decoding 7x slower. Pin the
+engine to ONE card with `--gpu <nvidia-smi index>` in `extra_args` (the setup's
+default is BOTH cards split), or the planner's one-card claim is a lie.
+
+**Measure.** The VRAM and RAM are held by the ENGINE, a child of the serve
+server; `measure()` reads the whole process family (NVML per pid, /proc). It
+read the server's pid alone — and was handed `None` — so the footprint was
+`unknown`, which the planner charges as the whole device: a whole-card claim by
+accident.
 
 **The rev is pinned**, in `<root>/STRATA_VERSION` (what `engine_rev` reports to
 the ledger record of every load). The runbook:
@@ -1052,10 +1088,20 @@ the ledger record of every load). The runbook:
 diskreap auto --force          # the install wants ~70 GB of disk; stop below 100 GB free
 cd ~/strata/strata && git checkout <rev> && echo <rev> > STRATA_VERSION
 NVCC_PREPEND_FLAGS="-ccbin /usr/bin/g++-14" CUDAHOSTCXX=/usr/bin/g++-14 \
-  ./setup.sh --yes --family qwen --model Q2_0 --context 131072 --vision none \
+  ./setup.sh --yes --family qwen --model Q2_0 --context 131072 --vision gpu \
              --no-start --port 8191
 ./strata.sh verify             # the API shape: tool_calls, usage, stream usage
 ```
+
+**Images are a setup choice, not a units-file one.** Flash-Next reads
+pictures through a separate 0.9 GB encoder that setup installs only when
+asked (`--vision gpu`; `--yes` alone leaves it OUT). The adapter publishes
+`vision` from the run config (a `"vision"` section whose encoder files exist),
+so a host set up text-only says `vision: false` truthfully and a units-file
+`"vision": true` cannot paper over it. The GPU encoder is held inside the
+unit's VRAM footprint (it starts before the engine, whose auto expert cache
+then sizes to what is left), so text decodes a few % slower (Strata
+DETAILS.md, "Images").
 
 The gcc-14 drop-in is this host's (`HARMONY.md` fp8 note above): CUDA 12.9's
 nvcc cannot identify itself under gcc 15. `--no-start` because Harmony owns the
@@ -1081,6 +1127,275 @@ goes; the override lives disabled as
 `/etc/systemd/system/harmony-llm.service.d/80-coload.conf.disabled-20261002`.
 
 Design record + what this does NOT fix: `_plans/harmony-engine-units.md`.
+
+## Speed as evidence — a caller states how fast, the fleet answers where (2026-10-18)
+
+A caller says how fast it needs an answer, never which host:
+
+```jsonc
+{"model": "require:class=llm,context_len>=131072",
+ "harmony_prefer": [{"metric": "llm.decode_tok_s", "direction": "max"}], ...}
+```
+
+**Measured, per unit, per host.** Every response the harmony-llm proxy relays
+is timed (`livestack_node.demand_log.UsageTail.speed`): the engine's own
+`timings.predicted_per_second` when it reports one (Strata does), else a stream
+timed from its first text to its last chunk; a body that arrived all at once
+gets no rate. First token is measured from when the request reached the engine,
+so a queue wait is not the engine's latency. `SpeedStats` keeps SOLO and
+BATCHED samples apart — a batched engine decodes each stream slower, and
+averaging the two describes neither — and publishes medians with real sample
+counts. Each demand record carries `decode_tok_s`, `first_token_ms`,
+`speed_source`, `in_flight`; a restart re-reads them, so evidence survives.
+
+**Published per unit.** The node's capability `inventory` is
+`{"units": {<unit>: <prefer inventory>}, "host": <hardware>}`; the fleet
+broker carries it verbatim. `fleet_rank` reads the evidence of the best unit
+that satisfies the requirement (`_unit_evidence`), not one number per node — a
+node with a fast 27B and a slow 125B has no single decode rate. `host` (CPU,
+RAM, GPU, driver) explains a difference; it is never a ranking input.
+
+**Warmth meets the requirement.** `warm_for(node, kind, require)`: a resident
+unit that cannot serve the request does not make its node warm for it. Before
+this, xc-tower-ubuntu's resident 27B (24K window) made the tower "warm" for a
+131K request, so warm-first would have sent it there to evict the 27B while an
+idle host could load the right unit.
+
+**Routed across hosts.** A request whose `prefer` names `llm.decode_tok_s` or
+`llm.first_token_ms` is ranked over the fleet broker's `/fleet` view and
+forwarded to the winner, body as asked, `x-harmony-routed` set (the receiver
+serves; it never re-routes). A request with no speed preference also travels
+when nothing resident and unsaturated here can serve it — see "Regional
+routing" below. Fleet broker: `HARMONY_LLM_FLEET_URL`, else the last of two
+`LIVESTACK_BROKER_URL` entries.
+
+**Cold against warm, priced by finish time.** Warm-first alone sent a speed
+request to a slow host that kept its model over a fast host that had unloaded
+it, however long the answer. For a speed preference `fleet_rank.rank` now
+prices every target as `load (cold only) + first token + tokens / decode`
+(`finish_estimate`), tokens being the request's `max_completion_tokens` /
+`max_tokens`, else 512 (`fleet_route.DEFAULT_EXPECTED_TOKENS`). A cold target
+that finishes sooner than EVERY warm one joins them, and once one is in the
+running the order is the finish time. Load times are MEASURED: each engine
+start to serving is appended to `~/.cache/livestack/unit-loads.jsonl`
+(`demand_log.LoadTimes`, env `HARMONY_UNIT_LOADS_FILE`) and published as
+`llm.load_s` (median of the last 10); the unit's declared `reload_cost` is the
+prior, marked `declared`. Silence keeps warm-first: a cold target with no
+load or decode figure, or any warm target with no decode figure, is not
+priced at all. Every held-back cold row says why (`finish≈14.6s with its 12.0s
+load, not sooner than warm 7.3s`). Worked numbers: a 4,096-token answer is
+~47 s on a cold whitby (12 s load, 116 tok/s) against ~100 s on a warm tower
+(41 tok/s), so it goes to whitby; a 300-token answer is 14.6 s against 7.3 s,
+so it stays on the tower. What it does not price yet: the requests that follow
+onto a unit once it is loaded (one answer only), what an eviction on the cold
+host costs that unit's users, and a warm target's queue wait.
+
+**Dry run.** `POST /harmony/route` on any harmony-llm node takes the chat body
+you would send and returns the resolved requirement, this node's units with
+their receipts and measured speed, and the fleet ranking with every
+candidate's reason — loading and forwarding nothing.
+
+```sh
+curl -s -X POST http://100.64.0.27:8188/harmony/route -H content-type:application/json \
+  -d '{"model":"require:class=llm,context_len>=131072",
+       "harmony_prefer":[{"metric":"llm.decode_tok_s","direction":"max"}],"messages":[]}'
+```
+
+**Measured on the pilot** (zz-whitby: Ryzen 7 9800X3D, DDR5, RTX 3090,
+Strata 0.1.45 Q2_0, 2 slots; engine-reported decode, 300-token answers):
+
+| concurrent | per-request decode | aggregate | first token |
+|---|---|---|---|
+| 1 | 100–135 tok/s | 111–117 | 0.17 s (2 s on a cold first request) |
+| 2 | 64–67 tok/s each | 121–123 | 0.18–0.41 s |
+| 3 | two at ~64, the third queued (`max_concurrent: 2`) then ~120 | 106–119 | 3rd: ~5 s in Harmony's queue |
+
+Two slots buy ~+8% aggregate over one: batching here is for not making the
+second caller WAIT, not for throughput.
+
+xc-tower-ubuntu's Flash-Next (i5-9400, older Strata e416ba57) logged a median
+41 tok/s solo decode over 14 requests (max 64) — about 2.5x slower, with two
+confounds stated: a different Strata version and longer prompts (~2.8K). This
+is the difference the ranking now sees as evidence rather than a declaration.
+
+**The event loop must stay free while admission waits.** `admit()`, the
+same-host holder lookup and the fleet fetch are blocking HTTP and ran ON the
+node's loop; the broker planning an admission probes this node's
+`/livestack/residence`, which could not answer, so each admission cost a 5.0 s
+probe timeout during which every stream the node relayed stopped being read
+and its engine stopped decoding (zz-whitby: a 3-way burst lost ~5 s on its two
+running requests, 12.4 s → 7.6 s once fixed). They run on a worker thread now
+(`_off_loop`); `tests/test_harmony_llm_loop_blocking.py` reproduces it.
+
+**Not done yet** (honest list): a hard speed floor (`require llm.decode_tok_s
+>= 60`, evidence-gated, with a rule for "no evidence"); cold-start priors from
+hardware for a unit with no samples yet; the scheduler (`choose_target`)
+weighing throughput. (The host-RAM ledger the first version of this list named
+is the next section.)
+
+## Regional routing — a view that expires, a target that validates (2026-10-18)
+
+openspec `harmony-regional-llm-routing`. Requests used to take one of two paths:
+serve here, or ask this host's broker. A requester far from the fleet (a Nanjing
+machine, a laptop, a hub) paid a round trip across the ocean before every
+request. Now the requester can **route itself**: rank the fleet from its own
+region over a cached view, and send straight to the serving node.
+
+**Not a grant.** The cached fleet view (`/fleet`, 10 s TTL, up to
+`HARMONY_LLM_VIEW_STALE_MAX_S`=300 s stale when the fleet broker is unreachable,
+then local / same-host only) is advice. The **target validates**:
+
+| `x-harmony-routed: <router-id>;expect=warm\|cold;v=<n>` | the target does |
+|---|---|
+| `expect=warm` | serves from a resident, satisfying, unsaturated unit it holds a slot on (pinned against idle eviction while held), else `409 {"error":"route_stale","reason":"not_resident\|unsatisfied\|saturated"}` **before any body byte**; never admits, loads or forwards |
+| `expect=cold` or no `expect` | today's behaviour: may admit and load |
+| `v` newer than the target supports | `409 {"error":"route_contract","router_version":…,"supported":…}` |
+
+The router retries **once** on `route_stale`, a connection failure before the
+response, or `429` (a `not_resident` target is dropped from its cached view until
+the next refresh); never after a body byte has reached the caller. A failure
+answers `{"error":"route_failed","attempts":[…]}` naming every attempt.
+
+**Eligibility before readiness.** `fleet_rank.rank(allow_regions=…)` applies the
+region policy *before* warm/cold: a warm node in a forbidden region no longer
+suppresses a cold node in an allowed one. Ranking uses the caller's vantage
+(`region:<LIVESTACK_NODE_REGION>`), not the fleet broker's. Region policy comes
+from the principal's allowance (`"regions": ["na"]` in the fleet principal table)
+which a request may narrow with `harmony_regions` and never widen (403 naming
+region and allowance); no allowance is unrestricted. A node with no declared
+region is excluded when a policy is in force.
+
+**What routes.** A speed preference (`trigger: speed`), or no resident,
+unsaturated, in-policy local unit able to serve it (`trigger: no_warm_local`). A
+request this node can serve warm never looks at the fleet. Peer shortcut on the
+request path is **same-host and resident only**; warm-on-start keeps the wider
+"resident or loading" holder check.
+
+**One request id.** `x-request-id` is minted by the first node that routes a
+request and carried unchanged: the router's route record
+(`<host>-routes.jsonl`, `role: router`, with `trigger`, `vantage`, `regions`,
+`regions_source`, `expect`, `view_age_s`, `view_stale`, `contract_version` and
+each `attempts[]` entry) and the target's demand record (`request_id`,
+`routed_by`, `outcome: route_stale` with `route_stale: <reason>`) join on it.
+
+**The router.** `node-py/examples/harmony-llm/router.py` is a facade with zero
+units, bound to `127.0.0.1:8188` on every machine that sends requests (GPU hosts
+get none). Callers set `base_url` to `http://127.0.0.1:8188/v1`. It never
+registers as a fleet node (so it can never be a target), holds no fleet token
+(caller `Authorization`/`X-Harmony-Owner` pass through unchanged), and parses the
+request language with the same code as the facade (`request_language.py`).
+`GET /health` reports `revision`, `region`, `fleet_url`, `contract`;
+`POST /harmony/route` is the dry run. It routes `chat/completions`, `completions`,
+`embeddings` (by the facade's one-embedding-space rule: a need met by embedders of
+different models is a 400) and `classifier` (its `model` names the adapter, e.g.
+`jemm`, which becomes the requirement `adapter.jemm` so only a node whose units
+declare it can be chosen). Other `/v1` endpoints are node-specific and refused with a
+404. Callers must **state a need, not a unit name**: a router cannot know which node
+holds `llm_title`.
+
+**Per-account isolation.** A router keeps no per-account state and shares only the
+fleet's topology (the cached view). Each request's `Authorization` and
+`X-Harmony-Owner` reach the target exactly as that caller sent them (the router adds
+none and strips none), its route record carries that caller's `principal` and
+`owner_ns` (never a token), and quota, auth and ledger attribution stay where they
+were: at the target and the fleet broker, per owner. Region allowances are per
+principal (`regions` in the principal table).
+
+Installed (2026-10-18, revision `bde0f54e`, plus public-tokyo from a source archive; xc-tower-ubuntu's fleetd also runs main since then, with `mesh_route_py` on its PYTHONPATH): lappy-bellinzona, xc-mac-studio (na);
+zz-tower0, zz-tower2, xc-win-1 WSL (cn; WSL2's mirrored loopback means the same
+router answers Windows-native callers). Regional fleet brokers: `na` is
+livestack-fleetd on xc-tower-ubuntu:8801; `cn` is `harmony-fleetd` on
+zz-tower2:8801 (installed by the same rollout; zz-tower0's `livestack-fleetd-cn` is a
+separate token-rollout rehearsal). There is no cn LLM node yet, so cn routers rank na
+nodes cross-region, distance `unknown` (no measured cn link rows).
+
+Dry runs, as shipped (`POST /harmony/route`, body `require:class=llm,params_b>=100`):
+
+```
+tower (na entry, 27B resident, flash_next only on whitby):
+  decision=forward trigger=no_warm_local chosen=http://100.64.0.27:8188 expect=warm
+  vantage=region:na regions=[] regions_source=none view_age_s=0.0 contract_version=1
+zz-tower2 router (cn entry):
+  decision=forward trigger=router chosen=http://100.64.0.27:8188 expect=warm
+  vantage=region:cn regions=[] regions_source=none view_age_s=1.0 contract_version=1
+```
+
+Forced stale route (verified on the real fleet): a warm-routed request straight to the
+tower for a unit it does not hold answers `409 route_stale/not_resident` and loads
+nothing; a router fed a stale view claiming the tower held it retried onto whitby
+(`attempts: route_stale/not_resident, ok`) and the two records joined on `x-request-id`.
+
+```sh
+scripts/harmony-router-rollout.sh                 # install/update every requester machine
+scripts/harmony-router-rollout.sh --status        # revision, region, dry run per host
+scripts/harmony-router-rollout.sh lappy-bellinzona --rev <sha>
+```
+
+Routers are pinned to the revision the serving nodes report on `/health` (both
+must run the same routed-request contract), **not** to what repo-sync last
+pulled: after redeploying a GPU node, run the rollout. It installs a dedicated
+worktree + venv under `~/.local/share/harmony-router`, a systemd user unit
+(launchd agent on macOS), starts it, and fails the host unless a dry run names a
+target. Idempotent: a second run says "no changes". One fleet broker per region
+(same code); `HARMONY_LLM_FLEET_URL` names the region's.
+
+**Not in this change** (stated so it is not assumed): fairness between routers
+(each ranks independently; a burst from two requesters can land on one node and the
+target's queue/429 is the backstop), a global rate view, and negative caching
+beyond dropping a stale target until the next refresh.
+
+## One host-RAM ledger for both planners — drain, don't kill (2026-10-18)
+
+Two planners place work on one machine's RAM: the host broker (model servers;
+a Strata unit declares `ram_gb` 45) and workload placement (task attempts; an
+e2e attempt may grow to 10 GiB). Each saw the other only by guessing. The
+broker's host pool was MemAvailable − reserve, so an attempt promised 10 GiB
+that had touched 2 left 8 GiB that LOOKED free. Placement charged a model
+server its learned peak whenever its units were cold, so a Strata nobody was
+using held ~40 GB of zz-whitby's 60 and its task workers sat idle.
+
+`livestack_node/host_ledger.py` is one ledger per machine: small JSON entries
+in `~/.local/state/livestack/host-ledger/` (`LIVESTACK_HOST_LEDGER_DIR`), each
+refreshed by its writer and lapsing when the writer dies.
+
+| entry | written by | means | read by |
+|---|---|---|---|
+| `attempt <id>` | the workload worker running it (every report) | this attempt may grow to `claim_bytes` (its cgroup cap) | host broker: pool −= Σ max(0, claim − cgroup current) |
+| `service <cgroup>` | a node whose units declare `ram_bytes` (`serve.attach`) | the host broker plans this cgroup's host RAM | worker `HostView`: no learned-peak charge while cold |
+| `load <unit>` | host broker: `waiting` when `/admit` defers it for host memory, `loading` while it loads | this much RAM is about to be taken | worker `HostView`: charged in full |
+
+**The policy, the owner's decision:** a model load DRAINS, it never kills. A
+load refused for host memory is written `waiting`; workers then report it as
+the planned service's outstanding transient (`peak_bytes = current +
+outstanding`, `resident = outstanding == 0` — the fields the deployed authority
+already accepts), so placement stops admitting new attempts there; running
+attempts finish normally; the load then fits. harmony-llm keeps asking while
+the defer names host memory (`HARMONY_LLM_DRAIN_WAIT_S`, default 900 s, poll
+`HARMONY_LLM_DRAIN_POLL_S` 5 s) — asking is what keeps the `waiting` entry
+alive, and giving up lets it lapse. The wait is on the demand record
+(`drain_ms`) and in the refusal the caller gets if the bound is reached.
+
+**Rollout in any order.** Old workers write no attempts, so the broker
+subtracts nothing (today's behaviour); without a `service` entry workers keep
+charging the learned peak (today's behaviour); the authority sees only fields
+it already validates. Measured arithmetic, zz-whitby (57 GiB available, 8 GiB
+reserve, Strata's learned peak 38): cold Strata left attempts 11 GiB before,
+49 GiB after; a waiting 45 GiB load leaves 4, so a 9 GiB e2e attempt waits.
+Tests: `tests/test_host_ledger.py`, `tests/test_host_ledger_drain.py`,
+`tests/test_harmony_llm_loop_blocking.py` (the node's drain wait).
+
+**Verified live on zz-whitby (2026-10-18, broker and workers on f4fb816a):** a
+real probe attempt's claim appeared on the ledger; with Strata cold, the
+headroom the workers report for attempts went from ~7.5 GiB to ~40 GiB; a Strata
+load published `load flash_next 45 GiB (loading)` and the entry cleared when the
+unit became resident (12 s). NOT yet exercised live: a load actually DEFERRED by
+attempts' claims (the drain itself) — unit-tested against the real broker and
+HostView, but not staged on the pilot, where it would have blocked the live E2E
+queue.
+
+What it does NOT do: preempt a running attempt (by design); reserve ahead of
+demand (a cold model holds nothing until a request needs it); span machines
+(each ledger is one host's — placement across hosts is still the fleet's).
 
 ## Scheduler policy — the target choice is a tunable, recorded policy
 
@@ -1335,7 +1650,7 @@ up on stays filtered, however empty its card.
 | `LIVESTACK_CAPABILITY_TTL` | `15` | seconds a node's `/capability` is cached for `/fleet`. That surface is polled, and a probe to Nanjing costs 0.5-1.5 s |
 | `LIVESTACK_PEER_SUSPECT_SECONDS` | `45` | unseen before a peer is `suspect` |
 | `LIVESTACK_PEER_MIA_SECONDS` | `600` | unseen before a peer is `mia` |
-| `LIVESTACK_PEER_PRUNE_SECONDS` | — | unset ⇒ pruning DISABLED (delete-shaped bound) |
+| `LIVESTACK_PEER_PRUNE_SECONDS` | `86400` | unseen before a peer is forgotten — registered peers **and seeds**, so a moved/renamed node (or a loopback seed shadowing a mesh-registered one) stops sitting in `/fleet` as `mia`. Logged at start and per prune (`pruned absent peer: <key> (<source>, unseen <s>s)`). A pruned seed returns at the next broker start; a registered peer when it announces. `0`/`off` disables; any other non-positive or non-numeric value refuses to start |
 | `LIVESTACK_DEVICE_ID` | derived | this node's device id; derived from the CUDA device UUID / MLX when unset |
 | `LIVESTACK_NODE_HOST` | `127.0.0.1` | read by NODES: the address a node announces ITSELF at. Loopback is right for a broker on the same machine and wrong for one anywhere else — an unreachable registration sits `suspect` forever with a connect error, looking like a dead node rather than a bad address. A node cannot infer this, so it is the operator's to state |
 | `LIVESTACK_BROKER_URL` | `http://127.0.0.1:8799` | read by NODES: a **comma list** of brokers to report for duty to. One entry is a node and its host broker; two is the fleet case. An announce reaches all of them and fails only if none answered — a fleet broker being down must not make a node look unregistered to the broker that arbitrates its card |
@@ -1369,11 +1684,16 @@ up on stays filtered, however empty its card.
 - **xc-tower-ubuntu** (2x RTX 3090): `livestack-hostd.service` (:8799) brokers
   `polyasr` x2 + `polytts` + `harmony-llm`; **`livestack-fleetd.service` (:8801)**
   is the fleet broker — observe-only, peers on all three GPU hosts.
-- **zz-joe** (build/test host): `harmony-embed-cpu.service` (:8220) — the CPU
-  embedding node (`kind=embed`, device `zz-joe/cpu`), announced to its own
-  hostd and the fleet broker. It was deployed serving MiniLM
-  (`HARMONY_EMBED_MODELS`); per the one-embedder decision it is to be replaced by
-  `serve_gemma` (deployment is operator work, not done by the code change).
+- **zz-whitby** (Ryzen 7 9800X3D, 60 GB DDR5, RTX 3090, driver 595): `livestack-hostd`
+  (:8799) brokers `polyasr` + `polytts` + `harmony-llm` (:8188, one unit: `flash_next`
+  through Strata 0.1.45 at `~/strata/strata`, cold until a request needs it). Units file
+  `/etc/harmony/llm-units.json`; the pilot runs livestack branch `agent/strata-vram-budget`
+  from `~/worktrees/livestack/strata-vram-budget` (`PYTHONPATH` in the unit).
+- **zz-joe** (build/test host): `harmony-embed-gemma.service` (:8230) — the fleet's
+  one embedder (`serve_gemma`, EmbeddingGemma 2, `kind=embed`). The MiniLM node
+  (`harmony-embed-cpu.service`, :8220) was stopped and its unit, env file and model
+  files deleted on 2026-10-12; its `residence` entry may still appear in the
+  livestack-workloads worker config until an operator removes it.
 
 ## Tests
 
@@ -1394,7 +1714,7 @@ OFF unless `HARMONY_STREAMS=1` (optional `HARMONY_STREAMS_SOCKET`, `HARMONY_STRE
 |---|---|---|
 | `harmony.host/1` | state, one-per-host | each host broker: unit-declaration digest, mtime, `drift` against the digest a reviewed deployment recorded |
 | `harmony.fleet/1`, `harmony.jobs/1` | state | the fleet broker (`harmony.fleet/1` is one-per-realm; a second broker is refused `authority_conflict`) |
-| `harmony.workload/1` | durable intent, one-per-realm | the fleet broker; `submitted < admitted < placed < running < done`, every terminal carries `attribution` (`workload` / `infra` / `unknown`) and a reason, durable in the claim ledger |
+| `harmony.workload/1` | durable intent, one-per-realm | Livestack's WorkloadStore authority; `submitted < admitted < placed < running < done`, every terminal carries `attribution` (`workload` / `infra` / `unknown`) and a reason, durable in the intent ledger |
 | `harmony.request/1` | durable intent, one-per-host | host and fleet brokers; `require`/`prefer` in the request language, refusals `requirement_inexpressible` (names the clause) vs `unsatisfiable` |
 
 Operator flow: a native producer first runs in SHADOW beside the Stage 1 adapter (the daemon compares field by field
@@ -1402,9 +1722,20 @@ and counts), then the operator lists the contract in `<daemon state dir>/streams
 (see benchday `docs/native-service-producers.md`). Inference calls, audio and job payloads stay on their own
 transports; a partial refers to large bodies only by reference `{ref, digest, bytes, media}`.
 
-Known gaps: `harmony.workload/1` submit is refused `spec_resolver_unconfigured` (attribution `infra`) until a
-`resolve_spec` hook turns a spec reference into a store request; the Stage 1 `harmony.fleet-source` adapter reads
-flat keys the live `/fleet` does not emit, so shadow divergence is expected until it is corrected (set
-`shadow_ignore` for the three rings, `degraded`, `degraded_truncated` and `host_id` meanwhile).
+`workloads.service` passes its recovered `WorkloadStore` and `server.blobs` to
+`start_for_workload_authority`; the factory's default resolver reads a bounded
+JSON request from the authenticated principal's CAS namespace and verifies
+`application/json`, the one-MiB limit, exact size, SHA-256, UTF-8 and object
+shape before normal strict WorkloadStore admission. The stream intent ID is the
+durable WorkloadStore request key. A source-matched framed-ingress integration
+test covers real stores, replay, strict refusals, attribution, cancellation and
+the WorkloadStore decision ledger. The older
+`spec_resolver_unconfigured` gap note is no longer current. HTTP remains the
+bounded CAS data plane; it is not a workload-job submission or outcome path.
+
+The Stage 1 `harmony.fleet-source` adapter reads flat keys the live `/fleet`
+does not emit, so shadow divergence is expected until it is corrected (set
+`shadow_ignore` for the three rings, `degraded`, `degraded_truncated` and
+`host_id` meanwhile).
 `/peers`, `/status`, `/fleet`, `/fleet/rank`, `/fleet/operations` and `/fleet/ledger` still have callers
 (benchday's poll-mode roster and `fleet_rank`, fleetd) and are NOT removed from hostd's listener.

@@ -20,12 +20,15 @@ import time
 import uuid
 from urllib.error import HTTPError
 
+from ..host_ledger import HostLedger
 from ..hostview import HostView, cgroup_nonreclaimable
 from .archive import relative_path, unpack
 from . import docker_cache
+from . import log_excerpt
 from . import dependency_cache
 from .docker_runtime import RuntimeCleanupRefused, remove_data
 from .client import WorkloadClient
+from .doors import parse_object_relay
 from . import cpu_admission as cpu_signals
 from .cpu_admission import CpuAdmission
 from .resource_usage import sample as sample_resources, filesystem_used, unit_evidence, merge_evidence, CpuPeak
@@ -96,12 +99,23 @@ def transfer_byte_limit(config):
     return value
 
 
+# Stall-watchdog limits (stall_watchdog.py): how long the main thread may stay in a
+# phase without announcing the next one. Each exceeds the longest bounded work the phase
+# does (the download budget is 3600 s), so only a wedge reaches them.
+STALL_STEP_SECONDS = 600
+STALL_TRANSFER_SECONDS = 3600 + 300
+STALL_MATERIALIZE_SECONDS = 1800
+STALL_RUNNING_SECONDS = 300
+STALL_HANDOFF_SECONDS = 1800
+
+
 class WorkloadWorker:
     # Match the authority's object bound without widening input/downloads.
     MAX_HANDLER_OUTPUT_BYTES = 8 * 1024**3
 
     def __init__(self, config):
         self.config = config
+        self.watchdog = None  # set by worker_service.main; tests and one-shot callers run without
         self.client = WorkloadClient(config['authority'], config['token'], edge_key=config.get('edge_key'))
         self.journal = WorkerJournal(config['state_dir'])
         # macOS has no cgroups: launchd jobs plus wrapper-enforced limits
@@ -160,15 +174,11 @@ class WorkloadWorker:
         # Keep that budget separate so control requests still fail fast.
         transfer_client = WorkloadClient(config['authority'], config['token'], timeout=transfer_timeout,
                                          edge_key=config.get('edge_key'))
-        spec = config.get('object_relay')
-        if spec is not None and (not isinstance(spec, dict) or not {'url', 'key'} <= set(spec) <= {'url', 'key', 'parallel'}
-                                 or not isinstance(spec.get('parallel', 4), int) or isinstance(spec.get('parallel', 4), bool)
-                                 or not 1 <= spec.get('parallel', 4) <= 8):
-            raise WorkloadError('object_relay requires url and key, and optionally parallel 1..8')
-        transfer_options = {} if spec is None else dict(
-            relay=WorkloadClient(spec['url'], config['token'], timeout=transfer_timeout,
-                                 edge_key=config.get('edge_key')),
-            relay_key=spec['key'], relay_parallel=spec.get('parallel', 4))
+        doors = parse_object_relay(config.get('object_relay'))
+        transfer_options = {} if not doors else dict(doors=[
+            dict(name=d.name, client=WorkloadClient(d.url, config['token'], timeout=transfer_timeout,
+                                                    edge_key=config.get('edge_key')),
+                 key=d.key, parallel=d.parallel) for d in doors])
         limit = transfer_byte_limit(config)
         logging.info('object transfer ceiling is %d bytes', limit)
         self.transfer = InputTransfer(transfer_client, max_bytes=limit, **transfer_options)
@@ -212,9 +222,18 @@ class WorkloadWorker:
         # The measured host every placement on it consults
         # (openspec/changes/host-memory-ledger). Model servers listed in
         # `host_services` are charged their learned host-RAM peak.
+        # The shared host-RAM ledger (host_ledger.py): this worker's running
+        # attempt is written there with its memory claim, so the host broker
+        # does not grant a model load into RAM an attempt has been promised;
+        # services the broker plans are read from it. Linux hosts only — the
+        # Mac/Windows VM workers do not share their guest's RAM with a broker.
+        self.host_ledger = (HostLedger(config.get('host_ledger_dir'))
+                            if not (self.windows or self.darwin) else None)
+        self._ledger_attempt = None  # (attempt id, claim bytes) while one runs
         self.host_view = HostView(services=config.get('host_services', []),
                                   peaks_path=Path(config['state_dir'])/'host-peaks-nonreclaimable.json',
-                                  reserve_bytes=config.get('memory_reserve_bytes', 1024**3))
+                                  reserve_bytes=config.get('memory_reserve_bytes', 1024**3),
+                                  ledger=self.host_ledger)
         # Workspaces that could not be removed: path -> last error text. They are
         # retried every step; a removal failure never blocks claiming/heartbeats.
         self.stuck_workspaces = {}
@@ -572,7 +591,18 @@ class WorkloadWorker:
         # Unknown (first sample) is charged as a fully busy host, never as idle.
         return (os.cpu_count() or 1) if busy is None else busy
 
+    # A claim outlives its last refresh by this long. Reports run every ~2 s idle
+    # and ~10 s busy; a worker that dies stops refreshing and its claim lapses.
+    LEDGER_TTL_S = 90.0
+
+    def _ledger_refresh(self):
+        if self.host_ledger is not None and self._ledger_attempt is not None:
+            attempt, claim = self._ledger_attempt
+            self.host_ledger.put('attempt', attempt, ttl_s=self.LEDGER_TTL_S,
+                                 claim_bytes=claim, worker=self.config.get('worker'))
+
     def report(self):
+        self._ledger_refresh()
         filesystem_bytes, filesystem_free = self._disk(self.workspace)
         if self.windows:
             # Not the Linux `host` block either: a WSL VM worker on the same
@@ -1060,6 +1090,12 @@ class WorkloadWorker:
                     continue
                 artifacts.append(dict(name=path.name, **artifact))
         completion['result']['artifacts'] = artifacts
+        if completion['outcome'] != 'succeeded':
+            # The decisive command.log line rides the completion so the authority's typed cause can name
+            # what broke (log_excerpt.py); None means the log was unreadable, and stays absent, not invented.
+            found = log_excerpt.excerpt(Path(output)/'command.log', completion['result'].get('exit_code'))
+            if found is not None:
+                completion['result']['log_excerpt'] = found
         completion.update(boot=assignment['boot'], attempt_id=assignment['attempt_id'], fence=assignment['fence'],
                           input_digest=assignment['spec']['input_digest'])
         if assignment.get('handler_release') is not None:
@@ -1072,7 +1108,12 @@ class WorkloadWorker:
                     'handler_id', 'release_digest', 'execution_contract', 'payload_schema', 'result_schema')})
         return completion
 
+    def _beat(self, phase, limit):
+        if self.watchdog is not None:
+            self.watchdog.beat(phase, limit)
+
     def step(self):
+        self._beat('step', STALL_STEP_SECONDS)
         if self.journal.read():
             self.reconciled = False
         if not self.reconciled:
@@ -1095,6 +1136,7 @@ class WorkloadWorker:
         assignment = self.client.request('worker/claim', {'boot':self.boot})['assignment']
         if assignment is None:
             return False
+        self._beat('execute', STALL_STEP_SECONDS)
         self.execute(assignment)
         return True
 
@@ -1216,17 +1258,26 @@ class WorkloadWorker:
         try:
             lease = LeaseKeeper(self.client, assignment, root/'lease',
                                 interval=self.config.get('lease_interval', 10),
-                                progress_path=output/'progress.json').start()
+                                progress_path=output/'progress.json',
+                                log_dirs=(output, output.parent)).start()
             spec = assignment['spec']
+            self._beat('prepare', STALL_STEP_SECONDS)
             handler = self._handler_for_assignment(assignment)
             handler_backend = handler.get('backend')
             need = spec['need']
             if need.get('cpu', 0) <= 0 or need.get('memory_bytes', 0) < 64*1024**2:
                 raise WorkloadError('native execution requires CPU and at least 64 MiB RAM')
+            # Promised from here on: the attempt may grow to its cap (the
+            # cgroup limit is `need`), and the host broker must not grant that
+            # RAM to a model load. Refreshed by every report; dropped below.
+            self._ledger_attempt = (attempt, int(need['memory_bytes']))
+            self._ledger_refresh()
+            self._beat('transfer', STALL_TRANSFER_SECONDS)
             transfer_started = time.monotonic()
             bundle = (self.input_cache.get(assignment) if self.input_cache else
                       self.transfer.get(spec['input_digest'], root/'input.tar', assignment=assignment))
             transfer_seconds += time.monotonic() - transfer_started
+            self._beat('materialize', STALL_MATERIALIZE_SECONDS)
             source_materialization_started = time.monotonic()
             unpack(bundle, root/'source', spec['input_digest'])
             if not self.input_cache:
@@ -1249,11 +1300,13 @@ class WorkloadWorker:
             objects.mkdir()
             for item in spec.get('input_objects', []):
                 destination = objects/item['name']
+                self._beat('transfer', STALL_TRANSFER_SECONDS)
                 transfer_started = time.monotonic()
                 received = self.transfer.get(item['digest'], destination, assignment=assignment)
                 transfer_seconds += time.monotonic() - transfer_started
                 if received.stat().st_size != item['size']:
                     raise WorkloadError('input object size mismatch', 409)
+            self._beat('materialize', STALL_MATERIALIZE_SECONDS)
             output.mkdir()
             (root/'request.json').write_text(encode(spec['payload']))
             env = self._attempt_env(assignment, root, output, objects, attempt, source_path=execution_cwd,
@@ -1299,6 +1352,7 @@ class WorkloadWorker:
             cpu_window = CpuPeak()
             disk_baseline, disk_sampled = (filesystem_used(execution_cwd) if attempt_cgroup is not None else None), 0.0
             while True:
+                self._beat('running', STALL_RUNNING_SECONDS)
                 if lease.lost.is_set():
                     raise WorkloadError('execution lease lost', 409)
                 if dependency_attempt is not None:
@@ -1382,9 +1436,15 @@ class WorkloadWorker:
                 completion['result']['resources'] = merge_evidence(None, resource_sample, unit)
         finally:
             # Never acknowledge completion or cleanup while owned work survives.
+            self._beat('cleanup', STALL_HANDOFF_SECONDS)
             cleanup_started = time.monotonic()
             try:
                 self._stop(attempt)
+                # The cgroup is gone with the unit: its RAM is back in
+                # MemAvailable, so the claim on the ledger ends here.
+                self._ledger_attempt = None
+                if self.host_ledger is not None:
+                    self.host_ledger.drop('attempt', attempt)
                 self._record_docker_cache(completion, handler_backend, output)
                 self._record_metrics(completion, execution_seconds)
                 self._record_dependency_cache(completion, dependency_attempt, root/'source', output)
@@ -1437,6 +1497,7 @@ class WorkloadWorker:
             status=None if started is None else
             'ok' if completion['outcome'] == 'succeeded' else 'failed',
             wall_s=None if started is None else time.monotonic() - started)
+        self._beat('handoff', STALL_HANDOFF_SECONDS)
         try:
             # The upload is idempotent by digest and the lease keeper is still
             # renewing: ride out a short authority outage instead of dropping
@@ -1445,6 +1506,8 @@ class WorkloadWorker:
                            keep_going=lambda: lease is None or not lease.lost.is_set())
             completion = self._attach_or_end_oversized(assignment, completion, output, attempt, **handoff)
             self.journal.write(dict(assignment=assignment, phase='completed', completion=completion))
+            if lease:
+                lease.begin_handoff()
             acknowledged = retry_transient(lambda: self.client.request('worker/complete', completion),
                             'attempt %s completion' % attempt, **handoff)
             if environment_prepared is not None and self.task_environments is not None and \

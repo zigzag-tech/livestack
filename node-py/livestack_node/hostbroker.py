@@ -445,6 +445,10 @@ class HostBroker:
         # rather than the planning that precedes it: the plan is the product.
         self.dispatch = dispatch
         self.ledger = ledger
+        # The shared HOST-RAM ledger (host_ledger.HostLedger) of THIS machine,
+        # set by the host broker that dispatches on it (never by a fleet
+        # broker): task attempts' claims come in, `ram_bytes` loads go out.
+        self.host_ledger = None
         self.emitter = emitter
         self.emitter_id = emitter_id
         # Per peer, an EWMA (0.7 old / 0.3 new) of the wall-clock cost of one
@@ -597,12 +601,71 @@ class HostBroker:
             claim = max(0.0, float((units.get(pl.kind).footprint
                                     if units.get(pl.kind) else {}).get("ram_bytes", 0.0)))
             loading[hid] = loading.get(hid, 0.0) + claim
+        # THE OTHER PLANNER'S CLAIMS (host_ledger): a task attempt admitted to
+        # this machine may grow to its cap, and MemAvailable shows only what it
+        # has touched so far. Without this, an attempt promised 10 GiB holding 2
+        # left 8 GiB that looked free, and a 45 GiB load could be granted into it.
+        promised = self._ledger_attempts_outstanding()
+        self._last_units = units          # what note_waiting sizes a refused load by
         hosts: Dict[str, Dict[str, float]] = {}
         host_reserve: Dict[str, Dict[str, float]] = {}
         for hid, (_at, avail) in freshest.items():
-            hosts[hid] = {"ram_bytes": max(0.0, avail - reserve - loading.get(hid, 0.0))}
+            held = float(promised) if hid == self.host_id else 0.0
+            hosts[hid] = {"ram_bytes": max(0.0, avail - reserve - loading.get(hid, 0.0) - held)}
             host_reserve[hid] = {"ram_bytes": reserve}
+        self._ledger_sync_loads(units, placements, device_hosts)
         return hosts, host_reserve
+
+    def _ledger_attempts_outstanding(self) -> int:
+        if self.host_ledger is None:
+            return 0
+        try:
+            from .hostview import attempt_memory
+            return self.host_ledger.attempt_outstanding_bytes(attempt_memory())
+        except Exception:                 # planning input, never a planning failure
+            return 0
+
+    # A load entry outlives the last cycle that saw it by this long; the host
+    # broker replans every few seconds, so a dead broker's entries lapse fast.
+    LEDGER_LOAD_TTL_S = 30.0
+
+    def _ledger_sync_loads(self, units: Mapping[str, Unit], placements: List[Placement],
+                           device_hosts: Mapping[str, str]) -> None:
+        """Publish this machine's `ram_bytes` units that are LOADING, and clear
+        the entry of one that became resident. A WAITING entry (`note_waiting`)
+        is left to lapse on its own: the request that needs the unit refreshes
+        it for as long as it keeps asking."""
+        if self.host_ledger is None or not self.host_id:
+            return
+        try:
+            ram = {k: float(u.footprint.get("ram_bytes", 0) or 0) for k, u in units.items()
+                   if isinstance(u.footprint, Mapping) and u.footprint.get("ram_bytes")}
+            here = [p for p in placements if p.kind in ram
+                    and device_hosts.get(p.device_id) == self.host_id]
+            for p in here:
+                if p.loading:
+                    self.host_ledger.put("load", p.kind, ttl_s=self.LEDGER_LOAD_TTL_S,
+                                         ram_bytes=int(ram[p.kind]), state="loading",
+                                         reason=f"loading on {p.device_id}")
+                else:
+                    self.host_ledger.drop("load", p.kind)
+        except Exception:
+            pass
+
+    def note_waiting(self, kinds, reason: str) -> None:
+        """A `ram_bytes` load was refused for host memory: say so on the
+        ledger, so task placement stops admitting attempts here (the drain).
+        The refused request refreshes this by asking again."""
+        if self.host_ledger is None:
+            return
+        units = getattr(self, "_last_units", {}) or {}
+        for kind in kinds:
+            u = units.get(kind)
+            ram = float((u.footprint or {}).get("ram_bytes", 0)) if u is not None and isinstance(
+                u.footprint, Mapping) else 0.0
+            if ram > 0:
+                self.host_ledger.put("load", kind, ttl_s=self.LEDGER_LOAD_TTL_S,
+                                     ram_bytes=int(ram), state="waiting", reason=reason[:200])
 
     # -- hosted lease ledger (the broker IS the source of truth here) ---------
     def _now(self, now: Optional[float] = None) -> float:
@@ -814,18 +877,21 @@ class HostBroker:
                 "peers": len(self.peers)}
 
     def prune_absent(self) -> List[str]:
-        """Forget registered peers that have been gone past the prune window.
-        Seeds are never pruned and an unset window disables this entirely, so
-        the roster shrinks only where shrinking is provably safe: a registered
-        peer re-announces the moment it returns."""
+        """Forget peers that have been gone past the prune window. Registered
+        peers re-announce the moment they return; a seed is pruned only where
+        the policy opts in (`MembershipPolicy.prune_seeds`), and is restored by
+        the next start of the broker. An unset window disables this entirely."""
         gone = self.roster.prunable()
+        rows = {r["peer"]: r for r in self.roster.snapshot()} if gone else {}
         for key in gone:
             self.peers = [p for p in self.peers if peer_key(p) != key]
             self.roster.drop(key)
             self._last_probe_error.pop(key, None)
             self._probe_degradation.pop(key, None)
             self.peer_report.pop(key, None)
-            self._log(f"[membership] pruned absent peer: {key}")
+            row = rows.get(key, {})
+            self._log(f"[membership] pruned absent peer: {key} "
+                      f"({row.get('source', '?')}, unseen {row.get('unseen_seconds', '?')}s)")
         return gone
 
     def membership_snapshot(self) -> List[dict]:

@@ -106,6 +106,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from dataclasses import replace
 from typing import Any, Dict, List, Optional
@@ -114,7 +115,7 @@ from .hostbroker import HostBroker, LocalDeviceMeterPeer, RestPeer
 from .device_leases import DeviceLeaseStore
 from .mesh_peer import MeshPeer, RelayRoute, facade_id
 from . import relay_control
-from .membership import MembershipPolicy, RosterFull
+from .membership import MembershipPolicy, RosterFull, policy_from_env
 from .fleet_scheduler import SchedulerPolicy
 from .planner import Defer, Device, Request, Residency, Unit, Evict, Grant, Load, plan as _plan
 
@@ -212,13 +213,7 @@ def build_app(broker: HostBroker):
     from fastapi.responses import HTMLResponse
 
     from .ui import page as ui_page
-    from .identity_facts import IdentitySnapshotPublisher, valid_identity
     app = FastAPI(title="Livestack Harmony broker")
-    authority_id = os.environ.get("LIVESTACK_IDENTITY_AUTHORITY_ID", "").strip()
-    identity_publisher = (
-        IdentitySnapshotPublisher("livestack", authority_id)
-        if valid_identity(authority_id, max_bytes=220) else None
-    )
     # One journal line per mutating request and per auth refusal, with source
     # address and principal name — the evidence the R.3 inventory gate reads
     # ("zero 401s from an address not in the inventory"). Reads stay silent;
@@ -380,6 +375,19 @@ def build_app(broker: HostBroker):
         _track(p)
         grant = next((g for g in p.of(Grant) if g.request_id == req.id), None)
         dev = grant.device_id if grant is not None else None
+        defer = next((d.reason for d in p.of(Defer) if d.request_id == req.id), None)
+        if dev is None and defer and "host memory" in defer:
+            # DRAIN, DON'T KILL (host_ledger.py): a model load that does not
+            # fit the host's RAM is written to the ledger as WAITING, so task
+            # placement admits no new attempt here until it does. The caller
+            # keeps asking (harmony-llm retries a host-memory defer), and each
+            # ask refreshes the entry; when it stops, the entry lapses.
+            from .planner import _unit_satisfies
+            units = getattr(broker, "_last_units", {}) or {}
+            broker.note_waiting(
+                [k for k, u in units.items()
+                 if (k == kind or (requires and _unit_satisfies(u, requires)))],
+                defer)
         served_kind = grant.kind if grant is not None else None
         lease_id = None
         if dev is not None and broker.device_config.get(dev, {}).get("hosted"):
@@ -544,29 +552,6 @@ def build_app(broker: HostBroker):
         """
         return HTMLResponse(ui_page())
 
-    @app.get("/fleet/identity-facts")
-    def fleet_identity_facts(authorization: str = Header(None)):
-        """Authenticated complete cut of explicitly configured node identities."""
-        if identity_publisher is None:
-            raise HTTPException(503, "identity_authority_not_configured")
-        principals = getattr(broker, "fleet_principals", None)
-        if principals is None:
-            raise HTTPException(503, "identity_fact_auth_not_configured")
-        if not authorization:
-            raise HTTPException(401, "authorization_required")
-        from .fleet_auth import AuthError, bearer_token, principal_for
-        try:
-            principal_for(principals, bearer_token(authorization))
-        except AuthError as error:
-            raise HTTPException(error.status, error.detail) from error
-        # Refresh the same soft-state view consumed by /fleet. identity_relations
-        # only includes capability observations younger than the Fact TTL.
-        broker.fleet_view()
-        relations, source_state = broker.identity_relations()
-        cut = identity_publisher.snapshot(relations)
-        cut["source_state"] = source_state
-        return cut
-
     @app.get("/fleet")
     def fleet():
         """The whole-fleet view: every node the broker knows, grouped by host,
@@ -663,8 +648,13 @@ def build_app(broker: HostBroker):
             preferences = parse_preferences(prefer)
         except PreferenceError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        wanted = [r.strip().lower() for r in (regions or "").split(",") if r.strip()]
+        # Region is a policy on ELIGIBILITY and is applied inside the ranker,
+        # before warm/cold: filtered afterwards, a warm node in a refused region
+        # had already suppressed the cold one in an allowed region.
         result = _rank(broker.fleet_view(), kind, vantage=via or vantage,
-                       ttl_s=ttl_s, prefer=preferences)
+                       ttl_s=ttl_s, prefer=preferences, allow_regions=wanted,
+                       allow_unknown_region=allow_unknown_region)
         # `region` is RECORDED, never applied. It is the asker's region as the
         # emitter knew it, which is what makes a ledger record readable later —
         # but WHERE the work may run is `regions`, below.
@@ -676,19 +666,15 @@ def build_app(broker: HostBroker):
         # endpoints are for.
         result["principal"] = _read_principal(broker, authorization)
 
-        wanted = [r.strip().lower() for r in (regions or "").split(",") if r.strip()]
         if wanted:
-            from .client import eligible_targets
-            kept, rejected = eligible_targets(result, allow_regions=set(wanted),
-                                              allow_unknown_region=allow_unknown_region)
-            result["targets"] = kept
+            from .fleet_rank import REGION_FILTERED
+            rejected = [{"target_id": c.target_id, "why": c.reason[len(REGION_FILTERED):]}
+                        for c in result["candidates"]
+                        if c.reason.startswith(REGION_FILTERED)]
             result["region_policy"] = {"allow": wanted,
                                        "allow_unknown": bool(allow_unknown_region),
                                        "rejected": rejected}
-            # The chosen row must agree with the filtered list, or a caller
-            # reading `chosen` gets an answer the policy just refused.
-            result["chosen"] = kept[0]["target_id"] if kept else None
-            if not kept:
+            if not result["targets"]:
                 result["reason"] = (
                     f"no {kind} target in {'/'.join(wanted)}: "
                     + "; ".join(f"{r['target_id']} ({r['why']})" for r in rejected[:4])
@@ -1383,16 +1369,12 @@ def main():
             extra_units[kind] = Unit(kind, {}, priority=u.get("priority", 100),
                                      residency=Residency.UNPINNED)
     # Membership thresholds. The defaults are the whole point — a fleet should
-    # not have to configure these to get sane behaviour. LIVESTACK_PEER_PRUNE
-    # is deliberately UNSET by default: this bound deletes rather than rotates,
-    # and an unset window must mean disabled, never "delete on the next deploy".
-    prune_env = os.environ.get("LIVESTACK_PEER_PRUNE_SECONDS", "").strip()
-    membership = MembershipPolicy(
-        suspect_after_s=float(os.environ.get("LIVESTACK_PEER_SUSPECT_SECONDS", "45")),
-        mia_after_s=float(os.environ.get("LIVESTACK_PEER_MIA_SECONDS", "600")),
-        prune_after_s=float(prune_env) if prune_env else None,
-        max_peers=int(os.environ.get("LIVESTACK_MAX_PEERS", "32")),
-    )
+    # not have to configure these to get sane behaviour (see policy_from_env for
+    # the prune window, the one delete-shaped bound among them).
+    membership = policy_from_env(os.environ)
+    print(f"[hostd] peer prune window: "
+          f"{'disabled' if membership.prune_after_s is None else f'{membership.prune_after_s:.0f}s'}",
+          flush=True)
     # apply (default) = host broker; observe = fleet broker. The default is what
     # keeps every existing deployment byte-for-byte unchanged.
     dispatch = os.environ.get("LIVESTACK_DISPATCH", "apply").strip().lower() != "observe"
@@ -1513,6 +1495,13 @@ def main():
     )
     broker.node_control_token = node_control_token
     broker.host_id = host_id
+    # The shared host-RAM ledger (host_ledger.py), on the broker that DISPATCHES
+    # on this Linux machine — the one master of its RAM, as of its cards. A
+    # fleet broker observes other machines and has no local ledger to keep.
+    if dispatch and sys.platform.startswith("linux"):
+        from .host_ledger import HostLedger
+        broker.host_ledger = HostLedger()
+        print(f"[harmony] host-RAM ledger: {broker.host_ledger.path}", flush=True)
     broker.link_peers = link_peers
     broker.snapshot_store = snapshot_store
     broker.fleet_policy = fleet_policy
@@ -1613,9 +1602,18 @@ def main():
               + (f", {ledger.max_age_s / 86400:.0f}d" if ledger.max_age_s
                  else ", age window disabled") + ")", flush=True)
     # Native stream producers (services-own-their-streams). A no-op unless HARMONY_STREAMS=1.
-    from .hostd_streams import start_for_hostd
-    start_for_hostd(broker, host_id, not dispatch, lambda m: print(m, flush=True))
-    uvicorn.run(build_app(broker), host="0.0.0.0", port=port)
+    from .hostd_streams import start_for_hostd, stop_streams_runtime
+    from .identity_facts import IdentitySnapshotPublisher, valid_identity
+    authority_id = os.environ.get("LIVESTACK_IDENTITY_AUTHORITY_ID", "").strip()
+    identity_publisher = (IdentitySnapshotPublisher("livestack", authority_id)
+                          if valid_identity(authority_id, max_bytes=220) else None)
+    runtime = start_for_hostd(broker, host_id, not dispatch,
+                              lambda m: print(m, flush=True),
+                              identity_publisher=identity_publisher)
+    try:
+        uvicorn.run(build_app(broker), host="0.0.0.0", port=port)
+    finally:
+        stop_streams_runtime(runtime)
 
 
 def _hostname() -> str:

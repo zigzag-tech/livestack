@@ -13,8 +13,17 @@ from .contract import ContractError, load_profile
 from .kinds import PhysicalKind, select_implementation
 
 def _profile_limits(profile_id: str) -> tuple[str, int]:
-    name = "pane-chips-v1.json" if profile_id.startswith("pane-chips") else "pane-attention-v1.json"
+    if profile_id.startswith("pane-ask-27b-v1:"):
+        name = "pane-ask-27b-v1.json"
+    else:
+        name = "pane-chips-v1.json" if profile_id.startswith("pane-chips") else "pane-attention-v1.json"
     profile = load_profile(name)
+    if name == "pane-ask-27b-v1.json":
+        if profile.get("qualification_hash") in (None, "", "unqualified"):
+            raise ContractError("profile_unavailable", "pane-ask 27B profile has no recorded qualification", 503)
+        requires = profile.get("harmony_requires", {})
+        if requires.get("class") != "llm" or requires.get("params_b") != "[26,28)":
+            raise ContractError("profile_unavailable", "pane-ask profile is not the nominal 27B tier", 503)
     return str(profile["language"]), int(profile["max_len"])
 
 

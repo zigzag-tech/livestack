@@ -53,7 +53,8 @@ def test_encoded_blocks_preserve_original_digest_and_resume(tmp_path, fault):
             remote.get(receipt['digest'], tmp_path/'received')
             assert (tmp_path/'received').read_bytes() == content
             assert observations[0][0] is None
-            assert observations[1][0] == 'bytes=0-4194303', 'an incomplete encoded block is retried from its original offset'
+            # The failed attempt halved the block (4 MiB -> 2 MiB); the offset is still the original one.
+            assert observations[1][0] == 'bytes=0-2097151', 'an incomplete encoded block is retried from its original offset'
             assert all(row[1] == 'gzip' for row in observations)
             assert sum(row[2] for row in observations) < len(content)//10
         else:

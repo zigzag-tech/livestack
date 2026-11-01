@@ -122,13 +122,85 @@ def test_extra_args_ride_verbatim(tmp_path):
     assert StrataEngine().argv(spec, None)[-3:] == toks
 
 
-def test_no_budget_translation_a_self_sizing_engine_takes_the_whole_card(tmp_path):
-    spec = _spec(8191, tmp_path)
-    # Budget or not, the launch line is the same: Strata sizes its cache to the
-    # free VRAM itself (the planner charges the whole device via
-    # `exclusive_device` — planner-side, not a launch-line translation).
-    assert StrataEngine().argv(spec, {"vram_bytes": 11 << 30}) == \
-        StrataEngine().argv(spec, None)
+def _sized(monkeypatch, spec, budget, free_gib):
+    monkeypatch.setattr(StrataEngine, "_free_vram_bytes",
+                        staticmethod(lambda index: int(free_gib * (1 << 30))))
+    argv = StrataEngine().argv(spec, budget)
+    path = argv[argv.index("--config") + 1]
+    return path, json.loads(Path(path).read_text())
+
+
+def test_the_grant_capped_at_the_footprint_becomes_the_vram_reserve(tmp_path, monkeypatch):
+    # 23 GiB free, 21 granted, 18 declared: the engine may hold 18, so it is
+    # told to leave 5 GiB free. Auto cache, so the engine re-checks its fit.
+    spec = _spec(8191, tmp_path, footprint_gb=18)
+    path, cfg = _sized(monkeypatch, spec, {"vram_bytes": 21 << 30}, 23)
+    assert cfg["args"][-4:] == ["--expert-cache", "auto", "--vram-reserve-mib", "5120"]
+    assert cfg["args"][:2] == ["--mtp", "pack/mtp.gguf"]       # the rest kept
+    assert cfg["exe"] == "engine/strata"
+
+
+def test_a_grant_smaller_than_the_footprint_wins(tmp_path, monkeypatch):
+    spec = _spec(8191, tmp_path, footprint_gb=18)
+    _, cfg = _sized(monkeypatch, spec, {"vram_bytes": 12 << 30}, 23)
+    assert cfg["args"][-1] == str(11 * 1024)
+
+
+def test_no_grant_holds_the_engine_to_its_declared_footprint(tmp_path, monkeypatch):
+    spec = _spec(8191, tmp_path, footprint_gb=18)
+    _, cfg = _sized(monkeypatch, spec, None, 23)
+    assert cfg["args"][-1] == str(5 * 1024)
+
+
+def test_setups_own_cache_and_reserve_flags_are_replaced_not_doubled(tmp_path, monkeypatch):
+    spec = _spec(8191, tmp_path, footprint_gb=18)
+    base = Path(spec["strata_root"]) / "strata-qwen-q2_0.json"
+    base.write_text(json.dumps({"exe": "engine/strata", "args": [
+        "--expert-cache", "8900", "--vram-reserve-mib", "700", "--spec", "4"]}))
+    _, cfg = _sized(monkeypatch, spec, None, 23)
+    assert cfg["args"] == ["--spec", "4", "--expert-cache", "auto",
+                           "--vram-reserve-mib", "5120"]
+
+
+def test_the_sized_copy_never_becomes_the_next_base(tmp_path, monkeypatch):
+    spec = _spec(8191, tmp_path, footprint_gb=18)
+    path, _ = _sized(monkeypatch, spec, None, 23)
+    assert not Path(path).name.startswith("strata-")
+    assert StrataEngine().config_path(spec).endswith("strata-qwen-q2_0.json")
+
+
+def test_unknowable_free_vram_keeps_setups_config(tmp_path, monkeypatch):
+    spec = _spec(8191, tmp_path, footprint_gb=18)
+    monkeypatch.setattr(StrataEngine, "_free_vram_bytes", staticmethod(lambda index: None))
+    argv = StrataEngine().argv(spec, {"vram_bytes": 21 << 30})
+    assert argv[argv.index("--config") + 1].endswith("strata-qwen-q2_0.json")
+
+
+def test_the_card_is_the_units_gpu_flag(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(StrataEngine, "_free_vram_bytes",
+                        staticmethod(lambda index: seen.append(index) or (23 << 30)))
+    StrataEngine().argv(_spec(8191, tmp_path, footprint_gb=18,
+                              extra_args=["--gpu", "1"]), None)
+    assert seen == [1]
+
+
+def test_the_units_max_concurrent_is_the_engines_batch_slots(tmp_path, monkeypatch):
+    # One knob: Harmony admits `max_concurrent`, so the engine gets that many
+    # slots whatever setup wrote — even when free VRAM is unknowable.
+    spec = _spec(8191, tmp_path, footprint_gb=18, attributes={"max_concurrent": 3})
+    base = Path(spec["strata_root"]) / "strata-qwen-q2_0.json"
+    base.write_text(json.dumps({"exe": "engine/strata", "parallel": 2,
+                                "args": ["--expert-cache", "8900"]}))
+    _, cfg = _sized(monkeypatch, spec, None, 23)
+    assert cfg["parallel"] == 3
+    monkeypatch.setattr(StrataEngine, "_free_vram_bytes", staticmethod(lambda index: None))
+    argv = StrataEngine().argv(spec, None)
+    cfg = json.loads(Path(argv[argv.index("--config") + 1]).read_text())
+    assert cfg["parallel"] == 3 and cfg["args"] == ["--expert-cache", "8900"]
+    # An undeclared unit is one slot, the server's own default.
+    _, cfg = _sized(monkeypatch, _spec(8191, tmp_path, footprint_gb=18), None, 23)
+    assert cfg["parallel"] == 1
 
 
 def test_ready_asks_the_fake_server(fake_strata, tmp_path):
@@ -281,3 +353,50 @@ def test_the_engine_source_pin_is_checked_at_startup(tmp_path):
     (Path(ok2["strata_root"]) / "MODEL_SHA256").write_text("deadbeef\n")
     with pytest.raises(ValueError, match="sha256"):
         StrataEngine().rev(ok2)
+
+
+def test_the_engine_child_is_measured_not_just_the_serve_server(tmp_path, monkeypatch):
+    # The serve server is the pid harmony-llm started; the card and the RAM are
+    # held by the engine it spawned. Measured on zz-whitby 2026-10-18: reading
+    # only the server's pid found no VRAM and the footprint went UNKNOWN.
+    import subprocess
+    import sys
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        fam = StrataEngine._family(os.getpid())
+        assert os.getpid() in fam and child.pid in fam
+
+        class _Out:
+            stdout = f"{os.getpid()}, 256\n{child.pid}, 21764\n99999999, 900\n"
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Out())
+        assert StrataEngine._pid_vram_bytes(fam) == (256 + 21764) << 20
+        assert StrataEngine._pid_vram_bytes([424242]) is None   # holds nothing: not a zero
+        row = StrataEngine().measure(_spec(8191, tmp_path), None, os.getpid(), [])
+        assert row["measured"] == "strata-startup"
+        assert row["footprint"] == (256 + 21764) << 20
+        assert row["ram_resident_bytes"] > 0
+    finally:
+        child.kill()
+
+
+def test_the_0_1_45_startup_lines_are_recognised(tmp_path):
+    from engines import LineCapture
+    cap = LineCapture()
+    cap.feed("[strata] experts loaded: 31.64 GiB at 5.14 GiB/s (11 s so far)\n")
+    cap.feed("[strata] filling the GPU's expert cache (10612 experts, 13.66 GiB of VRAM) ...\n")
+    row = StrataEngine().measure(_spec(8191, tmp_path), cap, None, [])
+    assert len(row["engine_lines"]) == 2
+
+
+def test_vision_is_what_the_run_config_set_up_not_what_the_units_file_says(tmp_path):
+    # Flash-Next reads images, but only with the encoder setup installs on
+    # request: no "vision" section, no pictures — whatever the units file says.
+    spec = _spec(8191, tmp_path, attributes={"vision": True})
+    assert StrataEngine().launch_attributes(spec)["vision"] is False
+    base = Path(spec["strata_root"]) / "strata-qwen-q2_0.json"
+    exe, mmproj = tmp_path / "strata-vision", tmp_path / "mmproj.gguf"
+    base.write_text(json.dumps({"exe": "engine/strata", "args": [],
+                                "vision": {"exe": str(exe), "mmproj": str(mmproj)}}))
+    assert StrataEngine().launch_attributes(spec)["vision"] is False   # files missing
+    exe.write_text(""); mmproj.write_text("")
+    assert StrataEngine().launch_attributes(spec)["vision"] is True

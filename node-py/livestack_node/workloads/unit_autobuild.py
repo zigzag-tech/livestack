@@ -45,6 +45,7 @@ from pathlib import Path
 from .model import WorkloadError
 from . import smoke
 from . import unit as deployment_unit
+from .host_release import content_hash as tree_content_hash
 
 RUNTIME_PATHS = ('node-py/livestack_node',)
 MAX_HISTORY = 20
@@ -127,8 +128,11 @@ class Repo:
         return int(self.git('rev-list', '--count', f'{base}..{tip}', '--', *RUNTIME_PATHS))
 
     def export(self, commit, dest):
-        """Materialise node-py/ and LICENSE of `commit` into dest (no .git, nothing to clean up but the dir)."""
-        code = subprocess.run(['git', '-C', str(self.path), 'archive', commit, '--', 'node-py', 'LICENSE'],
+        """Materialise node-py/, tools/ and LICENSE of `commit` into dest (no .git, nothing to clean up but the dir).
+
+        tools/ is here because gate tests read repo-root files (tests/test_workload_supervised.py reads
+        tools/supervised-handlers.json); without it the gate failed at collection on every commit."""
+        code = subprocess.run(['git', '-C', str(self.path), 'archive', commit, '--', 'node-py', 'tools', 'LICENSE'],
                               capture_output=True, timeout=300)
         if code.returncode != 0:
             raise Stop('export', code.stderr.decode('utf-8', 'replace')[-120:])
@@ -197,8 +201,20 @@ def run_gate(cfg, root):
         raise Stop('gate', 'tests_timed_out')
     tail = [l for l in (out + err).strip().splitlines() if l.strip()]
     if code != 0:
-        failed = [l.split(' ')[1] for l in tail if l.startswith('FAILED ')][:3]
-        raise Stop('gate', 'tests_failed:' + (','.join(failed) or (tail[-1] if tail else f'exit {code}'))[:160])
+        failed = [l.split(' ')[1] for l in tail if l.startswith('FAILED ')]
+        if failed:
+            # The gate runs niced beside the host's other work; a different timing-sensitive test failed on each of
+            # four runs on 2026-10-15 and every one passed alone and in a full re-run. Run the failures once more by
+            # themselves: a real failure fails again and keeps its name, a load flake does not block the candidate.
+            try:
+                code2, out2, err2 = run(argv[:6] + failed + ['-q', '-p', 'no:cacheprovider'], cwd=str(Path(root) / 'node-py'),
+                                        timeout=int(gate.get('timeout_seconds', 1800)), env=env)
+            except subprocess.TimeoutExpired:
+                raise Stop('gate', 'tests_timed_out')
+            if code2 == 0:
+                logging.warning('gate: %d test(s) failed once and passed on a re-run: %s', len(failed), ','.join(failed))
+                return f'{tail[-1] if tail else ""} (re-ran {len(failed)} failed test(s) once: passed)'
+        raise Stop('gate', 'tests_failed:' + (','.join(failed[:3]) or (tail[-1] if tail else f'exit {code}'))[:160])
     return tail[-1] if tail else ''
 
 
@@ -213,6 +229,11 @@ def build_release(cfg, commit, source):
             raise Stop('build', f'release_dir_exists_and_is_unreadable:{name}')
         if meta.get('commit') != commit:
             raise Stop('build', f'release_dir_exists_for_another_commit:{name}')
+        # The unit carries RELEASE.json's hash and the host checks the pushed tree against it with this same
+        # algorithm. A directory built by another tool (an authority release records a different hash) would stage
+        # as staged_content_hash_mismatch on every worker (fc8b905a, 2026-10-13): refuse it here, by name.
+        if meta.get('content_hash') != tree_content_hash(out):
+            raise Stop('build', f'release_dir_exists_with_a_different_content_hash:{name}')
         return name, out
     code, _, err = run([sys.executable, str(script), 'build', commit, '--out', str(out)], timeout=300)
     if code != 0:

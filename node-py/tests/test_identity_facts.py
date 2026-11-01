@@ -8,11 +8,6 @@ from livestack_node.identity_facts import (
 )
 from livestack_node.hostbroker import HostBroker
 
-pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
-
-from livestack_node.fleet_auth import load_principals  # noqa: E402
-from livestack_node.hostd import build_app  # noqa: E402
 
 
 def test_identity_snapshot_is_bounded_fenced_and_uses_explicit_relation():
@@ -118,8 +113,6 @@ def test_hostbroker_omits_conflicting_host_observations():
     relations, counts = broker.identity_relations()
     assert relations == []
     assert counts["conflicting_observation"] == 1
-
-
 def test_hostbroker_keeps_a_conflicted_identity_omitted_after_later_rows():
     broker = HostBroker(peers=[])
     now = int(time.time() * 1000)
@@ -133,74 +126,3 @@ def test_hostbroker_keeps_a_conflicted_identity_omitted_after_later_rows():
     relations, counts = broker.identity_relations()
     assert relations == []
     assert counts["conflicting_observation"] == 1
-
-
-class _IdentityBroker:
-    def __init__(self, principals):
-        self.fleet_principals = principals
-        self.refreshed = 0
-        self.planned = 0
-
-    def fleet_view(self):
-        self.refreshed += 1
-        return {}
-
-    def identity_relations(self):
-        return ([{
-            "resource_namespace": "harmony:node",
-            "resource_id": "node-a",
-            "host_id": "host-a",
-            "observed_at_ms": 1_800_000_000_000,
-            "ttl_ms": 60_000,
-        }], {"status": "ok", "known_peers": 1, "published": 1})
-
-
-def test_fleet_identity_endpoint_requires_auth_and_returns_complete_cut(monkeypatch):
-    token = "f" * 40
-    principals = load_principals(
-        '{"%s": {"name": "benchday-hub", "delegate_prefix": "benchday:"}}' % token)
-    broker = _IdentityBroker(principals)
-    monkeypatch.setenv("LIVESTACK_IDENTITY_AUTHORITY_ID", "fleet-a")
-    client = TestClient(build_app(broker), raise_server_exceptions=False)
-
-    assert client.get("/fleet/identity-facts").status_code == 401
-    assert client.get("/fleet/identity-facts",
-                      headers={"Authorization": "Bearer invalid"}).status_code == 401
-    response = client.get("/fleet/identity-facts",
-                          headers={"Authorization": f"Bearer {token}"})
-
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["v"] == 1
-    assert body["sequence"] == 1
-    assert body["source_state"]["published"] == 1
-    [fact] = body["facts"]
-    assert fact["authority"] == {"kind": "livestack", "id": "fleet-a"}
-    assert fact["subject"]["from"] == "harmony:node:node-a"
-    assert fact["subject"]["to"] == "benchday:host:host-a"
-    assert broker.refreshed == 1
-    assert broker.planned == 0
-
-
-def test_fleet_identity_endpoint_fails_closed_without_source_auth(monkeypatch):
-    monkeypatch.setenv("LIVESTACK_IDENTITY_AUTHORITY_ID", "fleet-a")
-    broker = _IdentityBroker(None)
-    client = TestClient(build_app(broker), raise_server_exceptions=False)
-    response = client.get("/fleet/identity-facts",
-                          headers={"Authorization": "Bearer arbitrary"})
-
-    assert response.status_code == 503
-    assert "identity_fact_auth_not_configured" in response.text
-
-
-def test_fleet_identity_endpoint_fails_closed_without_authority_id(monkeypatch):
-    monkeypatch.delenv("LIVESTACK_IDENTITY_AUTHORITY_ID", raising=False)
-    broker = _IdentityBroker(load_principals(
-        '{"%s": {"name": "benchday-hub", "delegate_prefix": "benchday:"}}' % ("f" * 40)))
-    client = TestClient(build_app(broker), raise_server_exceptions=False)
-
-    response = client.get("/fleet/identity-facts",
-                          headers={"Authorization": "Bearer " + "f" * 40})
-    assert response.status_code == 503
-    assert "identity_authority_not_configured" in response.text
-

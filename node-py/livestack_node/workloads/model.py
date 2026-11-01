@@ -92,8 +92,45 @@ class Limits:
     # against strictly lower effective priority (placement._hold_for_priority). Set from authority.json
     # `limits.handler_priority`; the authority reads it at start only (like every limit, SIGHUP skips it).
     handler_priority: dict = field(default_factory=dict)
+    # Authority-wide wall-clock bounds on SHARED capacity (rule 10: a named bound and its enforcer,
+    # WorkloadStore._job_verdict). An attempt running longer than `max_attempt_seconds` is fenced and its job
+    # fails `attempt_wall_clock_exceeded`; a job queued longer than `max_queue_age_seconds` expires
+    # `queue_age_exceeded`. A submitter may only LOWER the attempt bound (`max_attempt_seconds`, schema 4).
+    # The only way to run longer is an explicit, reasoned `wall_clock_exceptions` entry per handler:
+    # {handler: {"max_attempt_seconds": N, "reason": "why this cannot be split"}}; empty by default.
+    # Read at authority start only, like every limit.
+    max_attempt_seconds: float = 10800
+    max_queue_age_seconds: float = 86400
+    wall_clock_exceptions: dict = field(default_factory=dict)
+
+    HARD_ATTEMPT_CEILING = 86400
+
+    def attempt_ceiling(self, handler):
+        """(seconds, source) of the longest an attempt of `handler` may run: `exception` or `global`."""
+        entry = self.wall_clock_exceptions.get(handler)
+        if entry is not None:
+            return entry["max_attempt_seconds"], "exception"
+        return self.max_attempt_seconds, "global"
 
     def __post_init__(self):
+        for name_ in ("max_attempt_seconds", "max_queue_age_seconds"):
+            value = getattr(self, name_)
+            if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+                    or not 30 <= value <= self.HARD_ATTEMPT_CEILING):
+                raise ValueError(f"{name_} must be in [30, {self.HARD_ATTEMPT_CEILING}]; it cannot be disabled")
+        exceptions = self.wall_clock_exceptions
+        if not isinstance(exceptions, dict) or len(exceptions) > 16:
+            raise ValueError("wall_clock_exceptions must map at most 16 handler ids to entries")
+        for handler, entry in exceptions.items():
+            seconds = entry.get("max_attempt_seconds") if isinstance(entry, dict) else None
+            reason = entry.get("reason") if isinstance(entry, dict) else None
+            if (not isinstance(handler, str) or not handler or not isinstance(entry, dict)
+                    or set(entry) != {"max_attempt_seconds", "reason"}
+                    or isinstance(seconds, bool) or not isinstance(seconds, (int, float))
+                    or not self.max_attempt_seconds < seconds <= self.HARD_ATTEMPT_CEILING
+                    or not isinstance(reason, str) or not 8 <= len(reason.strip()) <= 240):
+                raise ValueError("a wall_clock_exceptions entry is {max_attempt_seconds above the global bound and "
+                                 f"at most {self.HARD_ATTEMPT_CEILING}, reason: 8..240 characters}} (%r)" % (handler,))
         declared = self.handler_priority
         if (not isinstance(declared, dict) or len(declared) > 64
                 or any(not isinstance(k, str) or not k or isinstance(v, bool) or not isinstance(v, int)
@@ -261,17 +298,61 @@ def labels(value) -> dict:
     return dict(value)
 
 
+PROGRESS_MESSAGE_BYTES = 200
+PROGRESS_TOTAL_MAX = 10**7
+
+
+def _single_line(text: str, limit: int) -> str:
+    """Control characters (newlines included) become spaces; cut at `limit` bytes on a character boundary."""
+    text = "".join(" " if ord(c) < 32 or ord(c) == 127 else c for c in text)
+    return text.encode()[:limit].decode(errors="ignore")
+
+
 def progress(value) -> dict:
-    """The jingway JobProgressSchema shape: {phase, detail?, fraction?}."""
-    if not isinstance(value, dict) or set(value) - {"phase", "detail", "fraction"}:
-        raise WorkloadError("progress must carry phase and optional detail/fraction")
-    name(value.get("phase"), "progress phase")
-    result = {"phase": value["phase"]}
+    """Progress contract v1 (openspec attempt-progress-reporting):
+    {phase, done?, total?, unit?, fraction?, message?, beat?}, with the jingway `detail` kept as an alias
+    of `message`. Unknown keys are refused. `message` is one line of at most 200 bytes and is
+    refused above that; the legacy `detail` (up to 1024 characters) is sanitised and cut to 200
+    bytes instead, so older handlers keep working. Times are never accepted: the authority stamps them."""
+    allowed = {"phase", "detail", "fraction", "done", "total", "unit", "message", "beat"}
+    if not isinstance(value, dict) or set(value) - allowed:
+        raise WorkloadError("progress must carry phase and optional done/total/unit/fraction/message")
+    phase = value.get("phase")
+    if not isinstance(phase, str) or len(phase) > 64:
+        raise WorkloadError("invalid progress phase")
+    name(phase, "progress phase")
+    result = {"phase": phase}
     detail = value.get("detail")
     if detail is not None:
         if not isinstance(detail, str) or len(detail) > 1024:
             raise WorkloadError("invalid progress detail")
-        result["detail"] = detail
+        result["detail"] = _single_line(detail, PROGRESS_MESSAGE_BYTES)
+    message = value.get("message")
+    if message is not None:
+        if (not isinstance(message, str) or len(message.encode()) > PROGRESS_MESSAGE_BYTES
+                or any(ord(c) < 32 or ord(c) == 127 for c in message)):
+            raise WorkloadError("progress message must be one line of at most 200 bytes")
+        result["message"] = message
+    for key in ("done", "total"):
+        count = value.get(key)
+        if count is not None:
+            if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= PROGRESS_TOTAL_MAX:
+                raise WorkloadError(f"progress {key} must be an integer in [0, {PROGRESS_TOTAL_MAX}]")
+            result[key] = count
+    beat = value.get("beat")
+    if beat is not None:
+        # A liveness counter the supervised wrapper bumps on every tick (process output, byte
+        # progress), so a long single step still changes the document and moves `changed_at`.
+        if isinstance(beat, bool) or not isinstance(beat, int) or not 0 <= beat <= 2**31:
+            raise WorkloadError("progress beat must be a non-negative integer")
+        result["beat"] = beat
+    if "done" in result and "total" in result and result["done"] > result["total"]:
+        raise WorkloadError("progress done must not exceed total")
+    unit = value.get("unit")
+    if unit is not None:
+        if not isinstance(unit, str) or not re.fullmatch(r"[A-Za-z0-9_./:@-]{1,24}", unit):
+            raise WorkloadError("invalid progress unit")
+        result["unit"] = unit
     fraction = value.get("fraction")
     if fraction is not None:
         if (isinstance(fraction, bool) or not isinstance(fraction, (float, int))
@@ -279,6 +360,73 @@ def progress(value) -> dict:
             raise WorkloadError("progress fraction must be in [0, 1]")
         result["fraction"] = float(fraction)
     return result
+
+
+CONTRACT_KEYS = {"max_silence_seconds", "min_interval_seconds", "max_per_period"}
+DEFAULT_BUCKET = {"count": 12, "seconds": 60}
+
+
+def progress_contract(value) -> dict:
+    """What a handler promises about its progress, declared at enrolment (release manifest
+    `progress_contract`) : the longest it may go without a semantic report, the shortest gap it
+    keeps between writes, and the most reports it makes per period. The authority's per-attempt
+    token bucket is sized from `max_per_period`."""
+    if not isinstance(value, dict) or set(value) - CONTRACT_KEYS or "max_silence_seconds" not in value:
+        raise WorkloadError("progress_contract needs max_silence_seconds and may carry min_interval_seconds, max_per_period")
+    def number(key, low, high):
+        x = value[key]
+        if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) or not low <= x <= high:
+            raise WorkloadError(f"progress_contract {key} must be in [{low}, {high}]")
+        return x
+    result = {"max_silence_seconds": number("max_silence_seconds", 30, 86400)}
+    if "min_interval_seconds" in value:
+        result["min_interval_seconds"] = number("min_interval_seconds", 0, 3600)
+    if "max_per_period" in value:
+        period = value["max_per_period"]
+        if (not isinstance(period, dict) or set(period) != {"count", "seconds"}
+                or any(isinstance(period[k], bool) or not isinstance(period[k], int) for k in period)
+                or not 1 <= period["count"] <= 1000 or not 1 <= period["seconds"] <= 3600):
+            raise WorkloadError("progress_contract max_per_period must be {count 1..1000, seconds 1..3600}")
+        result["max_per_period"] = dict(period)
+    return result
+
+
+def progress_policy(value) -> dict:
+    """Authority section `attempt_progress` (restart-only, like `limits`):
+    {strict_contract: false, deadline_mode: "enforce", handlers: {id: {...contract, deadline_mode?}}}.
+    `strict_contract` makes a handler release without a progress_contract refuse to stage (default
+    permissive: the registry logs which handlers lack one). `deadline_mode` is what a
+    submitter-supplied progress_deadline_seconds does: "enforce" fails the job (today's behaviour,
+    the default), "report" only publishes `progress_verdict`. A limit derived from a handler's
+    max_silence_seconds defaults to "report". A handler entry overrides both and may be flipped alone."""
+    value = {} if value is None else value
+    if not isinstance(value, dict) or set(value) - {"strict_contract", "deadline_mode", "handlers"}:
+        raise WorkloadError("invalid attempt_progress policy")
+    strict = value.get("strict_contract", False)
+    mode = value.get("deadline_mode", "enforce")
+    if not isinstance(strict, bool) or mode not in ("enforce", "report"):
+        raise WorkloadError("invalid attempt_progress policy")
+    handlers = {}
+    for handler, entry in (value.get("handlers") or {}).items():
+        name(handler, "handler")
+        if not isinstance(entry, dict):
+            raise WorkloadError("invalid attempt_progress handler entry")
+        entry = dict(entry)
+        entry_mode = entry.pop("deadline_mode", None)
+        if entry_mode not in (None, "enforce", "report"):
+            raise WorkloadError("invalid attempt_progress deadline_mode")
+        handlers[handler] = progress_contract(entry) if entry else {}
+        if entry_mode:
+            handlers[handler]["deadline_mode"] = entry_mode
+    return {"strict_contract": strict, "deadline_mode": mode, "handlers": handlers}
+
+
+def activity(value) -> dict:
+    """A worker's report that the attempt's log files grew since its last look: the one key
+    `source`, always `log`. No text, no sizes, no worker clock; the authority stamps the time."""
+    if value != {"source": "log"}:
+        raise WorkloadError('activity must be {"source": "log"}')
+    return {"source": "log"}
 
 
 def input_objects(value) -> list[dict]:
@@ -346,13 +494,14 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     allowed = {"version", "key", "handler", "input_digest", "input_objects", "payload", "need",
                "admit", "selector", "labels", "estimate_seconds", "deadline", "priority",
                "locality_host", "retain", "environment", "handler_release", "scope",
-               "max_queue_seconds", "progress_deadline_seconds"}
+               "max_queue_seconds", "progress_deadline_seconds", "max_attempt_seconds"}
     version = value.get("version")
     # Version 4 is version 3 plus work scopes and the opt-in deadlines; an authority that predates it
     # refuses a scoped submission loudly instead of ignoring the scope.
     if set(value) - allowed or version not in (1, 2, 3, 4) or (version == 1 and "input_objects" in value) \
             or (version not in (3, 4) and "environment" in value) \
-            or (version != 4 and {"scope", "max_queue_seconds", "progress_deadline_seconds"} & set(value)):
+            or (version != 4 and {"scope", "max_queue_seconds", "progress_deadline_seconds",
+                                                 "max_attempt_seconds"} & set(value)):
         raise WorkloadError("unsupported workload schema or fields")
     handler = name(value.get("handler"), "handler")
     if handler not in handlers:
@@ -435,6 +584,14 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
                         or not low <= seconds <= 86400:
                     raise WorkloadError(f"{field_} must be in [{low}, 86400]")
                 result[field_] = seconds
+    if "max_attempt_seconds" in value:
+        # A submitter may only lower the authority's bound for this handler, never raise it.
+        seconds, source = limits.attempt_ceiling(handler)
+        asked = value["max_attempt_seconds"]
+        if isinstance(asked, bool) or not isinstance(asked, (int, float)) or not 30 <= asked <= seconds:
+            raise WorkloadError(f"max_attempt_seconds must be in [30, {seconds:g}]: the authority's {source} "
+                                "wall-clock bound for this handler; a submission can only lower it")
+        result["max_attempt_seconds"] = asked
     if "scope" in value:
         result["scope"] = scope_ref(value["scope"], limits)
     elif handler in limits.scope_required_handlers:

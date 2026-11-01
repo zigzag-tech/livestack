@@ -96,7 +96,10 @@ def classify_job(job: dict) -> dict:
         return {"attribution": "unknown", "reason": bounded(reason or "execution deadline expired", 240)}
     if outcome == "product_failure":
         text = f"handler_reported_failure:{error}" if error else "handler_reported_failure"
-        return {"attribution": "workload", "reason": bounded(f"{text} {detail}".strip(), 240)}
+        # The worker's command.log excerpt names what broke when the handler gave no error/detail.
+        evidence = (job.get("cause") or {}).get("evidence") if isinstance(job.get("cause"), dict) else None
+        excerpt = (evidence or {}).get("excerpt") or ""
+        return {"attribution": "workload", "reason": bounded(f"{text} {detail or excerpt}".strip(), 240)}
     if outcome == "infrastructure":
         cause = completion.get("cause") or job.get("cause")
         if isinstance(cause, dict) and cause.get("cause") == "resource_limit":
@@ -340,7 +343,7 @@ class WorkloadAuthority:
                                       record["intent_id"])
         except BackendRefused as error:
             attribution = "infra" if error.status in (429, 502, 503, 504) else (
-                "workload" if error.status in (400, 403, 404, 409, 413, 422) else "unknown")
+                "workload" if error.status in (400, 403, 404, 409, 413, 415, 422) else "unknown")
             return await self._end(record, "refused", {
                 "refusal": REFUSAL_UNAVAILABLE if attribution == "infra" else REFUSAL_SCHEMA_INVALID,
                 "detail": bounded(error.detail, 256), "attribution": attribution,

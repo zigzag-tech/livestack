@@ -202,7 +202,7 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
             self.principals = principals
 
     def identity_facts(self):
-        """Authenticated, read-only full cut for current mapped workers."""
+        """Read-only full cut for current principal-mapped workers."""
         if self.identity_publisher is None:
             raise WorkloadError("identity_authority_not_configured", 503)
         now_s = self.store.clock()
@@ -491,8 +491,6 @@ class Handler(BaseHTTPRequestHandler):
         handled, answer = rollout_routes.route(self.server, principal, method, parts, body)
         if handled:
             return answer
-        if principal.role == 'admin' and method == 'GET' and parts == ['identity-facts']:
-            return self.server.identity_facts()
         if parts == ['handler-releases', 'status'] and method == 'GET':
             if principal.role != 'admin':
                 raise WorkloadError('handler release administration requires an admin principal', 403)
@@ -581,7 +579,7 @@ class Handler(BaseHTTPRequestHandler):
             if parts == ['worker', 'heartbeat']:
                 self._remote_boot(principal, body)
                 return store.heartbeat(principal.worker, body['boot'], body['attempt_id'], body['fence'],
-                                       progress=body.get('progress'))
+                                       progress=body.get('progress'), activity=body.get('activity'))
             if parts == ['worker', 'verify-compilation']:
                 self._remote_boot(principal, body)
                 return store.verify_compilation(principal.worker, body['boot'], body['attempt_id'],

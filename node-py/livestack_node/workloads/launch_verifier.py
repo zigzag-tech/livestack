@@ -439,6 +439,18 @@ class LaunchServer(getattr(socketserver, 'UnixStreamServer', object)):
             if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
                 raise WorkloadError('compilation_verifier_socket_directory_untrusted', 403)
         self.config = config
+        # An unclean stop (reboot, SIGKILL) skips serve()'s unlink and leaves a
+        # dead socket node, so bind() fails EADDRINUSE and launchd/systemd
+        # crash-loops while every compilation launch is refused. Remove only a
+        # socket nobody is listening on; a live peer still makes bind() fail.
+        if socket_path.is_socket():
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+                try:
+                    probe.connect(str(socket_path))
+                except ConnectionRefusedError:
+                    socket_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
         super().__init__(str(socket_path), LaunchHandler)
         socket_path.chmod(0o666)
 

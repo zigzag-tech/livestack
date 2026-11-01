@@ -237,3 +237,116 @@ Gate scope on xc-tower-ubuntu (2026-10-12): `tests/test_workload*.py` minus eigh
 for environment reasons at origin/main (`docker`, `edge_forward`, `http`, `launch_verifier`, `service`, `supervision`,
 `task_environment_docker`, `worker`: they need sudo `systemd-run`, a real dockerd or sockets). They are listed in `gate.exclude`;
 fix the cause and shrink that list rather than growing it. The rest runs in about six minutes.
+
+Two release builders, one hash (2026-10-15). `tools/build-authority-release.sh` (authority; keeps `_deps`) and
+`scripts/build-worker-release.py` (workers) both write `livestack-<sha8>` under `release_source`, and the auto-build
+reuses an existing directory of the right commit. Until 2026-10-15 the authority script recorded a different
+`content_hash` in `RELEASE.json` (it left `_deps` out), so a unit built on top of such a directory made every worker
+refuse the staged tree (`stage:staged_content_hash_mismatch`, `livestack-fc8b905a`, 2026-10-13: four workers, two tries
+each, nothing drained, attempts capped in `rollout-executor.json`). Now both scripts record `host_release.content_hash`,
+and the auto-build refuses a reused directory whose recorded hash is not the tree's
+(`build:release_dir_exists_with_a_different_content_hash`). Older authority-built releases (`2a2f3ee6`, `123818dd`,
+`fc8b905a`) still carry the old hash: never name one in a unit; build the worker release with
+`build-worker-release.py` under a different directory, or rebuild. A capped (worker, release) pair clears only by
+removing its keys from `attempts`/`capped` in `rollout-executor.json` while the executor is idle, or by declaring a new release.
+
+Gate re-run of failures (2026-10-15). The gate runs niced on a busy host: on four runs that day a different timing-sensitive
+test failed (`test_workload_host_release`, `..._docker_cache`, `..._progress`), each passing alone and in a full re-run with
+the same limits. `run_gate` now runs the failed test ids once more by themselves; a pass there lets the candidate through
+(logged as `gate: N test(s) failed once and passed on a re-run`), a second failure fails the gate with the test names as before.
+
+## Stall watchdog and dead authority links (2026-10-15 incident)
+
+**Incident.** After the authority restart (deploy of livestack-29db1192, about 13:08 UTC)
+`xc-win-1-wsl-2` went silent at about 13:37 UTC (its last log line was a handler-registry
+activation, 21:37:24 local) and stayed so until a manual restart at 14:47 UTC. The authority saw it OFFLINE
+for over 6 minutes yet had handed it `e2e.full` job 2f5f3bdd; one of its sockets sat in
+CLOSE-WAIT; the host was idle (no `harmony-work-*` unit was ever started for the job). Its sibling
+recovered by itself.
+
+**What the evidence rules out.** The worker has no long-poll or event stream: it polls
+(`register`, `worker/claim`) with a 15 s per-call socket timeout, retries every 5 s and logs each
+failure. A dead or restarted authority therefore already shows as `worker waiting after ...` lines
+and a reconnect, and the CLOSE-WAIT proves the kernel delivered the authority's close. A worker
+blocked in `recv` on that socket would have been woken by it. The log had no waiting lines at all,
+and no work unit started, so the main thread was not retrying: it was wedged inside the claim and
+prepare path (lease grant, handler check, input transfer, dependency or docker cache restore,
+unpack), in a call that has no deadline of its own (a blocked local lock or `cp`, a stuck
+filesystem). The journal and the restarted process destroyed the stack, so the exact call is
+unproven; this is why the fix below logs every thread's stack. A worker that holds an assignment
+and reports nothing is the failure.
+
+**Fix (general, in-process).** `workloads/stall_watchdog.py`: the main thread announces each
+phase with a deadline (`step`, `execute`, `prepare`, `transfer`, `materialize`, `running`,
+`cleanup`, `handoff`; limits are the `STALL_*_SECONDS` constants in `worker.py`, each above the
+longest bounded work of its phase, the download budget being 3600 s). When a phase overruns, the
+watchdog logs `worker stalled in phase ...` with the stack of every thread and exits with
+code 70, so systemd restarts the unit and the journal reconciles the held attempt: the authority
+then sees it lost and requeues it, instead of it being held silently. Phase changes are logged
+(`worker phase: a -> b`), and `worker_service` logs `worker recovered` when a step succeeds after
+a fault. Control connections now enable TCP keepalive (30 s idle, 10 s interval, 3 probes), so a
+peer that vanished without a FIN fails the next call within about a minute; every call already
+had a socket timeout.
+
+**Why not systemd `WatchdogSec`.** Workers also run on macOS and Windows, and the units carry no
+`Type=notify`. The in-process watchdog covers all three; it cannot save a process wedged in
+native code holding the GIL, which is rare here and still caught by the authority's OFFLINE
+state.
+
+**Roll.** Worker code is read at process start: the fix reaches a worker only at its next
+sanctioned roll (restart when idle, per the rollout record above). Until then it is exposed to
+the same wedge; an OFFLINE worker holding a job is cured by restarting its unit.
+
+## Host control plane refusing systemctl (2026-10-17 incident)
+
+**Incident.** At about 19:41 UTC six zz-joe workers (`e2e-1..4`, `release-2`, `release-3`) went OFFLINE at
+the authority and stayed so for over two hours with every unit `active`; queued flutter-check, image and
+hub-check jobs (and so every land-time compile gate) waited. A restart did not bring them back.
+
+**Cause.** A scratch Benchday desktop build (`xvfb-run ./bundle/benchday`, an agent's navigator repro) leaked
+system-bus connections until UID 1000 reached dbus-daemon's `max_connections_per_user=256`
+(`dbus-daemon: The maximum number of active connections for UID 1000 has been reached`). From then on every
+`systemctl --system ...` of that user failed with `No buffer space available`. `WorkloadWorker.step()` runs
+`reconcile()` before `register()`; with an attempt in the journal, `reconcile()` calls `_stop()` →
+`systemctl --system show harmony-work-...`, which raised on every step. `serve()` logged `worker waiting after
+CalledProcessError ... exit status 1` (stderr was dropped) and retried forever, never reaching `worker/report`:
+the authority saw silence, the host saw an active unit, and the restart re-read the same journal and failed
+the same way. Workers without a journaled attempt (`zz-joe-release`, `e2e-5`) kept reporting, which is why
+only part of the host went dark.
+
+**Fix (general, worker-side and roster-side; no authority protocol change).**
+- `control_plane.HostCommandFailed` (raised by `SystemdExecutor.command`, still a `CalledProcessError`) keeps
+  stderr and names `cause=host_control_plane_unavailable` for bus/systemd refusals; on connection exhaustion it
+  lists this user's top socket holders (`pid N sockets M command`), so the log names the leaker.
+- `worker_service.serve()` has a fault budget (`fault_exit_seconds`, default 600, `0` disables, otherwise
+  60-86400): if no step completes for that long the process logs `worker exiting: ...` and exits 71, so the
+  unit shows failed/auto-restart instead of `active` and silent. A completed step resets the budget.
+  Exiting never loses work: the journal is reconciled by the next process, as after a watchdog exit (70).
+- The roster warns `silent_while_work_waits` for a configured, previously registered worker that has stopped
+  reporting while queued jobs it serves have waited past `IDLE_WAIT_SECONDS`, naming its host and the number
+  of waiting jobs, so a silent worker is surfaced in `harmony-roster.mjs --queue` rather than discovered from
+  an agent complaint.
+
+**Rollout.** Workers pick up the fix on their next livestack release roll; the roster warning needs an
+authority restart (check live jobs first). Until then, recognise the pattern by `worker waiting after
+CalledProcessError` lines in `worker.log` and `journalctl -u dbus` (`maximum number of active connections`),
+then find the holder with `ss -xp | grep system_bus_socket`. Throwaway GUI/desktop repro processes belong
+under the worker-free dev hosts, not on a build host.
+
+**Tests.** `test_service_loop_fails_loudly_after_the_fault_budget_...`, `test_failed_systemctl_names_its_stderr_...`
+(with a positive control for the holder scan), `test_warnings_flag_a_configured_worker_that_went_silent_...`.
+
+## A worker preparing an attempt read as offline (2026-10-17 incident)
+
+Rolling `zz-joe-e2e-4` onto `livestack-66a8ced3` failed its soak 97 s after enable with
+`soak:worker_unhealthy_after_enable`, although smoke passed and the unit was healthy. The worker had claimed a full
+E2E job the moment it was enabled. `Worker.execute` prepares an attempt (input transfer, unpack, task environment)
+on the main thread and sends no `worker/report` until the handler runs, and `worker/report` was the only thing that
+moved `workers.seen`. The lease keeper heartbeated on its own channel, but a heartbeat did not count as life, so after
+`fresh_seconds` (60 s) the roster showed the worker OFFLINE and the soak (`connected` false) failed the roll. The same
+false-offline hit every busy worker's first minute of an attempt.
+
+Bound and enforcer: a valid execution-lease heartbeat (`WorkloadStore.heartbeat`, every `lease_interval`, 10 s)
+refreshes `workers.seen`; only `seen` moves, never the reported capacity or handlers.
+`tests/test_heartbeat_liveness.py` covers the preparing worker and the failure control (silence still goes offline).
+Authority-side, so it takes effect at the next authority restart; no worker roll is needed for it.

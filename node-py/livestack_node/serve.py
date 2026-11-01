@@ -138,6 +138,52 @@ def counting() -> WorkCounter:
     return WorkCounter()
 
 
+def _own_cgroup(proc_self: str = "/proc/self/cgroup") -> "str | None":
+    """This process's cgroup v2 path, relative to the cgroup root
+    (`system.slice/harmony-llm.service`) — the same spelling a workload
+    worker's `host_services` entry uses. None off cgroup v2."""
+    try:
+        with open(proc_self, "r", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("0::"):
+                    path = line.strip()[3:].lstrip("/")
+                    return path or None
+    except OSError:
+        return None
+    return None
+
+
+def _publish_planned_service(units, interval_s: float = 30.0, ttl_s: float = 120.0) -> None:
+    """Tell the host's RAM ledger that THIS cgroup's host RAM is planned by the
+    host broker, when any unit here declares `ram_bytes` (host_ledger.py).
+
+    Workload placement then stops charging this server its learned peak while
+    it is cold — the broker charges a load when one is waiting or running, and
+    only then. Refreshed on a timer and left to lapse when the process dies: a
+    stopped server must not keep the claim that its RAM is somebody's plan."""
+    import sys
+    import threading
+    if not sys.platform.startswith("linux"):
+        return
+    planned = sorted(name for name, u in units.items()
+                     if isinstance(getattr(u, "footprint", None), dict)
+                     and float(u.footprint.get("ram_bytes", 0) or 0) > 0)
+    cgroup = _own_cgroup() if planned else None
+    if not planned or not cgroup:
+        return
+    from .host_ledger import HostLedger
+    ledger = HostLedger()
+
+    def refresh():
+        while True:
+            ledger.put("service", cgroup, ttl_s=ttl_s, units=planned, pid=os.getpid())
+            time.sleep(interval_s)
+
+    threading.Thread(target=refresh, name="host-ledger-service", daemon=True).start()
+    print(f"[livestack] host-RAM ledger: {cgroup} planned by the host broker "
+          f"for {', '.join(planned)}", flush=True)
+
+
 def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
            idle_seconds: int, coload: bool, gpu_call: Callable[[Callable], object],
            prefix: str = "/livestack", device_meter="auto", port=None,
@@ -310,6 +356,8 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
                      subsystems={"mesh": mesh_state.snapshot}),
         prefix=prefix,
     )
+
+    _publish_planned_service(units)
 
     # Report for duty. This is what makes starting a model server the ONLY
     # action required to be arbitrated — no LIVESTACK_PEERS edit, no broker

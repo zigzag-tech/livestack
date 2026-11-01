@@ -138,6 +138,18 @@ def test_happy_path_drains_switches_smokes_enables_soaks_and_finishes(world):
     assert not any(w.draining(i) for i in IDS)
 
 
+def test_a_finished_roll_clears_attempts_so_earlier_aborted_tries_never_report_gave_up(world):
+    w = world
+    state = w.state() if (w.tmp / 'state.json').exists() else {}
+    state.setdefault('attempts', {})[f'zz-joe-e2e-3|{NEW}'] = 2   # one idle_timeout abort short of the cap (3), then this roll
+    (w.tmp / 'state.json').write_text(json.dumps(state))
+    run_to_soak(w)
+    w.clock.now += 601
+    assert w.kinds(w.tick()) == ['done']
+    assert w.state()['attempts'] == {}
+    assert w.tick() == [] and 'attempt_cap' not in str(w.executor.waiting)
+
+
 def test_only_the_listed_worker_is_touched_and_a_current_worker_is_left_alone(world):
     w = world
     w.hosts.state['zz-joe-e2e-3'].update(release=NEW, content_hash=H_NEW)

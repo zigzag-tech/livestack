@@ -33,7 +33,7 @@ def _req(name: str):
 
 def test_revision_links_benchday_change():
     text = REVISION_FILE.read_text(encoding="utf-8")
-    assert CONTRACT_REVISION == "typed-decision-contract-v1.0.0"
+    assert CONTRACT_REVISION == "typed-decision-contract-v1.1.0"
     assert "openspec/changes/route-pane-decisions-through-harmony" in text
     assert "benchday.decision.v1" in text
 

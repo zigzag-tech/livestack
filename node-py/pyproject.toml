@@ -13,6 +13,9 @@ requires-python = ">=3.9"
 # ~9,800 restarts each of glm-ocr / hunyuan-ocr / paddleocr-vl).
 dependencies = ["cryptography>=42", "pydantic>=2.12,<3"]
 
+[project.entry-points."vllm.endpoint_plugins"]
+harmony_extraction_execution = "livestack_node.decisions.vllm_extraction_endpoint:ExtractionEndpointPlugin"
+
 [project.optional-dependencies]
 facade = ["fastapi>=0.100"]
 # The broker daemon (`python -m livestack_node.hostd`) serves the facade itself.

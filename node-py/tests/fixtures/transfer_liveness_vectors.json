@@ -1,0 +1,45 @@
+{
+  "contract": "object-transfer-liveness",
+  "contract_version": 1,
+  "canonical": "livestack node-py/tests/fixtures/transfer_liveness_vectors.json; the ZZOPS copy is packages/harmony/transfer-liveness-vectors.json. Change this file first, then both implementations (livestack_node/workloads/liveness.py, zzops packages/harmony/transfer-liveness.mjs).",
+  "constants": {
+    "stall_seconds": 20, "ceiling_minimum": 60, "floor_rate": 65536, "slow_rate": 262144,
+    "max_block": 4194304, "min_block": 262144, "quantum": 65536, "ewma_alpha": 0.5
+  },
+  "ceiling": [
+    {"name": "empty keeps the minimum", "nbytes": 0, "minimum": 60, "expect": 60},
+    {"name": "a max block at the floor rate", "nbytes": 4194304, "minimum": 60, "expect": 64},
+    {"name": "a min block is dominated by the minimum", "nbytes": 262144, "minimum": 60, "expect": 60},
+    {"name": "object budget keeps the operator minimum", "nbytes": 104857600, "minimum": 3600, "expect": 3600},
+    {"name": "2 GiB scales past a small minimum", "nbytes": 2147483648, "minimum": 3600, "expect": 32768}
+  ],
+  "verdict": [
+    {"name": "fresh", "idle": 0, "elapsed": 0, "nbytes": 4194304, "expect": "ok"},
+    {"name": "slow but moving", "idle": 19.9, "elapsed": 30, "nbytes": 4194304, "expect": "ok"},
+    {"name": "stall window reached", "idle": 20, "elapsed": 30, "nbytes": 4194304, "expect": "stalled"},
+    {"name": "trickle reaches the ceiling", "idle": 5, "elapsed": 64, "nbytes": 4194304, "expect": "duration"},
+    {"name": "trickle just under the ceiling", "idle": 5, "elapsed": 63.9, "nbytes": 4194304, "expect": "ok"},
+    {"name": "stalled outranks duration", "idle": 20, "elapsed": 100, "nbytes": 4194304, "expect": "stalled"},
+    {"name": "small block ceiling is the minimum", "idle": 5, "elapsed": 60, "nbytes": 262144, "expect": "duration"},
+    {"name": "small block under the minimum", "idle": 5, "elapsed": 59, "nbytes": 262144, "expect": "ok"}
+  ],
+  "sizer": [
+    {"name": "a fast path stays at the maximum",
+     "steps": [{"ok": [4194304, 2, 4194304], "block": 4194304}, {"ok": [4194304, 1, 4194304], "block": 4194304}]},
+    {"name": "a DERP-class path shrinks to the minimum and recovers",
+     "steps": [
+       {"ok": [4194304, 280, 4194304], "block": 262144},
+       {"ok": [262144, 17.5, 262144], "block": 262144},
+       {"ok": [262144, 0.5, 262144], "block": 524288},
+       {"ok": [524288, 0.5, 524288], "block": 1048576},
+       {"ok": [1048576, 0.5, 1048576], "block": 2097152},
+       {"ok": [2097152, 1, 2097152], "block": 4194304}]},
+    {"name": "each failure halves down to the minimum",
+     "steps": [{"fail": 1, "block": 2097152}, {"fail": 1, "block": 1048576}, {"fail": 1, "block": 524288},
+               {"fail": 1, "block": 262144}, {"fail": 1, "block": 262144}]},
+    {"name": "a short block says nothing about the path",
+     "steps": [{"fail": 1, "block": 2097152}, {"ok": [100000, 10, 2097152], "block": 2097152}]},
+    {"name": "a mid-rate path gets what it moves in half a stall window",
+     "steps": [{"ok": [4194304, 25, 4194304], "block": 1638400}]}
+  ]
+}

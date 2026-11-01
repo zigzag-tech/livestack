@@ -110,3 +110,16 @@ Environment=LIVESTACK_NODE_REGION=na
 
 Check it: `curl -s http://100.64.0.18:8801/fleet | jq '.hosts[].nodes[] | {peer,kinds,region,probe_ms}'`.
 Every node should name a region; a `None` is a node nobody told.
+
+## Addendum (2026-10-18): region is eligibility, applied before readiness
+
+`GET /fleet/rank?regions=` used to rank first and filter afterwards. "Warm first"
+therefore dropped a cold node in an allowed region whenever a warm node in a
+forbidden one existed, and the caller got no target although one could serve.
+`fleet_rank.rank(allow_regions=…, allow_unknown_region=…)` now applies the policy
+as a filter on candidates *before* warm/cold, finish-time pricing and preference
+ordering; `/fleet/rank` passes it in, and a filtered row names the clause
+("filtered: by region policy: region na, wanted cn"). `/fleet/admit` already
+filtered the view before scheduling. A request's allowed regions are the
+principal's allowance narrowed by `harmony_regions` (never widened). See
+HARMONY.md, "Regional routing".

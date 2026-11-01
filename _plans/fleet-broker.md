@@ -769,3 +769,17 @@ scope of the items that revealed them, and each is an operator decision.
 - Not a source of region. Region is operator policy from the grant.
 - Not a second Livestack gateway. The gateway is *how* a job runs; the fleet
   broker is *where*.
+
+## Addendum (2026-10-18): one fleet broker per region
+
+openspec `harmony-regional-llm-routing`. With requesters in more than one region,
+a single fleet broker means every router in Nanjing fetches `/fleet` across the
+ocean and goes blind whenever that path is throttled. The same code now runs one
+fleet broker **per region** (`livestack-fleetd`; `na` on xc-tower-ubuntu:8801,
+`cn` on zz-tower2:8801), each observe-only and each seeing every node it can
+reach; a router names its region's broker with `HARMONY_LLM_FLEET_URL` and ranks
+from its own vantage (`region:<LIVESTACK_NODE_REGION>`). A host broker is still
+the only residency authority; a fleet broker's view is advice that the serving
+node validates (`409 route_stale`). Cross-region visibility between the fleet
+brokers is by seed lists, not federation: a node a broker cannot reach is `mia`
+in its view and is simply not a candidate there.

@@ -90,6 +90,12 @@ if request.get('write_mb'):
 if request.get('busy'):
     until=time.process_time()+request['busy']
     while time.process_time()<until: pass
+if request.get('node_syntax_error'):
+    # A real node process failing on a bug in the code it was asked to run, as a landed script would.
+    broken=Path('scripts','lib','e2e-account-scope.mjs')
+    broken.parent.mkdir(parents=True,exist_ok=True)
+    broken.write_text('const accountAgentContextChecks = 1;\\nconst accountAgentContextChecks = 2;\\n')
+    subprocess.run([request['node_syntax_error'],str(broken)]).returncode and sys.exit(1)
 time.sleep(request.get('sleep',0))
 value=Path('input').read_text()
 if request.get('assert_absent') and Path(request['assert_absent']).exists():
@@ -635,6 +641,28 @@ def test_worker_reuses_task_environment_across_captured_source_edits(fleet, tmp_
         if 'worker_b' in locals():
             worker_b.close()
 
+
+
+def test_handler_running_a_script_with_a_syntax_error_ends_with_a_labelled_cause(fleet):
+    # Real process end to end: node prints the SyntaxError into command.log, the worker ships its decisive
+    # line, and the authority's cause and reason name it (not just `exit 1` with no reason).
+    _, config, caller, digest = fleet
+    job = submit(caller, digest, node_syntax_error=shutil.which('node'))
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step()
+        result = caller.get(job['id'])
+        assert result['state'] == 'failed', result
+        assert result['result']['outcome'] == 'product_failure'
+        cause = result['cause']
+        assert cause['kind'] == 'handler_failed' and cause['retry'] == 'no'
+        excerpt = cause['evidence']['excerpt']
+        assert excerpt.startswith('exit 1: ') and len(excerpt.encode()) <= 300 and '\n' not in excerpt
+        assert "SyntaxError: Identifier 'accountAgentContextChecks' has already been declared" in excerpt
+        assert 'scripts/lib/e2e-account-scope.mjs:2' in excerpt
+        assert result['reason'] == 'handler failed: ' + excerpt
+    finally:
+        worker.close()
 
 
 def test_exit_between_receipt_read_and_unit_inspection_preserves_product_failure(fleet):
@@ -2058,3 +2086,94 @@ def test_oom_kill_without_a_receipt_fails_as_a_resource_limit_and_is_not_retried
         assert done['cause']['evidence']['source'] in ('unit', 'sampled')
     finally:
         worker.close()
+
+
+def test_worker_object_relay_accepts_the_object_form_and_a_list_of_doors(fleet):
+    _, config, _caller, _digest = fleet
+    config['object_relay'] = {'url': 'https://door-a.example/harmony-relay', 'key': 'k'*32}
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.transfer.health()['doors'] == ['relay']
+    finally:
+        worker.close()
+    config['object_relay'] = [{'name': 'ashburn', 'url': 'https://door-a.example/harmony-relay', 'key': 'a'*32},
+                              {'name': 'nanjing', 'url': 'https://door-b.example:3389/harmony-relay', 'key': 'b'*32}]
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.transfer.health() == dict(cross_region=True, doors=['ashburn', 'nanjing'], single_route=False)
+        assert worker.output_transfers['native.v1'] is worker.transfer
+    finally:
+        worker.close()
+    config['object_relay'] = [{'url': 'https://door-a.example/harmony-relay'}]
+    with pytest.raises(WorkloadError, match='object_relay'):
+        WorkloadWorker(config)
+
+
+def test_service_loop_fails_loudly_after_the_fault_budget_and_resets_when_a_step_completes(caplog):
+    # 2026-10-17: a step that could never complete left the unit `active` and the worker silent for hours.
+    from livestack_node.workloads.worker_service import serve, SustainedWorkerFault
+
+    class Wedged:
+        def __init__(self): self.fail = True
+        def step(self):
+            if self.fail:
+                raise RuntimeError('systemctl refused')
+            return False
+    now = [0.0]
+    worker = Wedged()
+    def sleep(seconds):
+        now[0] += seconds
+        if now[0] > 100 and worker.fail and now[0] < 400:
+            return
+    with pytest.raises(SustainedWorkerFault) as raised:
+        serve(worker, sleep, fault_exit=600, clock=lambda: now[0])
+    assert 'systemctl refused' in str(raised.value) and 600 <= now[0] < 620
+
+    # A completed step resets the budget: the same 5 s cadence never reaches it while steps succeed.
+    class Flaky:
+        turns = 0
+        def step(self):
+            self.turns += 1
+            if self.turns % 2:
+                raise RuntimeError('transient')
+            return False
+    flaky, now[0] = Flaky(), 0.0
+    def stop(seconds):
+        now[0] += 5
+        if flaky.turns >= 400:
+            raise KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):
+        serve(flaky, stop, fault_exit=60, clock=lambda: now[0])
+    with pytest.raises(WorkloadError):
+        serve(flaky, stop, fault_exit=5)
+    serve_disabled = Wedged()
+    def endless(seconds):
+        now[0] += 5
+        if now[0] > 10_000:
+            raise KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):  # 0 disables the budget
+        serve(serve_disabled, endless, fault_exit=0, clock=lambda: now[0])
+
+
+def test_failed_systemctl_names_its_stderr_and_cause_and_stays_a_called_process_error():
+    import subprocess
+    from livestack_node.workloads import supervision
+    from livestack_node.workloads.control_plane import HostCommandFailed, top_socket_holders
+    sup = supervision.SystemdExecutor.__new__(supervision.SystemdExecutor)
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        sup.command('sh', '-c', 'echo "Failed to get properties: No buffer space available" >&2; exit 1')
+    error = raised.value
+    assert isinstance(error, HostCommandFailed) and error.cause == 'host_control_plane_unavailable'
+    assert 'No buffer space available' in str(error) and 'top socket holders' in str(error)
+    with pytest.raises(HostCommandFailed) as plain:
+        sup.command('sh', '-c', 'echo boom >&2; exit 3')
+    assert plain.value.cause is None and 'boom' in str(plain.value) and 'cause=' not in str(plain.value)
+    # Positive control for the holder scan: this process holds sockets it just opened.
+    import socket
+    held = [socket.socketpair() for _ in range(5)]
+    try:
+        assert any(pid == os.getpid() and count >= 10 for count, pid, _ in top_socket_holders(limit=100000))
+    finally:
+        for pair in held:
+            for sock in pair:
+                sock.close()

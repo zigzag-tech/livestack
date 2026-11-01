@@ -5,6 +5,8 @@ static peer list, so a node that existed was invisible and a node that had gone
 was polled every cycle forever, logging one identical line each time — 92,089 of
 them on xc-mac-studio — with no record of how long it had been absent.
 """
+import pytest
+
 from livestack_node.hostbroker import HostBroker, peer_key
 from livestack_node.membership import (
     MembershipPolicy, PeerRoster, RosterFull, classify, probe_interval,
@@ -201,6 +203,47 @@ def test_a_registered_peer_is_pruned_but_a_seed_never_is():
     assert roster.prunable() == ["announced"]
 
 
+def test_a_seed_is_pruned_only_where_the_policy_opts_in():
+    """A seed unseen for the whole window is gone (the field case: loopback
+    duplicates of mesh-registered nodes sat `mia` for a week), but only a policy
+    that says so forgets one."""
+    clock = Clock()
+    roster = PeerRoster(MembershipPolicy(prune_after_s=3600, prune_seeds=True), clock=clock)
+    roster.seed("seeded")
+    roster.register("announced")
+    clock.advance(3599)
+    assert roster.prunable() == []
+    clock.advance(2)
+    assert sorted(roster.prunable()) == ["announced", "seeded"]
+
+
+def test_a_peer_seen_again_restarts_its_window():
+    clock = Clock()
+    roster = PeerRoster(MembershipPolicy(prune_after_s=3600, prune_seeds=True), clock=clock)
+    roster.seed("seeded")
+    clock.advance(3000)
+    roster.mark_seen("seeded")
+    clock.advance(3000)
+    assert roster.prunable() == [], "6000s since start but only 3000s since last seen"
+
+
+def test_the_daemon_default_prunes_after_a_day_and_off_is_explicit():
+    """The deployed default is a stated number, not an implied one; disabling it
+    is a deliberate act and a malformed value is refused, never guessed."""
+    from livestack_node.membership import DEFAULT_PRUNE_AFTER_S, policy_from_env
+    default = policy_from_env({})
+    assert default.prune_after_s == DEFAULT_PRUNE_AFTER_S == 24 * 3600
+    assert default.prune_seeds is True
+    assert policy_from_env({"LIVESTACK_PEER_PRUNE_SECONDS": "7200"}).prune_after_s == 7200
+    for off in ("0", "off", "OFF", "none"):
+        policy = policy_from_env({"LIVESTACK_PEER_PRUNE_SECONDS": off})
+        assert policy.prune_after_s is None and policy.prune_seeds is False
+    for bad in ("-5", "soon", "nan"):
+        with pytest.raises(ValueError):
+            policy_from_env({"LIVESTACK_PEER_PRUNE_SECONDS": bad})
+    assert MembershipPolicy().prune_after_s is None, "the bare policy still deletes nothing"
+
+
 def test_an_unset_prune_window_deletes_nothing():
     """A delete-shaped bound must never default to deleting."""
     clock = Clock()
@@ -367,6 +410,33 @@ def test_pruning_removes_the_peer_object_too():
     assert broker.prune_absent() == [peer.base]
     assert broker.peers == []
     assert broker.membership_snapshot() == []
+
+
+def test_pruning_a_seed_drops_its_row_from_the_fleet_view_and_names_why():
+    """The field case end to end at the broker: a seed that never answered and a
+    registered node gone for the window both leave `/fleet`, a live node stays,
+    and the log says which kind of row went and how long it had been unseen."""
+    clock = Clock()
+    logs = []
+    dead_seed = FakePeer("http://127.0.0.1:8100/livestack")
+    dead_seed.up = False
+    gone = FakePeer("http://100.64.0.18:8190/livestack")
+    live = FakePeer("http://100.64.0.18:8100/livestack")
+    broker = HostBroker(devices=[Device("gpu0", "h", capacity={"vram": 24})],
+                        peers=[dead_seed], clock=clock, log=logs.append,
+                        membership=MembershipPolicy(prune_after_s=3600, prune_seeds=True))
+    broker.register_url(gone.base, make_peer=lambda _: gone)
+    broker.register_url(live.base, make_peer=lambda _: live)
+    gone.up = False
+    clock.advance(3000)
+    broker.roster.mark_seen(live.base)
+    clock.advance(1000)
+    assert sorted(broker.prune_absent()) == sorted([dead_seed.base, gone.base])
+    assert [r["peer"] for r in broker.membership_snapshot()] == [live.base]
+    assert [p.base for p in broker.peers] == [live.base]
+    pruned = [m for m in logs if "pruned absent peer" in m]
+    assert any("127.0.0.1:8100" in m and "seed" in m and "unseen 4000" in m for m in pruned), pruned
+    assert any("8190" in m and "registered" in m for m in pruned), pruned
 
 
 def test_tick_announces_decay_even_when_nothing_probes():

@@ -8,11 +8,24 @@ import time
 import traceback
 
 from .model import WorkloadError
+from .stall_watchdog import StallWatchdog
 from .worker import WorkloadWorker
 
 
 class RemoteWorkloadFailed(RuntimeError):
     """Single-assignment remote invocation ended without Harmony success."""
+
+
+class SustainedWorkerFault(RuntimeError):
+    """No step completed for the whole fault budget; the unit must fail loudly, not wait quietly."""
+
+
+# A step that cannot complete (host control plane refusing systemctl, authority unreachable,
+# a refused cleanup) leaves the worker silent: it never reaches `worker/report`, so the
+# authority sees OFFLINE while the unit shows `active`. Past this budget the process exits
+# so the service manager reports the failure and restarts; 0 disables. 2026-10-17 incident.
+FAULT_EXIT_SECONDS = 600
+FAULT_EXIT_CODE = 71
 
 
 def main():
@@ -25,21 +38,36 @@ def main():
     logging.basicConfig(level=logging.INFO, handlers=[
         RotatingFileHandler(root/'worker.log', maxBytes=8*1024**2, backupCount=2)])
     worker = WorkloadWorker(config)
+    worker.watchdog = StallWatchdog().start()
+    fault_exit = config.get('fault_exit_seconds', FAULT_EXIT_SECONDS)
     try:
         serve(worker, single_assignment=config.get('single_assignment', False),
-              idle_timeout=config.get('idle_timeout_seconds', 300))
+              idle_timeout=config.get('idle_timeout_seconds', 300), fault_exit=fault_exit)
+    except SustainedWorkerFault as error:
+        logging.error('worker exiting: %s', error)
+        raise SystemExit(FAULT_EXIT_CODE)
     finally:
+        worker.watchdog.stop()
         worker.close()
 
 
-def serve(worker, sleep=time.sleep, *, single_assignment=False, idle_timeout=300):
+def serve(worker, sleep=time.sleep, *, single_assignment=False, idle_timeout=300,
+          fault_exit=FAULT_EXIT_SECONDS, clock=time.monotonic):
+    if type(fault_exit) not in (int, float) or not (fault_exit == 0 or 60 <= fault_exit <= 86400):
+        raise WorkloadError('invalid worker fault budget')
     if type(single_assignment) is not bool or type(idle_timeout) not in (int,float) or not 1 <= idle_timeout <= 3600:
         raise WorkloadError('invalid single-assignment worker settings')
     seen = set()
+    waiting = False
+    fault_since = None
     idle_deadline = time.monotonic()+idle_timeout
     while True:
         try:
             worked = worker.step()
+            if waiting:
+                logging.info('worker recovered: step completed after an authority/worker fault')
+                waiting = False
+            fault_since = None
             if worked and single_assignment:
                 status = worker.client.request('worker/status', {})
                 if status.get('state') == 'succeeded':
@@ -56,6 +84,8 @@ def serve(worker, sleep=time.sleep, *, single_assignment=False, idle_timeout=300
         except RemoteWorkloadFailed:
             raise
         except Exception as error:
+            waiting = True
+            fault_since = clock() if fault_since is None else fault_since
             logging.warning('worker waiting after %s: %s', type(error).__name__, str(error)[:512])
             # The full traceback once per distinct type+location, so a wedge
             # names its own cause without repeating every 5 s.
@@ -65,6 +95,10 @@ def serve(worker, sleep=time.sleep, *, single_assignment=False, idle_timeout=300
                 seen.add(signature)
                 logging.warning('worker wait cause (first occurrence):\n%s',
                                 ''.join(traceback.format_exception(type(error), error, error.__traceback__))[-4000:])
+            if fault_exit and clock()-fault_since >= fault_exit:
+                raise SustainedWorkerFault(
+                    f'no step completed for {int(clock()-fault_since)}s; last fault {type(error).__name__}: '
+                    f'{str(error)[:300]}') from error
             sleep(5)
 
 

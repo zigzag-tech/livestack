@@ -7,11 +7,13 @@ residency.
 --model <size>` handles download, patch and build). Three facts drive
 everything here:
 
-* **The model stays mapped in host RAM.** VRAM holds only the compute state and
-  the KV cache — and the cache is sized to whatever VRAM is free. That is why
-  the unit is `exclusive_device: true` (the planner charges it the whole card)
-  and why its footprint carries `ram_bytes`: planning only its VRAM is how a
-  host swaps.
+* **The model stays mapped in host RAM.** VRAM holds the compute state, the KV
+  window and the expert cache, and `--expert-cache auto` sizes that cache to
+  whatever VRAM is free minus `--vram-reserve-mib`. Left alone it takes the
+  whole card, so the adapter turns the planner's grant into that reserve
+  (`argv`): the engine then holds `min(grant, footprint_gb)` and the unit is
+  planned like any other — a declared VRAM `footprint_gb` and a host-RAM
+  `ram_gb` (planning only its VRAM is how a host swaps), no whole-device claim.
 * **The launch is the repo's own server, not a bare engine binary.** The
   canonical start (what setup writes into `run-<model>.sh`) is
   `.venv/bin/python serve/server.py --engine strata --config strata-*.json
@@ -24,9 +26,10 @@ everything here:
   reports `measured: "unknown"` and the DECLARED numbers stand. Silence is not
   a measurement. MTP speculative decode is built in — never an attribute.
 
-`thinking`/`tools`/`vision` are NOT invented: they are what the units file
-declared, or False — only the operator knows what this build serves, and
-`tests/test_engines_attributes.py` pins that truth. The served `context_len` is
+`thinking`/`tools` are NOT invented: they are what the units file declared, or
+False — only the operator knows what this build serves, and
+`tests/test_engines_attributes.py` pins that truth. `vision` is the run
+config's: true exactly when setup installed the image encoder. The served `context_len` is
 declared for the same reason: it is baked into the engine config at setup time
 (`--context`), not on the server's command line.
 """
@@ -101,9 +104,6 @@ class StrataEngine(Engine):
     # -- what to launch ----------------------------------------------------
     def argv(self, spec: dict, budget: "Mapping[str, float] | None" = None,
              total_bytes: Optional[float] = None) -> "list[str]":
-        # NO BUDGET TRANSLATION: Strata sizes its cache to whatever VRAM is free
-        # when it starts, and with `exclusive_device` the grant is the whole
-        # device anyway. An engine that self-sizes must not be told a fraction.
         toks = _argv_tokens(spec)
         bad = [f for f in OWNED_BY_HARMONY
                if any(t == f or t.startswith(f + "=") for t in toks)]
@@ -116,10 +116,110 @@ class StrataEngine(Engine):
             self._python(spec),
             os.path.join(self.root(spec), "serve", "server.py"),
             "--engine", "strata",
-            "--config", self.config_path(spec),
+            "--config", self._sized_config(spec, budget, toks),
             "--port", str(spec["port"]),
             "--host", "127.0.0.1",
         ] + toks
+
+    # -- what VRAM it may take -------------------------------------------------
+    def _sized_config(self, spec: dict, budget: "Mapping[str, float] | None",
+                      toks: "list[str]") -> str:
+        """The run config with the engine held to the VRAM Harmony reserved.
+
+        SIZE TO THE GRANT, like the vLLM adapter: the target is the planner's
+        `vram_bytes` grant capped at the declared `footprint_gb` (a grant is
+        what is FREE, and the unit's residence is charged its footprint — an
+        engine that grew into the whole grant would hold more than it is
+        charged for). With no grant the declared footprint stands.
+
+        The cache stays `auto` and the knob is `--vram-reserve-mib` = free VRAM
+        now minus the target: auto re-checks once its slots are written and
+        shrinks if they do not fit, while an explicit `--expert-cache N` does
+        not, and Strata's DETAILS.md measured a cache at 0 MiB free decoding 7x
+        slower. Subtracting from free VRAM also bounds the compute state and KV
+        window without this adapter guessing their size.
+
+        The engine flags live inside the config, not on the server's command
+        line, so this writes a sibling copy. Its name does not start with
+        `strata-`: `config_path` picks the newest `strata-*.json`, and a copy
+        named that way would become the base of the next launch."""
+        base = self.config_path(spec)
+        try:
+            with open(base, "r", encoding="utf-8") as fh:
+                cfg = json.load(fh)
+        except (OSError, ValueError):
+            return base               # the server's own error names the file
+        # ONE batch-slot count: the unit's `max_concurrent` is what Harmony
+        # admits, so it is also the engine's `parallel` — a setup config that
+        # says otherwise would make the engine queue what Harmony let through
+        # (or idle slots Harmony never fills).
+        slots = self.launch_attributes(spec)["max_concurrent"]
+        resized = cfg.get("parallel", 1) != slots
+        cfg["parallel"] = slots
+        target = float(spec.get("footprint_gb") or 0) * (1 << 30)
+        granted = float((budget or {}).get("vram_bytes") or 0)
+        if granted > 0:
+            target = min(target, granted) if target > 0 else granted
+        free = self._free_vram_bytes(self._gpu_index(cfg, toks))
+        reserve_mib = None
+        if target > 0 and free is not None:
+            reserve_mib = max(0, int((free - target) // (1 << 20)))
+        if reserve_mib is None and not resized:
+            return base
+        if reserve_mib is not None:
+            args = [str(a) for a in cfg.get("args") or []]
+            out: "list[str]" = []
+            i = 0
+            while i < len(args):
+                if args[i] in ("--vram-reserve-mib", "--expert-cache"):
+                    i += 2            # replaced below
+                    continue
+                out.append(args[i])
+                i += 1
+            cfg["args"] = out + ["--expert-cache", "auto",
+                                 "--vram-reserve-mib", str(reserve_mib)]
+        path = os.path.join(os.path.dirname(base) or ".",
+                            f"harmony-{spec['name']}.strata.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(cfg, fh, indent=1)
+        print(f"[harmony-llm] {spec['name']}: "
+              f"{'planner granted ' + format(granted / (1 << 30), '.1f') + ' GiB, ' if granted else ''}"
+              f"footprint {float(spec.get('footprint_gb') or 0):.1f} GiB, "
+              + (f"{free / (1 << 30):.1f} GiB free -> --vram-reserve-mib {reserve_mib}, "
+                 if reserve_mib is not None else "free VRAM unknown, setup's cache kept, ")
+              + f"{slots} batch slot(s)",
+              flush=True)
+        return path
+
+    @staticmethod
+    def _gpu_index(cfg: dict, toks: "list[str]") -> int:
+        """The card the engine will run on, as nvidia-smi numbers it: the
+        unit's `--gpu` (what the planner's one-card claim is about), else the
+        config's `gpu`, else 0."""
+        for i, t in enumerate(toks):
+            if t == "--gpu" and i + 1 < len(toks):
+                return int(str(toks[i + 1]).split(",")[0])
+            if t.startswith("--gpu="):
+                return int(t.split("=", 1)[1].split(",")[0])
+        try:
+            return int(str(cfg.get("gpu", 0)).split(",")[0])
+        except ValueError:
+            return 0
+
+    @staticmethod
+    def _free_vram_bytes(index: int) -> "int | None":
+        """Free VRAM on that card, via nvidia-smi (no torch: a first CUDA call
+        in this process would itself take card space). None when unknowable,
+        and then the launch keeps the config as setup wrote it."""
+        import subprocess
+        try:
+            out = subprocess.run(
+                ["nvidia-smi", f"--id={index}", "--query-gpu=memory.free",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=5)
+            return int(float(out.stdout.strip().splitlines()[0]) * (1 << 20))
+        except Exception:
+            return None
 
     def ready(self, spec: dict, timeout: float = 2.0) -> bool:
         """Up AND loaded: `/health` answering, and `/status` (what the model is
@@ -153,11 +253,24 @@ class StrataEngine(Engine):
         `unmatched` list.
         """
         lines = list(getattr(capture, "lines", []) or [])
+        # Both spellings: the pinned rev's (`loaded … GiB at`, `expert cache …
+        # slots, `) and 0.1.45's (`experts loaded: 31.64 GiB at`, `expert cache
+        # (10612 experts, 13.66 GiB of VRAM)`).
         matched = [ln.strip() for ln in lines
-                   if (" loaded " in ln and "GiB at" in ln)
-                   or ("expert cache " in ln and " slots, " in ln)]
-        vram = self._pid_vram_bytes(pid)
-        pinned, mapped = self._proc_status_bytes(pid)
+                   if ((" loaded " in ln or " loaded: " in ln) and "GiB at" in ln)
+                   or ("expert cache " in ln and (" slots, " in ln or "GiB of VRAM" in ln))]
+        # The serve server is `pid`; the ENGINE holding the card and the RAM is
+        # its child (`engine/strata`). Reading `pid` alone found 256 MiB of
+        # Python and no engine, so the footprint went UNKNOWN — which the
+        # planner charges as the whole device, a whole-card claim by accident.
+        family = self._family(pid)
+        vram = self._pid_vram_bytes(family)
+        pinned = mapped = anon = None
+        for p in family:
+            lck, fil, ano = self._proc_status_bytes(p, anon=True)
+            pinned = (pinned or 0) + lck if lck is not None else pinned
+            mapped = (mapped or 0) + fil if fil is not None else mapped
+            anon = (anon or 0) + ano if ano is not None else anon
         row: dict = {"measured": "unknown", "source": "strata-startup",
                      "unmatched": ["no engine memory report: Strata's startup prints none"]}
         if matched:
@@ -168,6 +281,11 @@ class StrataEngine(Engine):
             row["ram_pinned_bytes"] = pinned
         if mapped is not None:
             row["ram_mapped_bytes"] = mapped
+        if anon is not None:
+            # 0.1.45 copies the experts into ordinary memory (measured on
+            # zz-whitby: 38 GiB RssAnon, VmLck 0, RssFile 0.2 GiB) — this is the
+            # host-RAM cost a units file's `ram_gb` should be checked against.
+            row["ram_resident_bytes"] = anon
         if vram is not None:
             # The card claim: compute state + the KV cache sized to the free
             # VRAM. One number both times — a self-sizing cache has no separate
@@ -180,36 +298,70 @@ class StrataEngine(Engine):
         return row
 
     @staticmethod
-    def _pid_vram_bytes(pid: "int | None") -> "int | None":
-        """VRAM this pid's engine holds, via nvidia-smi. None when unknowable —
-        an unreadable meter contributes nothing, it never fabricates a zero."""
+    def _family(pid: "int | None", proc: str = "/proc") -> "list[int]":
+        """`pid` and every process descended from it (the serve server and the
+        engine it spawned). Empty for no pid."""
         if not pid:
+            return []
+        children: "dict[int, list[int]]" = {}
+        try:
+            names = os.listdir(proc)
+        except OSError:
+            return [pid]
+        for name in names:
+            if not name.isdigit():
+                continue
+            try:
+                with open(os.path.join(proc, name, "stat"), "r", encoding="utf-8") as fh:
+                    # comm may hold spaces; ppid is the 2nd field after its ')'
+                    ppid = int(fh.read().rsplit(")", 1)[1].split()[1])
+            except (OSError, IndexError, ValueError):
+                continue
+            children.setdefault(ppid, []).append(int(name))
+        out, todo = [], [pid]
+        while todo:
+            p = todo.pop()
+            out.append(p)
+            todo.extend(children.get(p, []))
+        return out
+
+    @staticmethod
+    def _pid_vram_bytes(pids) -> "int | None":
+        """VRAM those pids hold, via nvidia-smi (one pid or a family). None when
+        unknowable or when none of them holds any — an unreadable meter
+        contributes nothing, it never fabricates a zero."""
+        if not pids:
             return None
+        want = {str(p) for p in (pids if isinstance(pids, (list, tuple, set)) else [pids])}
         import subprocess
         try:
             out = subprocess.run(
                 ["nvidia-smi", "--query-compute-apps=pid,used_memory",
                  "--format=csv,noheader,nounits"],
                 capture_output=True, text=True, timeout=5)
+            total, seen = 0, False
             for line in out.stdout.splitlines():
                 parts = [p.strip() for p in line.split(",")]
-                if len(parts) == 2 and parts[0] == str(pid):
-                    return int(float(parts[1]) * (1 << 20))
+                if len(parts) == 2 and parts[0] in want:
+                    total += int(float(parts[1]) * (1 << 20))
+                    seen = True
+            return total if seen else None
         except Exception:
             return None
-        return None
 
     @staticmethod
-    def _proc_status_bytes(pid: "int | None"):
-        """(`VmLck`, `RssFile`) from /proc/<pid>/status, in bytes.
+    def _proc_status_bytes(pid: "int | None", anon: bool = False):
+        """(`VmLck`, `RssFile`[, `RssAnon`]) from /proc/<pid>/status, in bytes.
 
         `VmLck` is what the engine mlock()s for the GPU — the PINNED memory —
         and `RssFile` is the file-backed mapping (the GGUF). Both, because the
         two numbers answer different questions ("how much RAM is committed" vs
-        "how much of the model is resident") and only one of them is the pin."""
+        "how much of the model is resident") and only one of them is the pin.
+        `RssAnon` (with `anon=True`) is the ordinary memory an engine copied its
+        weights into — neither pinned nor file-backed, and still host RAM."""
         if not pid:
-            return None, None
-        locked = mapped = None
+            return (None, None, None) if anon else (None, None)
+        locked = mapped = rss_anon = None
         try:
             with open(f"/proc/{pid}/status", "r", encoding="utf-8") as fh:
                 for line in fh:
@@ -217,16 +369,25 @@ class StrataEngine(Engine):
                         locked = int(line.split()[1]) * 1024
                     elif line.startswith("RssFile:"):
                         mapped = int(line.split()[1]) * 1024
+                    elif line.startswith("RssAnon:"):
+                        rss_anon = int(line.split()[1]) * 1024
         except OSError:
-            return None, None
-        return locked, mapped
+            return (None, None, None) if anon else (None, None)
+        return (locked, mapped, rss_anon) if anon else (locked, mapped)
 
     # -- what the launch line means -----------------------------------------
     def launch_attributes(self, spec: dict) -> dict:
         """`class=llm` is the only DERIVED fact — the endpoint shape is fixed
         (OpenAI chat/completions).
 
-        Everything else is DECLARED or absent: `thinking`/`tools`/`vision` (a
+        `vision` is READ FROM THE RUN CONFIG: setup writes a `"vision"` section
+        (encoder exe and mmproj) only when images were set up, and the server
+        refuses pictures without one. Flash-Next reads images, but `--yes`
+        leaves the encoder out, so the model's ability is not the unit's — the
+        units file defaulting it to false hid that the fix was a setup choice,
+        and a units file saying true over a text-only config would lie.
+
+        Everything else is DECLARED or absent: `thinking`/`tools` (a
         Strata build's chat template and tool parser are its own business),
         `context_len` (baked into the engine config at setup time, not on this
         command line), and `max_concurrent` (the server runs one sequence at a
@@ -235,8 +396,9 @@ class StrataEngine(Engine):
         """
         attrs = dict(spec.get("attributes") or {})
         attrs["class"] = "llm"
-        for key in ("thinking", "tools", "vision"):
+        for key in ("thinking", "tools"):
             attrs[key] = bool(attrs.get(key, False))
+        attrs["vision"] = self._config_has_vision(spec)
         if "context_len" not in attrs:
             attrs.pop("context_len", None)
         try:
@@ -245,6 +407,16 @@ class StrataEngine(Engine):
             declared = 0
         attrs["max_concurrent"] = declared if declared > 0 else DEFAULT_MAX_CONCURRENT
         return attrs
+
+    def _config_has_vision(self, spec: dict) -> bool:
+        """The run config sets up an image encoder whose files exist."""
+        try:
+            with open(self.config_path(spec), "r", encoding="utf-8") as fh:
+                vision = json.load(fh).get("vision")
+        except (OSError, ValueError, AttributeError):
+            return False
+        return (isinstance(vision, dict)
+                and all(os.path.exists(str(vision.get(k) or "")) for k in ("exe", "mmproj")))
 
     # -- how it dies --------------------------------------------------------
     def stop(self, proc) -> None:
