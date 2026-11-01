@@ -37,6 +37,16 @@ def clause_meets(attributes: Mapping, key: str, want: Any) -> bool:
         return False
     have = attributes[name]
     try:
+        # A unit attribute that lists values offers each of them (`task: [text_to_image, inpaint]`): a clause asking for
+        # any one of them is met, and a negative clause only when the unit offers none of what it excludes.
+        if _is_many(have):
+            wanted = (want["not"] if isinstance(want, Mapping) and set(want) == {"not"} else want)
+            hit = any(w in have for w in wanted) if _is_many(wanted) else wanted in have
+            if isinstance(want, Mapping) and set(want) == {"not"}:
+                return not hit
+            if op in ("", "!="):
+                return hit if op == "" else not hit
+            return False                          # an ordering clause on a list of values is never met
         if isinstance(want, Mapping) and set(want) == {"not"}:
             neg = want["not"]
             return have not in neg if _is_many(neg) else bool(have != neg)
