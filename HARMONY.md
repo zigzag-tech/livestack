@@ -34,6 +34,15 @@ A multi-GPU worker holds one primary placement and several same-owner device lea
 
 This is exclusivity over **participating managed tenants and valid leaseholders**, not a license to kill unmanaged GPU processes. Direct warm/ensure calls outside admission are outside that contract. External memory is measured and can block acquisition. Production activation of an exclusive drain is a separate operational action.
 
+## Holding a device for a human
+
+An exclusive lease is held by a live process. To reserve a card for work Harmony should simply stay off (a multi-day training run), **hold** it: the planner drops the device from its world, so it is never a placement, eviction or warm target. No need to stop hostd or the model servers.
+
+- Standing (survives restart): `LIVESTACK_DEVICES='{"zz-tower0/gpu0": {"hold": "histo training"}}'`.
+- Runtime (memory only): `POST /devices/<id>/hold` with `{"reason": "histo training"}`; `{"reason": null}` releases it.
+
+The device id is the one the peers report (`GET /status`). A hold does not stop unmanaged processes, and it does not evict what is already resident: drain first (or hold before the peers load).
+
 ## Two brains, two layers
 
 - **`planner.py` — placement** (cross-process): given the whole world (every unit's
