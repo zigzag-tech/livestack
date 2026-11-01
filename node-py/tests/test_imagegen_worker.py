@@ -300,6 +300,25 @@ def test_flux2_integrated_controller_is_not_charged_twice(tmp_path, monkeypatch)
     assert captured["units"][config["unit"]].footprint == config["resident_bytes"]
 
 
+def test_a_flux2_worker_offers_inpainting_and_a_qwen_worker_does_not(tmp_path, monkeypatch):
+    """The FLUX.2 runtime inpaints with the controller it already loads, so its unit offers `task: inpaint` and the
+    specialist `inpaint` (an inpaint request is placed only there); other image units offer text-to-image only."""
+    captured = _capture_attach(monkeypatch)
+    config = _depth_config(tmp_path)
+    config.update(model="black-forest-labs/FLUX.2-dev", unit="flux_2_dev_depth_int8")
+    monkeypatch.setattr(worker, "_verify_depth_startup", lambda _config: config["depth_guide"]["weight_bytes"])
+    worker.create_app(config)
+    unit = captured["units"][config["unit"]]
+    assert unit.attributes["task"] == ["text_to_image", "inpaint"] and unit.attributes["inpaint"] is True
+    assert unit.attributes["depth_guide"] is True
+    captured = _capture_attach(monkeypatch)
+    (tmp_path / "qwen").mkdir()
+    qwen = _depth_config(tmp_path / "qwen")
+    worker.create_app(qwen, runtime_factory=lambda *a, **k: None)
+    assert captured["units"][qwen["unit"]].attributes["task"] == "text_to_image"
+    assert "inpaint" not in captured["units"][qwen["unit"]].attributes
+
+
 def test_int8_controlnet_uses_quantized_footprint_and_preserves_source_identity(
         tmp_path, monkeypatch):
     captured = _capture_attach(monkeypatch)
