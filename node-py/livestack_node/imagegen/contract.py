@@ -137,7 +137,10 @@ def validate_request(body: dict) -> dict:
     if task == "inpaint":
         for name in ("init_image", "mask_image"):
             _validate_png(body[name], dimensions["width"], dimensions["height"], name)
-    out["harmony_requires"] = {"class": "imagegen", **req, "task": task, **({"inpaint": True} if task == "inpaint" else {})}
+    # The size is part of the need: a unit advertises the largest side it is qualified for (`max_dimension`), and the
+    # request is placed only where it fits (a 1024 px request placed on a 768 px unit was refused there, 2026-11-02).
+    out["harmony_requires"] = {"class": "imagegen", **req, "task": task, **({"inpaint": True} if task == "inpaint" else {}),
+                               "max_dimension>=": max(dimensions["width"], dimensions["height"])}
     return out
 
 

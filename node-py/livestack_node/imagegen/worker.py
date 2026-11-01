@@ -169,7 +169,9 @@ def create_app(config: dict | None = None, runtime_factory=ImageRuntime):
     fleet_token = (Path(config["fleet_token_file"]).read_text().strip()
                    if config.get("fleet_token_file") else None)
     attrs = {"class": "imagegen", "task": "text_to_image", "params_b": config["params_b"],
-             "model": config["model"], "license": "apache-2.0", "quantization": config.get("quantization", "nf4")}
+             "model": config["model"], "license": "apache-2.0", "quantization": config.get("quantization", "nf4"),
+             # The largest side this worker is qualified for, so placement only sends it requests that fit.
+             "max_dimension": config.get("max_dimension", 1024)}
     if config.get("revision") is not None:
         attrs["revision"] = config["revision"]
     if config["model"] == QWEN_IMAGE_MODEL:
