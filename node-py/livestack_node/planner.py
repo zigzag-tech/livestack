@@ -284,6 +284,9 @@ class WorldState:
     # host_id -> the reserve subtracted from `hosts`, kept for the placement
     # record only (the planner never spends it twice). Absent = unmeasured.
     host_reserve: Mapping[str, Res] = field(default_factory=dict)
+    # device_id -> active broker-owned lease state. Draining and other owners'
+    # exclusive leases make the device unavailable to ordinary placement.
+    device_leases: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
 
 
 # --- actions ----------------------------------------------------------------
@@ -527,6 +530,11 @@ class _World:
         `host_free`, so one `_fits` call answers both questions and an eviction
         gives its `ram_bytes` back to the pool it came from."""
         d = self.devices[device_id]
+        if self.w.device_leases.get(device_id, {}).get("state") in {
+                "draining", "exclusive", "expired_draining"}:
+            budget = {k: 0.0 for k in d.capacity}
+            budget.update(self.host_free(d.host_id))
+            return budget
         if any(self.w.units[k].exclusive_device for k in self.resident[device_id]):
             # An exclusive tenant OWNS the device: nothing on it is free, and the
             # reserve/headroom that protects co-tenants has nobody left to
@@ -761,7 +769,8 @@ def _hosted_has_room(world: "_World", d: Device) -> bool:
 
 
 def _device_matches(d: Device, selector: Mapping[str, str]) -> bool:
-    return all(d.labels.get(k) == v for k, v in selector.items())
+    return all(d.id == v if k == "device_id" else d.labels.get(k) == v
+               for k, v in selector.items())
 
 
 def _can_serve(unit: Unit, d: Device) -> bool:
@@ -1106,6 +1115,9 @@ def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
     best: Optional[_Option] = None
     for d in world.w.devices:
         if not _device_matches(d, {**unit.selector, **req.selector}):
+            continue
+        if world.w.device_leases.get(d.id, {}).get("state") in {
+                "draining", "exclusive", "expired_draining"}:
             continue
         if not _can_serve(unit, d):
             continue

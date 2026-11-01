@@ -32,6 +32,7 @@ from .planner import (
 )
 from .membership import MIA, MembershipPolicy, PeerRoster, RosterFull, probe_interval
 from .ledger import Candidate, Decision, JsonlLedger
+from .device_leases import DeviceLeaseStore
 
 
 class _UnitTelemetry:
@@ -286,6 +287,40 @@ class Peer:
     def evict(self, kind: str) -> None: ...             # pragma: no cover
 
 
+class LocalDeviceMeterPeer(Peer):
+    """A broker-local CUDA meter for a device with no model-server facade."""
+    def __init__(self, host_id: str, device_id: str, logical_device: int):
+        if type(logical_device) is not int or logical_device < 0:
+            raise ValueError("logical_device must be a nonnegative CUDA index")
+        from .meters import cuda_meter
+        self.base = f"local-meter://{device_id}"
+        self.host_id = host_id
+        self.device_id = device_id
+        self._meter = cuda_meter(logical_device)
+
+    def units(self):
+        return {}
+
+    def placements(self):
+        return []
+
+    def _read(self, key):
+        value = self._meter()
+        return value.get(key) if value else None
+
+    def device_memory(self):
+        return self._read("free")
+
+    def device_capacity(self):
+        return self._read("capacity")
+
+    def warm(self, kind: str) -> None:
+        raise RuntimeError("a device meter cannot warm a unit")
+
+    def evict(self, kind: str) -> None:
+        raise RuntimeError("a device meter cannot evict a unit")
+
+
 class HostBroker:
     def __init__(self, devices=None, peers: Optional[List[Peer]] = None,
                  policy: Optional[PlannerPolicy] = None,
@@ -302,7 +337,8 @@ class HostBroker:
                  emitter_id: str = "host-broker",
                  in_flight_ttl_s: float = 900.0,
                  residency_grace_s: float = 90.0,
-                 mesh_suspect_probe_s: Optional[float] = None):
+                 mesh_suspect_probe_s: Optional[float] = None,
+                 exclusive_store=None):
         # devices: a FIXED list (single-host / tests). If None, devices are
         # DISCOVERED from the peers' reported device_ids (federated / multi-host),
         # each sized from device_config[device_id] or default_capacity. That is the
@@ -373,6 +409,8 @@ class HostBroker:
         # lease ends. None on a host broker: nothing is recorded.
         self.policy_runtime = None
         self._lease_lock = threading.Lock()     # the reconcile thread snapshots too
+        self.exclusive_store = exclusive_store or DeviceLeaseStore(":memory:")
+        self._exclusive_condition = threading.Condition()
         # Counters are exposed with epoch-second bucket starts; planner and
         # lease timestamps remain on the broker's monotonic clock.
         self._telemetry = _UnitTelemetry(time.time)
@@ -897,7 +935,8 @@ class HostBroker:
 
     # -- world assembly (soft state: re-snapshot peers every time) ------------
     def snapshot(self, requests: Optional[List[Request]] = None,
-                 last_evicted_at: Optional[Mapping[str, float]] = None) -> WorldState:
+                 last_evicted_at: Optional[Mapping[str, float]] = None,
+                 device_lease_id: Optional[str] = None) -> WorldState:
         # Keyed by (kind, peer) so two nodes serving one kind on one host are
         # both recorded rather than the second being dropped by a setdefault.
         # Folded to the planner's per-kind map by aggregate_units() below.
@@ -1102,13 +1141,22 @@ class HostBroker:
         resolved = self._resolve_devices(discovered, measured_caps)
         hosts, host_reserve = self._host_pools(
             units, placements, {d.id: d.host_id for d in resolved})
+        device_leases = {
+            record["device_id"]: self.exclusive_store.state(record["device_id"])
+            for record in self.exclusive_store.active()
+        }
+        if device_lease_id is not None:
+            lease = self.exclusive_store.get_lease(device_lease_id)
+            if (lease is not None and lease["state"] == "exclusive"
+                    and lease["expires_at"] > now):
+                device_leases.pop(lease["device_id"], None)
         return WorldState(devices=tuple(resolved),
                           units=units,
                           placements=tuple(placements), requests=tuple(requests or ()),
                           now=now, last_evicted_at=dict(last_evicted_at or {}),
                           measured_free=measured,
                           hosts=hosts, host_reserve=host_reserve,
-                          demand=self.demand(now))
+                          demand=self.demand(now), device_leases=device_leases)
 
     # -- demand ----------------------------------------------------------------
     #
@@ -1268,11 +1316,167 @@ class HostBroker:
         """
         return {did: host for (_kind, did), (_at, host) in self._in_flight.items()}
 
+    def use_exclusive_store(self, store) -> None:
+        self.exclusive_store.close()
+        self.exclusive_store = store
+
+    @staticmethod
+    def _exclusive_result(record: dict, blockers=None) -> dict:
+        granted = record.get("state") == "exclusive"
+        return {
+            "granted": granted,
+            "exclusive_device": True,
+            "device_id": record["device_id"],
+            "lease_id": record.get("lease_id") if granted else None,
+            "request_id": record["request_id"],
+            "state": record["state"],
+            "free_bytes": record.get("free_bytes"),
+            "min_free_bytes": record["min_free_bytes"],
+            "blockers": record.get("blockers") if blockers is None else blockers,
+            "reason": record.get("reason"),
+        }
+
+    def _exclusive_block(self, record: dict, blockers, terminal=False, terminal_state="failed"):
+        now = self._now()
+        record = self.exclusive_store.blockers(record["request_id"], blockers, now)
+        if terminal:
+            record = self.exclusive_store.fail(record["request_id"], blockers[0]["type"], now, terminal_state)
+        with self._exclusive_condition:
+            self._exclusive_condition.notify_all()
+        return record
+
+    def _drive_exclusive(self, record: dict) -> dict:
+        if record["state"] in {"released", "failed", "timeout"}:
+            return record
+        now = self._now()
+        if record["state"] == "draining" and record["expires_at"] <= now:
+            blockers = record.get("blockers") or [{"type": "timeout", "detail": "exclusive acquisition timed out"}]
+            return self._exclusive_block(record, blockers, terminal=True, terminal_state="timeout")
+        if record["state"] == "exclusive":
+            return record
+        world = self.snapshot()
+        device_id = record["device_id"]
+        placements = [p for p in world.placements if p.device_id == device_id]
+        blockers = []
+        victims = []
+        for placement in placements:
+            unit = world.units.get(placement.kind)
+            if unit is None:
+                blockers.append({"type": "peer_unavailable", "kind": placement.kind})
+            elif placement.loading:
+                blockers.append({"type": "in_flight", "kind": placement.kind})
+            elif unit.residency == Residency.HARD_PIN:
+                blockers.append({"type": "hard_pin", "kind": placement.kind})
+            elif placement.busy:
+                blockers.append({"type": "busy", "kind": placement.kind})
+            elif now - placement.loaded_at < unit.min_residency_s and record["state"] != "expired_draining":
+                blockers.append({"type": "residency_floor", "kind": placement.kind})
+            else:
+                victims.append(placement)
+        if blockers:
+            if any(block["type"] == "hard_pin" for block in blockers):
+                return self._exclusive_block(record, blockers, terminal=True)
+            return self._exclusive_block(record, blockers)
+        if victims:
+            try:
+                for placement in victims:
+                    peer = self._peer_for(placement.kind, device_id)
+                    if peer is None:
+                        return self._exclusive_block(record, [{"type": "peer_unavailable", "kind": placement.kind}])
+                    peer.evict(placement.kind)
+                    self._in_flight.pop((placement.kind, device_id), None)
+                    for remembered in [key for key in self._resident_at
+                                       if key[1] == placement.kind and key[2] == device_id]:
+                        self._resident_at.pop(remembered, None)
+                for peer in {peer for peer in self.peers if peer.device_id == device_id}:
+                    peer.reclaim()
+            except Exception as exc:
+                return self._exclusive_block(record, [{"type": "peer_unavailable", "detail": str(exc)[:500]}])
+            return self._drive_exclusive(record)
+        if record["state"] == "expired_draining":
+            self.exclusive_store.release(record["lease_id"], now)
+            return self.exclusive_store.get(record["request_id"])
+        free = world.measured_free.get(device_id) if world.measured_free else None
+        if not free or "vram_bytes" not in free:
+            return self._exclusive_block(record, [{"type": "memory_unknown"}])
+        free_bytes = int(free["vram_bytes"])
+        if free_bytes < record["min_free_bytes"]:
+            return self._exclusive_block(record, [{
+                "type": "external_memory", "free_bytes": free_bytes,
+                "min_free_bytes": record["min_free_bytes"],
+            }])
+        record = self.exclusive_store.mark_exclusive(record["request_id"], record["lease_id"], free_bytes, now)
+        with self._exclusive_condition:
+            self._exclusive_condition.notify_all()
+        return record
+
+    def acquire_exclusive(self, request: Request, device_id: str, min_free_bytes: int,
+                          wait_timeout_s=240.0, ttl_s=120.0) -> dict:
+        if not self.dispatch:
+            raise ValueError("exclusive acquisition requires a dispatching host broker")
+        if not isinstance(device_id, str) or not device_id:
+            raise ValueError("exclusive acquisition requires selector.device_id")
+        world = self.snapshot()
+        device = next((d for d in world.devices if d.id == device_id), None)
+        if device is None or device.hosted:
+            raise ValueError("exclusive acquisition requires a local non-hosted device")
+        now = self._now()
+        try:
+            record = self.exclusive_store.begin(
+                request.id, device_id, request.owner, min_free_bytes,
+                wait_timeout_s, ttl_s, now)
+        except RuntimeError:
+            active = self.exclusive_store.active(device_id)[0]
+            result = self._exclusive_result(active, [{"type": "other_owner", "owner": active["owner"]}])
+            result.update(granted=False, lease_id=None, state="other_owner")
+            return result
+        deadline = now + wait_timeout_s
+        while True:
+            record = self._drive_exclusive(record)
+            if record["state"] in {"exclusive", "released", "failed", "timeout"}:
+                return self._exclusive_result(record)
+            remaining = deadline - self._now()
+            if remaining <= 0:
+                record = self.exclusive_store.fail(record["request_id"], "timeout", self._now(), "timeout")
+                return self._exclusive_result(record)
+            with self._exclusive_condition:
+                self._exclusive_condition.wait(timeout=min(1.0, remaining))
+
+    def reconcile_exclusive(self) -> None:
+        now = self._now()
+        self.exclusive_store.expire(now)
+        for record in self.exclusive_store.active():
+            try:
+                self._drive_exclusive(record)
+            except Exception as exc:
+                self.exclusive_store.blockers(record["request_id"], [{"type": "internal_error", "detail": str(exc)[:500]}], self._now())
+
+    def exclusive_heartbeat(self, lease_id: str, ttl_s=120.0) -> bool:
+        accepted = self.exclusive_store.heartbeat(lease_id, ttl_s, self._now())
+        if accepted:
+            with self._exclusive_condition:
+                self._exclusive_condition.notify_all()
+        return accepted
+
+    def exclusive_release(self, lease_id: str) -> bool:
+        accepted = self.exclusive_store.release(lease_id, self._now())
+        if accepted:
+            with self._exclusive_condition:
+                self._exclusive_condition.notify_all()
+        return accepted
+
+    def valid_exclusive_owner(self, lease_id: str, owner: str, device_id: str) -> bool:
+        lease = self.exclusive_store.get_lease(lease_id)
+        return bool(lease and lease["state"] == "exclusive"
+                    and lease["owner"] == owner and lease["device_id"] == device_id
+                    and lease["expires_at"] > self._now())
+
     def plan_and_apply(self, requests: Optional[List[Request]] = None,
-                       last_evicted_at: Optional[Mapping[str, float]] = None):
+                       last_evicted_at: Optional[Mapping[str, float]] = None,
+                       device_lease_id: Optional[str] = None):
         """Snapshot the fleet, plan, and dispatch every action to the owning peer.
         Evicts are applied before loads so VRAM is freed first. Returns the Plan."""
-        world = self.snapshot(requests, last_evicted_at)
+        world = self.snapshot(requests, last_evicted_at, device_lease_id)
         p = plan(world, self.policy)
         requested_ids = {r.id for r in (requests or [])}
         semantic = {r.id: r for r in world.requests if not r.kind}
@@ -1595,6 +1799,7 @@ class HostBroker:
                                         if k.endswith(":")}}
                       if pol else None),
             "vantage_host": self.host_id,
+            "device_leases": self.exclusive_store.active(),
             "hosts": {
                 h: ({"nodes": sorted(n, key=lambda r: r["peer"])}
                     | ({"links": matrix[h]} if h in matrix else {}))

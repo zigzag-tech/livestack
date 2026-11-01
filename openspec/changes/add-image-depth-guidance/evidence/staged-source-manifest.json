@@ -1,0 +1,12 @@
+{
+  "sourceHash": "582c3300a544892c917e8831f4d52dd9e938b1d583970857e9e9a0de254f6323",
+  "fileCount": 537,
+  "codeRevision": "b5abf81940dbc3f84975c748326ef2f6c64941b1",
+  "stagedAt": "2026-10-25T08:21:08.023316+00:00",
+  "scope": [
+    "examples",
+    "livestack_node",
+    "pyproject.toml",
+    "tests"
+  ]
+}
