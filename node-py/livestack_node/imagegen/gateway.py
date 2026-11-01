@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import time
 import urllib.error
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -109,7 +110,10 @@ def _exclusive_units(config):
 
 
 @contextmanager
-def _device_leases(profile, token):
+def _device_leases(profile, token, wait_deadline):
+    """Whole-device leases for ``profile``. While another request holds a
+    device, this one queues on the host broker until ``wait_deadline`` (the
+    caller's ``harmony_wait_s``, monotonic) rather than being refused."""
     if profile is None:
         yield []
         return
@@ -121,7 +125,8 @@ def _device_leases(profile, token):
             min_free_bytes=minimum[device_id] if isinstance(minimum, dict) else minimum,
             wait_timeout_s=profile.get("wait_timeout_s", 240),
             ttl_seconds=profile.get("ttl_seconds", 120),
-            request_id=f"image-gateway-{secrets.token_hex(16)}"))
+            request_id=f"image-gateway-{secrets.token_hex(16)}",
+            queue_wait_s=max(0.0, wait_deadline - time.monotonic())))
             for device_id in profile["device_ids"]]
 
 
@@ -155,6 +160,7 @@ def create_app(config=None, call=json_call):
             # planner's last reason if the window runs out first. The call outlives the window, so the HTTP
             # timeout is the window plus a margin.
             wait_s = request["harmony_wait_s"]
+            wait_deadline = time.monotonic() + wait_s
             admission = {
                 "requires": request["harmony_requires"],
                 "wait_s": wait_s,
@@ -169,7 +175,7 @@ def create_app(config=None, call=json_call):
             # A unit declared exclusive runs only while its host broker holds
             # whole-device leases for it: Harmony drains the other tenants itself
             # (never an external stop), and other admissions wait for the release.
-            with _device_leases(profile, fleet_token) as device_grants:
+            with _device_leases(profile, fleet_token, wait_deadline) as device_grants:
                 lease_ids = [lease["lease_id"] for lease in device_grants]
                 lease_evidence = json.dumps(lease_ids, separators=(",", ":")) if lease_ids else None
                 result = call(endpoint, "POST", "/v1/images/generations", request,

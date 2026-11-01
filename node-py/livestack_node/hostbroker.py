@@ -412,6 +412,9 @@ class HostBroker:
         self._lease_lock = threading.Lock()     # the reconcile thread snapshots too
         self.exclusive_store = exclusive_store or DeviceLeaseStore(":memory:")
         self._exclusive_condition = threading.Condition()
+        # Arrival order of exclusive acquisitions queued behind another
+        # request's lease, per device (guarded by _exclusive_condition).
+        self._exclusive_waiters: Dict[str, List[str]] = {}
         # Counters are exposed with epoch-second bucket starts; planner and
         # lease timestamps remain on the broker's monotonic clock.
         self._telemetry = _UnitTelemetry(time.time)
@@ -1505,26 +1508,99 @@ class HostBroker:
         return record
 
     def acquire_exclusive(self, request: Request, device_id: str, min_free_bytes: int,
-                          wait_timeout_s=240.0, ttl_s=120.0) -> dict:
+                          wait_timeout_s=240.0, ttl_s=120.0, queue_wait_s=0.0) -> dict:
+        """Take a whole-device lease on ``device_id`` for ``request``.
+
+        ``queue_wait_s`` is how long the caller will wait for ANOTHER request's
+        lease on the device to end. Waiters queue in arrival order per device;
+        the head begins its own acquisition once the device has no active
+        lease, and ``wait_timeout_s`` then bounds draining the device's
+        tenants. A holder that stops heartbeating lapses at its TTL and the
+        queue moves on, so a dead holder cannot block it forever. With
+        ``queue_wait_s == 0`` another request's lease is refused at once.
+
+        Observed 2026-11-02 on xc-tower-ubuntu: two FLUX.2 depth requests sent
+        back to back; the second carried ``harmony_wait_s: 1800`` and was
+        refused immediately with ``other_owner`` because this path never
+        queued. Callers describe the job; they must not sequence GPU work.
+        """
         if not self.dispatch:
             raise ValueError("exclusive acquisition requires a dispatching host broker")
         if not isinstance(device_id, str) or not device_id:
             raise ValueError("exclusive acquisition requires selector.device_id")
+        if (isinstance(queue_wait_s, bool) or not isinstance(queue_wait_s, (int, float))
+                or not 0 <= queue_wait_s <= 86400):
+            raise ValueError("queue_wait_s must be between 0 and 86400 seconds")
         world = self.snapshot()
         device = next((d for d in world.devices if d.id == device_id), None)
         if device is None or device.hosted:
             raise ValueError("exclusive acquisition requires a local non-hosted device")
-        now = self._now()
+        capacity = (device.capacity or {}).get("vram_bytes")
+        if capacity is not None and min_free_bytes > capacity:
+            # No release can ever make this fit: waiting would only hold the line.
+            return {"granted": False, "exclusive_device": True, "device_id": device_id,
+                    "lease_id": None, "request_id": request.id, "state": "failed",
+                    "free_bytes": None, "min_free_bytes": min_free_bytes,
+                    "blockers": [{"type": "exceeds_capacity", "capacity_bytes": capacity}],
+                    "reason": "exceeds_capacity"}
+        started = self._now()
+        queue_deadline = started + queue_wait_s
+        with self._exclusive_condition:
+            line = self._exclusive_waiters.setdefault(device_id, [])
+            if request.id not in line:
+                line.append(request.id)
         try:
-            record = self.exclusive_store.begin(
-                request.id, device_id, request.owner, min_free_bytes,
-                wait_timeout_s, ttl_s, now)
-        except RuntimeError:
-            active = self.exclusive_store.active(device_id)[0]
-            result = self._exclusive_result(active, [{"type": "other_owner", "owner": active["owner"]}])
-            result.update(granted=False, lease_id=None, state="other_owner")
-            return result
-        deadline = now + wait_timeout_s
+            while True:
+                self._lapse_dead_exclusive(device_id)
+                with self._exclusive_condition:
+                    line = self._exclusive_waiters[device_id]
+                    position = line.index(request.id)
+                blocker = None
+                if position == 0:
+                    try:
+                        record = self.exclusive_store.begin(
+                            request.id, device_id, request.owner, min_free_bytes,
+                            wait_timeout_s, ttl_s, self._now())
+                        break
+                    except RuntimeError:
+                        active = self.exclusive_store.active(device_id)
+                        if active:
+                            blocker = active[0]
+                else:
+                    active = self.exclusive_store.active(device_id)
+                    blocker = active[0] if active else None
+                now = self._now()
+                if now >= queue_deadline:
+                    if blocker is None:
+                        # Free device, earlier arrivals still ahead in line.
+                        return {"granted": False, "exclusive_device": True,
+                                "device_id": device_id, "lease_id": None,
+                                "request_id": request.id, "state": "queued",
+                                "free_bytes": None, "min_free_bytes": min_free_bytes,
+                                "blockers": [{"type": "queued", "ahead": position}],
+                                "reason": (f"waited {now - started:.0f}s of {queue_wait_s:g}s; "
+                                           f"{position} earlier request(s) still ahead")}
+                    result = self._exclusive_result(
+                        blocker, [{"type": "other_owner", "owner": blocker["owner"]}])
+                    result.update(
+                        granted=False, lease_id=None, state="other_owner",
+                        request_id=request.id, min_free_bytes=min_free_bytes,
+                        reason=(None if queue_wait_s <= 0 else
+                                f"waited {now - started:.0f}s of {queue_wait_s:g}s; device "
+                                f"still held by request {blocker['request_id']} "
+                                f"({blocker['state']})"))
+                    return result
+                with self._exclusive_condition:
+                    self._exclusive_condition.wait(timeout=min(1.0, queue_deadline - now))
+        finally:
+            with self._exclusive_condition:
+                line = self._exclusive_waiters.get(device_id, [])
+                if request.id in line:
+                    line.remove(request.id)
+                if not line:
+                    self._exclusive_waiters.pop(device_id, None)
+                self._exclusive_condition.notify_all()
+        deadline = self._now() + wait_timeout_s
         while True:
             record = self._drive_exclusive(record)
             if record["state"] in {"exclusive", "released", "failed", "timeout"}:
@@ -1535,6 +1611,14 @@ class HostBroker:
                 return self._exclusive_result(record)
             with self._exclusive_condition:
                 self._exclusive_condition.wait(timeout=min(1.0, remaining))
+
+    def _lapse_dead_exclusive(self, device_id: str) -> None:
+        """Expire leases past their TTL and finish draining expired ones on
+        ``device_id``, so a queued waiter is not left to the reconcile cadence."""
+        self.exclusive_store.expire(self._now())
+        for record in self.exclusive_store.active(device_id):
+            if record["state"] == "expired_draining":
+                self._drive_exclusive(record)
 
     def reconcile_exclusive(self) -> None:
         now = self._now()

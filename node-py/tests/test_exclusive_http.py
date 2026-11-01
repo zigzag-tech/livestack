@@ -261,3 +261,28 @@ def test_http_exclusive_input_errors_never_become_degraded_grants(
     assert missing_device["exclusive_device"] is True
     assert "degraded" not in missing_device
     assert responses[4].json() == responses[5].json() == {"ok": False}
+
+
+def test_http_exclusive_wait_s_queues_behind_another_lease(tmp_path, monkeypatch):
+    import time
+
+    monkeypatch.setenv("LIVESTACK_LEDGER_DIR", str(tmp_path))
+    broker = _broker([_Peer("http://alpha", "alpha", resident=False)], time.monotonic)
+    app = build_app(broker)
+
+    async def exercise():
+        async with _client(app) as client:
+            first = (await client.post("/admit", json=_exclusive_body("first"))).json()
+            refused = (await client.post(
+                "/admit", json=_exclusive_body("no-wait", owner="bob"))).json()
+            waiter = asyncio.create_task(client.post(
+                "/admit", json={**_exclusive_body("waiter", owner="bob"), "wait_s": 10}))
+            await asyncio.sleep(0.3)
+            assert not waiter.done()
+            await client.post(f"/lease/{first['lease_id']}/release")
+            return first, refused, (await waiter).json()
+
+    first, refused, waited = asyncio.run(exercise())
+    assert first["granted"] is True
+    assert refused["granted"] is False and refused["state"] == "other_owner"
+    assert waited["granted"] is True and waited["request_id"] == "waiter"

@@ -1773,3 +1773,130 @@ def test_exclusive_active_lease_survives_store_reopen(tmp_path):
         assert broker.snapshot().device_leases == {}
     finally:
         reopened.close()
+
+
+# --- Queued exclusive acquisition (2026-11-02): a request that can wait queues
+# behind another request's lease instead of being refused with other_owner. ---
+
+import threading as _threading
+
+
+def _acquire_async(broker, request_id, owner="bob", **kwargs):
+    out = {}
+
+    def run():
+        out["result"] = broker.acquire_exclusive(
+            _exclusive_request(request_id, owner=owner), "gpu0", 24_000,
+            wait_timeout_s=5, **kwargs)
+
+    thread = _threading.Thread(target=run, daemon=True)
+    thread.start()
+    return thread, out
+
+
+def _wait_queued(broker, request_ids, timeout=2.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with broker._exclusive_condition:
+            if broker._exclusive_waiters.get("gpu0", []) == list(request_ids):
+                return
+        time.sleep(0.01)
+    raise AssertionError(f"waiters {broker._exclusive_waiters} != {request_ids}")
+
+
+def test_exclusive_waiter_is_granted_after_the_holder_releases():
+    peer = ExclusivePeer("http://alpha", "alpha", resident=False)
+    broker = _exclusive_broker(peer, clock=time.monotonic)
+    first = broker.acquire_exclusive(
+        _exclusive_request("first", owner="alice"), "gpu0", 24_000,
+        wait_timeout_s=5, ttl_s=60)
+    assert first["granted"] is True
+
+    thread, out = _acquire_async(broker, "second", queue_wait_s=10)
+    _wait_queued(broker, ["second"])
+    time.sleep(0.2)
+    assert "result" not in out
+    assert broker.exclusive_release(first["lease_id"]) is True
+    thread.join(5)
+    assert out["result"]["granted"] is True
+    assert out["result"]["request_id"] == "second"
+    assert broker._exclusive_waiters == {}
+
+
+def test_exclusive_wait_budget_expiry_is_an_explicit_refusal():
+    peer = ExclusivePeer("http://alpha", "alpha", resident=False)
+    broker = _exclusive_broker(peer, clock=time.monotonic)
+    first = broker.acquire_exclusive(
+        _exclusive_request("first", owner="alice"), "gpu0", 24_000,
+        wait_timeout_s=5, ttl_s=60)
+
+    started = time.monotonic()
+    refused = broker.acquire_exclusive(
+        _exclusive_request("second", owner="bob"), "gpu0", 24_000,
+        wait_timeout_s=5, queue_wait_s=0.3)
+    assert time.monotonic() - started >= 0.3
+    assert refused["granted"] is False
+    assert refused["lease_id"] is None
+    assert refused["state"] == "other_owner"
+    assert refused["request_id"] == "second"
+    assert refused["blockers"] == [{"type": "other_owner", "owner": "alice"}]
+    assert "waited" in refused["reason"] and "first" in refused["reason"]
+    assert broker._exclusive_waiters == {}
+    assert broker.valid_exclusive_owner(first["lease_id"], "alice", "gpu0") is True
+
+
+def test_exclusive_waiters_are_served_in_arrival_order():
+    peer = ExclusivePeer("http://alpha", "alpha", resident=False)
+    broker = _exclusive_broker(peer, clock=time.monotonic)
+    first = broker.acquire_exclusive(
+        _exclusive_request("first", owner="alice"), "gpu0", 24_000,
+        wait_timeout_s=5, ttl_s=60)
+
+    second_thread, second = _acquire_async(broker, "second", queue_wait_s=10)
+    _wait_queued(broker, ["second"])
+    third_thread, third = _acquire_async(broker, "third", owner="carol", queue_wait_s=10)
+    _wait_queued(broker, ["second", "third"])
+
+    broker.exclusive_release(first["lease_id"])
+    second_thread.join(5)
+    assert second["result"]["granted"] is True
+    time.sleep(0.2)
+    assert "result" not in third        # still behind the second's lease
+    _wait_queued(broker, ["third"])
+
+    broker.exclusive_release(second["result"]["lease_id"])
+    third_thread.join(5)
+    assert third["result"]["granted"] is True
+    assert third["result"]["request_id"] == "third"
+
+
+def test_exclusive_waiter_proceeds_when_a_dead_holder_lapses_at_ttl():
+    peer = ExclusivePeer("http://alpha", "alpha", resident=False)
+    broker = _exclusive_broker(peer, clock=time.monotonic)
+    dead = broker.acquire_exclusive(
+        _exclusive_request("dead", owner="alice"), "gpu0", 24_000,
+        wait_timeout_s=5, ttl_s=0.5)
+    assert dead["granted"] is True
+
+    # Nobody heartbeats the dead holder's lease and no reconcile loop runs:
+    # the waiter itself must notice the lapse.
+    started = time.monotonic()
+    granted = broker.acquire_exclusive(
+        _exclusive_request("waiter", owner="bob"), "gpu0", 24_000,
+        wait_timeout_s=5, queue_wait_s=10)
+    assert granted["granted"] is True
+    assert 0.4 <= time.monotonic() - started < 5
+    assert broker.exclusive_store.get_lease(dead["lease_id"])["state"] == "released"
+
+
+def test_exclusive_beyond_device_capacity_is_refused_without_waiting():
+    peer = ExclusivePeer("http://alpha", "alpha", resident=False)
+    broker = _exclusive_broker(peer, clock=time.monotonic)
+    started = time.monotonic()
+    refused = broker.acquire_exclusive(
+        _exclusive_request("too-big"), "gpu0", 24_001,
+        wait_timeout_s=5, queue_wait_s=10)
+    assert time.monotonic() - started < 1
+    assert refused["granted"] is False
+    assert refused["reason"] == "exceeds_capacity"
+    assert broker.exclusive_store.active("gpu0") == []

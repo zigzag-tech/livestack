@@ -220,7 +220,9 @@ def test_exclusive_lease_heartbeats_and_releases_on_granting_broker(monkeypatch)
     assert paths.count("/admit") == 1
     assert "/lease/lease%2Fa%20b/heartbeat" in paths
     assert paths[-1] == "/lease/lease%2Fa%20b/release"
-    assert calls[0]["timeout"] == 3
+    # The HTTP call outlives the broker's own drain window by a margin.
+    assert calls[0]["timeout"] == 3 + 30
+    assert "wait_s" not in calls[0]["body"]
     heartbeat = calls[paths.index("/lease/lease%2Fa%20b/heartbeat")]
     assert heartbeat["body"] == {"ttl_seconds": 17}
     assert all(call["headers"].get("Authorization") == "Bearer secret"
