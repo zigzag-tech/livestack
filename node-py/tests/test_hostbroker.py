@@ -1900,3 +1900,22 @@ def test_exclusive_beyond_device_capacity_is_refused_without_waiting():
     assert refused["granted"] is False
     assert refused["reason"] == "exceeds_capacity"
     assert broker.exclusive_store.active("gpu0") == []
+
+
+def test_exclusive_drain_leaves_a_just_granted_unit_for_the_grant_hold():
+    # xc-tower-ubuntu 2026-11-02 14:45:28: drama3 was warmed for a waiting TTS
+    # admission and drained by the next FLUX exclusive acquisition 1 s later,
+    # before the caller's facade could start the request it was granted for.
+    peer = ExclusivePeer("http://alpha", "alpha", resident=False)
+    broker = _exclusive_broker(peer, clock=time.monotonic)
+    broker.grant_hold_s = 0.4
+    p = broker.plan_and_apply([Request("tts-1", "alpha", owner="voice",
+                                       created_at=time.monotonic())])
+    assert [g.device_id for g in p.of(Grant)] == ["gpu0"]
+
+    started = time.monotonic()
+    result = broker.acquire_exclusive(_exclusive_request("flux-2", owner="bob"),
+                                      "gpu0", 24_000, wait_timeout_s=5)
+    assert result["granted"] is True
+    assert time.monotonic() - started >= 0.35
+    assert _calls(peer, "evict") == [("evict", "alpha")]

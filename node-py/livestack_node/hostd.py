@@ -486,15 +486,27 @@ def build_app(broker: HostBroker):
             return attempt()
         wait_key = json.dumps([kind, requires, req.selector], sort_keys=True, default=str)
         deadline = time.monotonic() + wait_s
-        with admit_queue.waiting(wait_key, req.id):
+        # The broker keeps one arrival order per device across kinds: this
+        # request lets an exclusive acquisition that arrived before it go
+        # first, and an exclusive one arriving later yields to it (see
+        # HostBroker.admission_waiting). Brokers without it plan as before.
+        from contextlib import nullcontext
+        holding = getattr(broker, "admission_waiting", None)
+        arrived = broker._now() if holding else 0.0
+        with admit_queue.waiting(wait_key, req.id), (holding(req, arrived) if holding else nullcontext()):
             while True:
-                if admit_queue.is_head(wait_key, req.id):
+                if admit_queue.is_head(wait_key, req.id) and not (
+                        holding and broker.exclusive_ahead(req, arrived)):
+                    attempted_at = broker._now() if holding else 0.0
                     out = attempt()
                     if out.get("granted") or time.monotonic() >= deadline:
                         return out
+                    if holding:
+                        broker.admission_deferred(req.id, attempted_at)
                 elif time.monotonic() >= deadline:
                     return {"granted": False, "device_id": None, "plan": {},
-                            "reason": "still waiting behind earlier requests for the same requirement",
+                            "reason": ("still waiting behind earlier requests for the same requirement"
+                                       " or for the device"),
                             "defer_reason": None}
                 time.sleep(min(ADMIT_WAIT_POLL_S, max(0.0, deadline - time.monotonic())))
 

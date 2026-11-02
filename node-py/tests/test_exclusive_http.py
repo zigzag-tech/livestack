@@ -286,3 +286,92 @@ def test_http_exclusive_wait_s_queues_behind_another_lease(tmp_path, monkeypatch
     assert first["granted"] is True
     assert refused["granted"] is False and refused["state"] == "other_owner"
     assert waited["granted"] is True and waited["request_id"] == "waiter"
+
+
+# --- One arrival order per device across kinds (xc-tower-ubuntu, 2026-11-02/03).
+# A drama3 TTS admission waited (wait_s) for a GPU held by back-to-back FLUX
+# depth jobs. Each time a FLUX lease ended, the NEXT FLUX job — which arrived
+# after the TTS request — took the device: its exclusive acquisition began the
+# moment the lease ended and drained the TTS unit 1-3 s after the TTS grant
+# warmed it, before the caller could use it. For 1.5 h every TTS call ended
+# 503 "Harmony grant did not warm this provider". ---
+
+def _plain_peer(kind):
+    return _Peer(f"http://{kind}", kind, resident=False)
+
+
+def test_http_waiting_admission_outranks_a_later_exclusive_arrival(tmp_path, monkeypatch):
+    import time
+
+    from livestack_node import hostd
+
+    monkeypatch.setenv("LIVESTACK_LEDGER_DIR", str(tmp_path))
+    monkeypatch.setenv("LIVESTACK_REPLAN_INTERVAL", "0")
+    monkeypatch.setattr(hostd, "ADMIT_WAIT_POLL_S", 0.02)
+    tts = _plain_peer("tts")
+    broker = _broker([_Peer("http://alpha", "alpha", resident=False), tts], time.monotonic)
+    broker.grant_hold_s = 0.5
+    app = build_app(broker)
+    done = {}
+
+    async def timed(name, call):
+        response = await call
+        done[name] = time.monotonic()
+        return response.json()
+
+    async def exercise():
+        async with _client(app) as client:
+            first = (await client.post("/admit", json=_exclusive_body("flux-1"))).json()
+            assert first["granted"] is True
+            speech = asyncio.create_task(timed("tts", client.post(
+                "/admit", json={"id": "tts-1", "kind": "tts", "owner": "voice", "wait_s": 4})))
+            await asyncio.sleep(0.3)
+            later = asyncio.create_task(timed("flux-2", client.post(
+                "/admit", json={**_exclusive_body("flux-2", owner="bob"), "wait_s": 8})))
+            await asyncio.sleep(0.3)
+            assert not speech.done() and not later.done()
+            await client.post(f"/lease/{first['lease_id']}/release")
+            return await speech, await later
+
+    speech, later = asyncio.run(exercise())
+    # The request that waited longest is served first...
+    assert speech["granted"] is True and speech["device_id"] == "gpu0"
+    assert later["granted"] is True and later["request_id"] == "flux-2"
+    assert done["tts"] < done["flux-2"]
+    # ...and the later exclusive arrival does not drain what it was granted
+    # until the caller has had the grant hold to start using it.
+    assert ("warm", "tts") in tts.calls
+    assert done["flux-2"] - done["tts"] >= 0.4
+
+
+def test_http_waiting_admission_queues_behind_an_earlier_exclusive_arrival(
+        tmp_path, monkeypatch):
+    import time
+
+    from livestack_node import hostd
+
+    monkeypatch.setenv("LIVESTACK_LEDGER_DIR", str(tmp_path))
+    monkeypatch.setenv("LIVESTACK_REPLAN_INTERVAL", "0")
+    monkeypatch.setattr(hostd, "ADMIT_WAIT_POLL_S", 0.02)
+    tts = _plain_peer("tts")
+    broker = _broker([_Peer("http://alpha", "alpha", resident=False), tts], time.monotonic)
+    app = build_app(broker)
+
+    async def exercise():
+        async with _client(app) as client:
+            first = (await client.post("/admit", json=_exclusive_body("flux-1"))).json()
+            later = asyncio.create_task(client.post(
+                "/admit", json={**_exclusive_body("flux-2", owner="bob"), "wait_s": 8}))
+            await asyncio.sleep(0.3)
+            speech = asyncio.create_task(client.post(
+                "/admit", json={"id": "tts-1", "kind": "tts", "owner": "voice", "wait_s": 0.8}))
+            await asyncio.sleep(0.3)
+            await client.post(f"/lease/{first['lease_id']}/release")
+            return (await later).json(), (await speech).json()
+
+    later, speech = asyncio.run(exercise())
+    # FIFO both ways: the exclusive request arrived first, so it holds the
+    # device and the later admission is still waiting when its budget ends.
+    assert later["granted"] is True
+    assert speech["granted"] is False
+    assert ("warm", "tts") not in tts.calls

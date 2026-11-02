@@ -22,6 +22,7 @@ import os
 import threading
 import time
 from collections import deque
+from contextlib import contextmanager
 
 from dataclasses import replace
 from typing import Callable, Dict, List, Mapping, Optional, Tuple
@@ -338,7 +339,8 @@ class HostBroker:
                  in_flight_ttl_s: float = 900.0,
                  residency_grace_s: float = 90.0,
                  mesh_suspect_probe_s: Optional[float] = None,
-                 exclusive_store=None):
+                 exclusive_store=None,
+                 grant_hold_s: float = 30.0):
         # devices: a FIXED list (single-host / tests). If None, devices are
         # DISCOVERED from the peers' reported device_ids (federated / multi-host),
         # each sized from device_config[device_id] or default_capacity. That is the
@@ -415,6 +417,24 @@ class HostBroker:
         # Arrival order of exclusive acquisitions queued behind another
         # request's lease, per device (guarded by _exclusive_condition).
         self._exclusive_waiters: Dict[str, List[str]] = {}
+        # ONE arrival order per device across kinds. Exclusive waiters and
+        # plain admissions held by hostd (`wait_s`) used to queue in separate
+        # lines, so a FLUX job that arrived after a waiting TTS request took
+        # the device every time a lease ended (xc-tower-ubuntu, 2026-11-02/03;
+        # see HARMONY.md "One arrival order per device"). Both lines now record
+        # when each waiter arrived, and each yields to an older waiter of the
+        # other line that can be served on the same device.
+        # exclusive request id -> arrival (guarded by _exclusive_condition).
+        self._exclusive_arrived: Dict[str, float] = {}
+        # held plain admission id -> {"arrived", "kind", "requires",
+        # "deferred_at"}: the start of its latest attempt that was not granted.
+        self._admission_waiters: Dict[str, dict] = {}
+        # (kind, device) -> when a requested admission was granted it. An
+        # exclusive drain leaves that unit alone for `grant_hold_s`, so the
+        # caller can start the work it waited for before the unit is evicted
+        # (it is protected by being busy from then on).
+        self._granted_at: Dict[Tuple[str, str], float] = {}
+        self.grant_hold_s = float(grant_hold_s)
         # Counters are exposed with epoch-second bucket starts; planner and
         # lease timestamps remain on the broker's monotonic clock.
         self._telemetry = _UnitTelemetry(time.time)
@@ -1466,6 +1486,8 @@ class HostBroker:
                 blockers.append({"type": "hard_pin", "kind": placement.kind})
             elif placement.busy:
                 blockers.append({"type": "busy", "kind": placement.kind})
+            elif now - self._granted_at.get((placement.kind, device_id), float("-inf")) < self.grant_hold_s:
+                blockers.append({"type": "granted", "kind": placement.kind})
             elif now - placement.loaded_at < unit.min_residency_s and record["state"] != "expired_draining":
                 blockers.append({"type": "residency_floor", "kind": placement.kind})
             else:
@@ -1549,6 +1571,11 @@ class HostBroker:
             line = self._exclusive_waiters.setdefault(device_id, [])
             if request.id not in line:
                 line.append(request.id)
+            self._exclusive_arrived.setdefault(request.id, started)
+        # When this waiter first saw the device without a lease: an older held
+        # admission that has been planned since then and still not granted
+        # cannot use the device either, and stops holding this one back.
+        free_since = None
         try:
             while True:
                 self._lapse_dead_exclusive(device_id)
@@ -1556,16 +1583,23 @@ class HostBroker:
                     line = self._exclusive_waiters[device_id]
                     position = line.index(request.id)
                 blocker = None
+                admission = None
                 if position == 0:
-                    try:
-                        record = self.exclusive_store.begin(
-                            request.id, device_id, request.owner, min_free_bytes,
-                            wait_timeout_s, ttl_s, self._now())
-                        break
-                    except RuntimeError:
-                        active = self.exclusive_store.active(device_id)
-                        if active:
-                            blocker = active[0]
+                    if self.exclusive_store.active(device_id):
+                        free_since = None
+                    elif free_since is None:
+                        free_since = self._now()
+                    admission = self._older_admission(device_id, started, free_since)
+                    if admission is None:
+                        try:
+                            record = self.exclusive_store.begin(
+                                request.id, device_id, request.owner, min_free_bytes,
+                                wait_timeout_s, ttl_s, self._now())
+                            break
+                        except RuntimeError:
+                            active = self.exclusive_store.active(device_id)
+                            if active:
+                                blocker = active[0]
                 else:
                     active = self.exclusive_store.active(device_id)
                     blocker = active[0] if active else None
@@ -1573,13 +1607,15 @@ class HostBroker:
                 if now >= queue_deadline:
                     if blocker is None:
                         # Free device, earlier arrivals still ahead in line.
+                        ahead = position + (admission is not None)
                         return {"granted": False, "exclusive_device": True,
                                 "device_id": device_id, "lease_id": None,
                                 "request_id": request.id, "state": "queued",
                                 "free_bytes": None, "min_free_bytes": min_free_bytes,
-                                "blockers": [{"type": "queued", "ahead": position}],
+                                "blockers": [{"type": "queued", "ahead": ahead,
+                                              **({"admission": admission} if admission else {})}],
                                 "reason": (f"waited {now - started:.0f}s of {queue_wait_s:g}s; "
-                                           f"{position} earlier request(s) still ahead")}
+                                           f"{ahead} earlier request(s) still ahead")}
                     result = self._exclusive_result(
                         blocker, [{"type": "other_owner", "owner": blocker["owner"]}])
                     result.update(
@@ -1599,6 +1635,7 @@ class HostBroker:
                     line.remove(request.id)
                 if not line:
                     self._exclusive_waiters.pop(device_id, None)
+                self._exclusive_arrived.pop(request.id, None)
                 self._exclusive_condition.notify_all()
         deadline = self._now() + wait_timeout_s
         while True:
@@ -1611,6 +1648,71 @@ class HostBroker:
                 return self._exclusive_result(record)
             with self._exclusive_condition:
                 self._exclusive_condition.wait(timeout=min(1.0, remaining))
+
+    def _devices_serving(self, kind: str, requires: Mapping) -> set:
+        """Devices with a peer that declares ``kind`` (or a unit satisfying
+        ``requires``), as of the last snapshot."""
+        from .planner import _unit_satisfies
+        out = set()
+        for (unit_kind, key), unit in list(self.peer_units.items()):
+            if unit_kind == kind if kind else (requires and _unit_satisfies(unit, requires)):
+                device_id = self._peer_device.get(key)
+                if device_id:
+                    out.add(device_id)
+        return out
+
+    @contextmanager
+    def admission_waiting(self, request: Request, arrived: float):
+        """Hold ``request`` (a plain admission hostd keeps for `wait_s`, which
+        arrived at ``arrived`` on this broker's clock) in the device arrival
+        order for as long as the caller waits."""
+        with self._exclusive_condition:
+            self._admission_waiters[request.id] = {
+                "arrived": arrived, "kind": request.kind,
+                "requires": dict(request.requires or {}), "deferred_at": None}
+        try:
+            yield
+        finally:
+            with self._exclusive_condition:
+                self._admission_waiters.pop(request.id, None)
+                self._exclusive_condition.notify_all()
+
+    def admission_deferred(self, request_id: str, attempted_at: float) -> None:
+        """A held admission's attempt that began at ``attempted_at`` was not granted."""
+        with self._exclusive_condition:
+            waiter = self._admission_waiters.get(request_id)
+            if waiter is not None:
+                waiter["deferred_at"] = attempted_at
+
+    def _older_admission(self, device_id: str, arrived: float,
+                         free_since: Optional[float]) -> Optional[str]:
+        """A held admission that arrived before ``arrived`` and can be served on
+        ``device_id``, which an exclusive acquisition there must let go first.
+
+        One that was planned on the free device (an attempt begun after
+        ``free_since``) and still not granted is not waiting for this device:
+        a lower-priority request, or one that cannot fit, would otherwise hold
+        the exclusive line until its own budget ran out."""
+        with self._exclusive_condition:
+            waiters = [(w["arrived"], rid, w) for rid, w in self._admission_waiters.items()
+                       if w["arrived"] < arrived]
+        for _, rid, waiter in sorted(waiters, key=lambda row: row[:2]):
+            if (free_since is not None and waiter["deferred_at"] is not None
+                    and waiter["deferred_at"] >= free_since):
+                continue
+            if device_id in self._devices_serving(waiter["kind"], waiter["requires"]):
+                return rid
+        return None
+
+    def exclusive_ahead(self, request: Request, arrived: float) -> bool:
+        """True when every device that can serve the held admission ``request``
+        has an exclusive acquisition queued that arrived before it."""
+        devices = self._devices_serving(request.kind, request.requires or {})
+        with self._exclusive_condition:
+            return bool(devices) and all(
+                any(self._exclusive_arrived.get(rid, arrived) < arrived
+                    for rid in self._exclusive_waiters.get(device_id, []))
+                for device_id in devices)
 
     def _lapse_dead_exclusive(self, device_id: str) -> None:
         """Expire leases past their TTL and finish draining expired ones on
@@ -1747,6 +1849,10 @@ class HostBroker:
                     self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id} did not "
                               f"confirm ({type(e).__name__}: {e}) — treating it as "
                               f"in flight")
+        now = self._now()
+        for grant in p.of(Grant):
+            if grant.request_id in requested_ids and grant.device_id:
+                self._granted_at[(grant.kind, grant.device_id)] = now
         self._record_request_grants(p, requested_ids)
         return p
 

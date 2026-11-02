@@ -32,6 +32,16 @@ The SQLite record in `device_leases.py` survives broker restart. It does not sur
 
 A multi-GPU worker holds one primary placement and several same-owner device leases. Its gateway supplies ordered `device_lease_ids`; the broker validates every lease and uses the first for placement. `LIVESTACK_DEVICE_METERS` supplies measured memory for local CUDA devices that have no model facade. The worker returns every device/lease pair, and the gateway rejects missing or mismatched evidence.
 
+### One arrival order per device (2026-11-03)
+
+`wait_s` on `POST /admit` holds a request in a queue — plain admissions in hostd's per-requirement `AdmitQueue`, exclusive acquisitions FIFO per device. Until 2026-11-03 those were two separate lines that never compared arrival times, and the gap starved a waiting request of another kind:
+
+- **Observed** (xc-tower-ubuntu, 2026-11-03 03:26–05:10 CST): a drama3 TTS request (19.3 GB, one 24 GB card) waited while back-to-back FLUX depth jobs (exclusive leases on both cards) ran. Each time a FLUX lease ended, the waiting TTS admission did preempt the idle FLUX unit and warm drama3 — but the *next* FLUX job, which arrived after the TTS request, began its exclusive acquisition during that warm, waited on the `in_flight` blocker, and drained drama3 1–3 s after the load landed. The process-node facade then found its granted unit gone and answered `503 Harmony grant did not warm this provider`. Every retry for 1.5 h ended the same way; `last_evicted_at` showed drama3 evicted within seconds of each warm.
+- **Rule now:** the broker records when every held waiter arrived. The head of a device's exclusive line does not begin while an **older** held admission whose kind a peer on that device declares is still waiting; a held admission does not plan while every device that can serve it has an **older** exclusive waiter. So whoever waited longest goes first, whatever its kind.
+- **No lock-out by a hopeless waiter.** An older admission that has been planned since the device came free and was still not granted (lower priority than a resident, does not fit) is not waiting for this device, and stops holding the exclusive line back.
+- **A grant is usable.** A unit granted to a requested admission is not drained by an exclusive acquisition for `grant_hold_s` (30 s; blocker `granted`), so the caller can start the work it waited for; once it runs, it is `busy` and the facade refuses eviction.
+- The facade's "grant did not warm this provider" therefore means a genuine failure, not a lost race. A TTS caller that needs several calls (capabilities, then the job) may still wait behind a FLUX job that arrived between its calls — that is the queue working, and its wait is bounded by its own `harmony_wait_s`.
+
 This is exclusivity over **participating managed tenants and valid leaseholders**, not a license to kill unmanaged GPU processes. Direct warm/ensure calls outside admission are outside that contract. External memory is measured and can block acquisition. Production activation of an exclusive drain is a separate operational action.
 
 ## Holding a device for a human
