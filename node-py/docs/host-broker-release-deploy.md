@@ -46,3 +46,14 @@ specialist requirement `inpaint: true`); the FLUX.2 Fun Union unit serves it wit
 
 Roll back by restoring the three backups, `daemon-reload`, and restarting `livestack-fleetd`,
 `harmony-image-gateway` and `harmony-image-flux2-depth`. The SDXL and Qwen image units are unchanged.
+
+## Pending deploy: device leases released across reboot (branch agent/lease-boot-expiry), 2026-11-02
+
+`DeviceLeaseStore` stamps leases with hostd's `time.monotonic` clock, which restarts near 0 at reboot. After
+xc-tower-ubuntu rebooted on 2026-11-01, two harmony-image leases from the previous boot (expires_at ~2192059
+against an uptime of ~200 s) stayed `exclusive`, blocking admission and a deploy guard, and were released by hand.
+Leases now record the kernel boot id (`/proc/sys/kernel/random/boot_id`), and opening the store (hostd start)
+releases every active lease from another boot with `reason = previous_boot`. Rows from before this change have
+no boot id and are released at the first start, so deploy while `GET /status` shows no `device_leases` held.
+**Not yet deployed: xc-tower-ubuntu needs a hostd deploy** (only `device_leases.py` changed; cherry-pick onto the
+pinned release as above and run `tests/test_device_leases.py`).
