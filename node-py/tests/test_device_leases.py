@@ -302,3 +302,63 @@ def test_concurrent_begin_has_one_winner_per_device(store):
     assert len(records) == 1
     assert len(conflicts) == 7
     assert len(store.active("gpu-0")) == 1
+
+
+def test_leases_from_a_previous_boot_are_released_on_open(tmp_path):
+    # hostd stamps leases with time.monotonic, which restarts near 0 at reboot:
+    # a lease from the last boot has expires_at far in this boot's future, so
+    # expiry alone never frees it (xc-tower-ubuntu, 2026-11-01).
+    path = str(tmp_path / "device-leases.sqlite")
+    before = DeviceLeaseStore(path, boot_id="boot-a")
+    record = begin(before, now=2_190_000)
+    before.mark_exclusive(record["request_id"], record["lease_id"], 2048, 2_190_001)
+    draining = begin(before, request_id="request-2", device_id="gpu-1", now=2_190_000)
+    before.close()
+
+    after = DeviceLeaseStore(path, boot_id="boot-b")
+    try:
+        assert after.expire(200) == []
+        assert after.active() == []
+        assert after.state("gpu-0")["state"] == "shared"
+        for request_id in (record["request_id"], draining["request_id"]):
+            released = after.get(request_id)
+            assert released["state"] == "released"
+            assert released["reason"] == "previous_boot"
+        assert begin(after, request_id="request-3", now=200)["state"] == "draining"
+    finally:
+        after.close()
+
+
+def test_leases_from_the_same_boot_survive_reopen(tmp_path):
+    path = str(tmp_path / "device-leases.sqlite")
+    before = DeviceLeaseStore(path, boot_id="boot-a")
+    record = begin(before)
+    before.mark_exclusive(record["request_id"], record["lease_id"], 2048, 101)
+    before.close()
+
+    after = DeviceLeaseStore(path, boot_id="boot-a")
+    try:
+        assert [lease["request_id"] for lease in after.active()] == [record["request_id"]]
+        assert after.state("gpu-0")["state"] == "exclusive"
+    finally:
+        after.close()
+
+
+def test_rows_from_before_boot_ids_were_recorded_count_as_another_boot(tmp_path):
+    import sqlite3
+
+    path = str(tmp_path / "device-leases.sqlite")
+    store = DeviceLeaseStore(path, boot_id="boot-a")
+    record = begin(store)
+    store.close()
+    db = sqlite3.connect(path)
+    db.execute("ALTER TABLE device_leases DROP COLUMN boot_id")
+    db.commit()
+    db.close()
+
+    reopened = DeviceLeaseStore(path, boot_id="boot-a")
+    try:
+        assert reopened.active() == []
+        assert reopened.get(record["request_id"])["state"] == "released"
+    finally:
+        reopened.close()
