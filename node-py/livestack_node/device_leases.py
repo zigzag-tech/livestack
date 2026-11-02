@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS device_leases (
     updated_at REAL NOT NULL,
     expires_at REAL NOT NULL,
     reason TEXT,
-    blockers_json TEXT NOT NULL DEFAULT '[]'
+    blockers_json TEXT NOT NULL DEFAULT '[]',
+    boot_id TEXT NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS device_leases_one_active
     ON device_leases(device_id)
@@ -43,6 +44,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS device_leases_one_active
 CREATE INDEX IF NOT EXISTS device_leases_active
     ON device_leases(state, device_id);
 """
+
+
+BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id"
+
+
+def current_boot_id() -> str:
+    """This kernel boot's id, or '' where the kernel does not expose one."""
+    try:
+        with open(BOOT_ID_PATH) as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
 
 
 def _identifier(value: Any, name: str) -> str:
@@ -99,7 +112,12 @@ def _record(row: sqlite3.Row) -> Dict[str, Any]:
 class DeviceLeaseStore:
     """SQLite-backed device exclusivity with durable requests and leases."""
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, boot_id: Optional[str] = None):
+        # Callers pass time.monotonic, which restarts near 0 at reboot, so a
+        # lease persisted by an earlier boot carries an expires_at far in this
+        # boot's future and would never expire. Its holder died with that boot,
+        # so every lease stamped with another boot id is released on open.
+        self._boot_id = current_boot_id() if boot_id is None else boot_id
         self._lock = threading.RLock()
         self._db = sqlite3.connect(
             path,
@@ -112,6 +130,20 @@ class DeviceLeaseStore:
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA synchronous=FULL")
             self._db.executescript(_SCHEMA)
+            columns = {row["name"] for row in self._db.execute("PRAGMA table_info(device_leases)")}
+            if "boot_id" not in columns:
+                # Rows written before boot ids were recorded get '' (an unknown boot).
+                self._db.execute(
+                    "ALTER TABLE device_leases ADD COLUMN boot_id TEXT NOT NULL DEFAULT ''")
+            if self._boot_id:
+                self._db.execute(
+                    f"""
+                    UPDATE device_leases
+                    SET state = 'released', reason = 'previous_boot'
+                    WHERE boot_id != ? AND state IN ({','.join('?' for _ in ACTIVE_STATES)})
+                    """,
+                    [self._boot_id, *ACTIVE_STATES],
+                )
 
     def close(self) -> None:
         with self._lock:
@@ -206,8 +238,8 @@ class DeviceLeaseStore:
                     INSERT INTO device_leases (
                         request_id, lease_id, device_id, owner, state,
                         min_free_bytes, free_bytes, wait_timeout_s, ttl_s,
-                        created_at, updated_at, expires_at, reason, blockers_json
-                    ) VALUES (?, ?, ?, ?, 'draining', ?, NULL, ?, ?, ?, ?, ?, NULL, '[]')
+                        created_at, updated_at, expires_at, reason, blockers_json, boot_id
+                    ) VALUES (?, ?, ?, ?, 'draining', ?, NULL, ?, ?, ?, ?, ?, NULL, '[]', ?)
                     """,
                     (
                         request_id,
@@ -220,6 +252,7 @@ class DeviceLeaseStore:
                         now,
                         now,
                         now + wait_timeout_s,
+                        self._boot_id,
                     ),
                 )
             except sqlite3.IntegrityError as exc:
