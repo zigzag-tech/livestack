@@ -42,6 +42,14 @@ A multi-GPU worker holds one primary placement and several same-owner device lea
 - **A grant is usable.** A unit granted to a requested admission is not drained by an exclusive acquisition for `grant_hold_s` (30 s; blocker `granted`), so the caller can start the work it waited for; once it runs, it is `busy` and the facade refuses eviction.
 - The facade's "grant did not warm this provider" therefore means a genuine failure, not a lost race. A TTS caller that needs several calls (capabilities, then the job) may still wait behind a FLUX job that arrived between its calls — that is the queue working, and its wait is bounded by its own `harmony_wait_s`.
 
+### A busy tenant waits within the caller's window (2026-11-03)
+
+`wait_s` (the caller's `harmony_wait_s`) is the whole time the caller can wait; `wait_timeout_s` (profile default 240 s) is not a second, shorter budget for the same wait.
+
+- **Observed** (xc-tower-ubuntu, 2026-11-03): histo inpainting requests with `harmony_wait_s: 3600` were answered `503 exclusive admission refused: timeout` after 240 s, every ~5 min (the client retries), with blocker `[{"kind":"asr","type":"busy"}]` on `4bac2869`. The queue phase honoured the window, but once at the head the drain was bounded by `wait_timeout_s` alone. The paired `a46c4c2e` lease was released within milliseconds of each timeout, but sat drained and idle for the 240 s of every failed attempt.
+- **Rule now:** a drain blocked only by blockers that clear on their own — `busy` (a tenant finishing its work), `in_flight`, `granted`, `residency_floor` (`SELF_CLEARING_BLOCKERS` in `hostbroker.py`) — rolls its deadline forward, up to the caller's window (arrival + `wait_s`). `wait_timeout_s` now bounds a **stuck** drain: `peer_unavailable`, `memory_unknown`, `external_memory` end the attempt `wait_timeout_s` after the drain last stopped being merely busy. A deadline is never shorter than before, and `wait_s: 0` keeps the old bound exactly.
+- **Cost, by design:** while the drain waits, the device is fenced (draining) and a multi-device caller (the FLUX gateway leases its devices in order) holds the devices it already has. That is the arrival order working: the caller asked first and said how long it could wait. A tenant that reports `busy` when it is idle is a reporting bug, not this policy's to work around.
+
 This is exclusivity over **participating managed tenants and valid leaseholders**, not a license to kill unmanaged GPU processes. Direct warm/ensure calls outside admission are outside that contract. External memory is measured and can block acquisition. Production activation of an exclusive drain is a separate operational action.
 
 ## Holding a device for a human
