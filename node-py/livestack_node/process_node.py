@@ -40,7 +40,9 @@ class ProcessNode:
             raise ValueError('process_node_declared_default_required')
         self.process = None
         self.resident = set()
-        self.active = 0
+        # One entry per admitted request, keyed by token, valued by the task
+        # that owns the request. See `active`.
+        self.holds = {}
         self.last_used = time.monotonic()
         # Monotonic end of the last REAL served session since the worker started
         # (None until one ends). Drives the adaptive keep-warm window.
@@ -206,6 +208,23 @@ class ProcessNode:
             # residents busy until the kernel proves that this process died.
             self.last_error = 'worker_state_unknown'
 
+    @property
+    def active(self):
+        """Requests in flight: what makes every unit of this worker busy.
+
+        A hold lives no longer than the request task that took it. Cleanup that
+        never ran (a cancelled `finally`, a response generator that was never
+        started) would otherwise keep the device busy until the facade
+        restarts: on xc-tower-ubuntu, 2026-11-03, one leaked HTTP hold showed
+        asr busy:true for hours over an idle worker and every exclusive
+        admission of that card timed out on it.
+        """
+        for token, owner in list(self.holds.items()):
+            if owner.done():
+                del self.holds[token]
+                log.warning('released a hold whose request ended without returning it')
+        return len(self.holds)
+
     def _protected(self):
         now = time.monotonic()
         self.leases = {k:v for k,v in self.leases.items() if v['deadline'] > now}
@@ -286,7 +305,10 @@ class ProcessNode:
         response.raise_for_status()
         return response.json()
 
-    async def begin(self, unit):
+    async def begin(self, unit, owner=None):
+        """Admit one request; returns the hold token to hand to `finish`.
+
+        `owner` is the task whose end ends the request (default: the caller's)."""
         if self.config.get('admission_hold'):raise HTTPException(503,self.config['admission_hold'])
         # Crucially outside self.lock: the broker dispatches /model/warm back
         # to this listener before acknowledging the grant.
@@ -306,13 +328,17 @@ class ProcessNode:
             if not self._alive() or unit not in self.resident:
                 log.warning('admission granted but the provider is not resident')
                 raise HTTPException(503,'Harmony grant did not warm this provider')
-            self.active += 1
+            token = uuid.uuid4().hex
+            self.holds[token] = owner or asyncio.current_task()
             self.last_used = time.monotonic()
         if cold: self.last_warm_s = time.monotonic() - began
+        return token
 
-    async def finish(self):
-        async with self.lock:
-            self.active -= 1
+    def finish(self, token):
+        # Synchronous on purpose: it runs in `finally` blocks that may already
+        # be cancelled, where an await (it once took self.lock, which the 2 s
+        # sweep holds while it polls the worker) is cancelled before it returns.
+        if self.holds.pop(token, None) is not None:
             self.last_used = self.last_served = time.monotonic()
 
     def voices(self):
@@ -497,12 +523,12 @@ def create_app(node):
     @app.post('/livestack/lease')
     async def lease(request:Request):
         control(request);data=await request.json();unit=data.get('kind',node.config['default_unit'])
-        await node.begin(unit)
+        hold=await node.begin(unit)
         try:
             ident=uuid.uuid4().hex;ttl=max(1,min(float(data.get('ttl_seconds') or 60),300))
             node.leases[ident]={'unit':unit,'deadline':time.monotonic()+ttl}
             return {'lease_id':ident,'kind':unit,'expires_at':time.monotonic()+ttl}
-        finally:await node.finish()
+        finally:node.finish(hold)
 
     @app.post('/livestack/lease/{ident}/{operation}')
     async def lease_update(ident:str,operation:str,request:Request):
@@ -522,20 +548,20 @@ def create_app(node):
             if len(body)+len(chunk)>maximum:raise HTTPException(413,'inference body exceeds limit')
             body.extend(chunk)
         unit=await node.choose('/'+path,body,request.headers.get('content-type',''))
-        await node.begin(unit)
+        hold=await node.begin(unit)
         try:
             headers={k:v for k,v in request.headers.items() if k.lower() not in HOP_HEADERS}
             req=node.http.build_request(request.method,node.worker_url+'/'+path,
                 params=request.query_params,headers=headers,content=bytes(body))
             response=await node.http.send(req,stream=True)
         except BaseException:
-            await node.finish();raise
+            node.finish(hold);raise
         async def stream():
             try:
                 async for data in response.aiter_raw():yield data
             finally:
+                node.finish(hold)
                 await response.aclose()
-                await node.finish()
         return StreamingResponse(stream(),status_code=response.status_code,
             headers={k:v for k,v in response.headers.items() if k.lower() not in HOP_HEADERS})
 
@@ -548,7 +574,8 @@ def create_app(node):
         session=None
         admission=None
         start_id=None
-        holding=False
+        hold=None
+        owner=asyncio.current_task()
         send_lock=asyncio.Lock()
         unit=node.config['default_unit']
 
@@ -569,11 +596,17 @@ def create_app(node):
             """Admit on its own task so the socket keeps answering while a cold
             worker loads, and tell the client how long it has been and how long
             it is expected to take. A failure closes the socket with its reason."""
-            nonlocal holding
+            nonlocal hold
             began=time.monotonic()
-            task=asyncio.create_task(node.begin(unit))
+            task=asyncio.create_task(node.begin(unit,owner))
             grace=node.config.get('warm_notice_after_s',.25)
             expected=node.config.get('warm_expected_s',node.last_warm_s)
+            async def abandon():
+                # Cancelled, or the socket closed under a warming note: a grant
+                # that lands anyway must not keep its hold.
+                task.cancel()
+                await asyncio.gather(task,return_exceptions=True)
+                if not task.cancelled() and task.exception() is None:node.finish(task.result())
             try:
                 while True:
                     done,_=await asyncio.wait({task},timeout=1 if time.monotonic()-began>=grace else grace)
@@ -582,22 +615,18 @@ def create_app(node):
                     if expected:note['expectedMs']=int(expected*1000)
                     if start_id:note['sessionId']=start_id
                     try:await send_json(note)
-                    except RuntimeError:return
-            except asyncio.CancelledError:
-                task.cancel()
-                await asyncio.gather(task,return_exceptions=True)
-                if not task.cancelled() and task.exception() is None:await node.finish()
-                raise
-            try:task.result()
+                    except RuntimeError:await abandon();return
+            except BaseException:
+                await abandon();raise
+            try:hold=task.result()
             except HTTPException as exc:await refuse(str(exc.detail))
             except Exception as exc:await refuse('Harmony admission failed: '+type(exc).__name__)
-            else:holding=True
 
         async def release():
-            nonlocal holding
-            if holding:
-                holding=False
-                await node.finish()
+            nonlocal hold
+            if hold:
+                node.finish(hold)
+                hold=None
 
         try:
             # Admission starts at `start`/`resume` (the app opens the socket when
@@ -632,7 +661,7 @@ def create_app(node):
             if admission is None:
                 admission=asyncio.create_task(admit_and_report())
             await admission
-            if not holding:return
+            if not hold:return
             try:
                 backend_url=node.worker_url.replace('http://','ws://')+'/'+path
                 if ws.url.query:backend_url+='?'+ws.url.query

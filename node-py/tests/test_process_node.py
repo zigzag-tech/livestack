@@ -25,6 +25,12 @@ class Handler(BaseHTTPRequestHandler):
   self.send_response(200);self.end_headers();self.wfile.write(json.dumps(body).encode())
  def do_POST(self):
   data=self.rfile.read(int(self.headers.get('Content-Length','0')))
+  if self.path=='/trickle':
+   self.send_response(200);self.end_headers()
+   for _ in range(40):
+    try:self.wfile.write(b'x');self.wfile.flush();time.sleep(.05)
+    except OSError:return
+   return
   if self.path.endswith('/warm'): resident.append(json.loads(data)['unit'])
   elif self.path.endswith('/evict'): resident.clear()
   elif self.path=='/slow': time.sleep(.3)
@@ -104,6 +110,52 @@ class ProcessNodeTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await pending).status_code,200)
         self.assertEqual(grants,['asr','asr'])
         self.assertEqual(self.node.active,0)
+
+    async def test_a_hold_never_outlives_the_request_that_took_it(self):
+        async def admit(unit):
+            await self.node.warm(unit)
+            return {'granted':True,'device_id':self.cfg['device_id']}
+        self.node.admit=admit
+        await self.node.begin('asr')
+        self.assertEqual(self.node.active,1)
+        self.assertTrue((await self.node.residence())['units'][0]['busy'])
+        async def request_that_skips_its_cleanup():await self.node.begin('asr')
+        await asyncio.create_task(request_that_skips_its_cleanup())
+        self.assertEqual(self.node.active,1,'only the live request is in flight')
+        self.node.holds.clear()
+        self.assertFalse((await self.node.residence())['units'][0]['busy'])
+
+    async def test_client_gone_mid_response_releases_its_hold_while_the_sweep_holds_the_lock(self):
+        # xc-tower-ubuntu, 2026-11-03: a hold leaked this way reported asr
+        # busy over an idle worker for hours and blocked exclusive admission.
+        import uvicorn
+        async def admit(unit):
+            await self.node.warm(unit)
+            return {'granted':True,'device_id':self.cfg['device_id']}
+        self.node.admit=admit
+        self.node.config['announce_brokers']=[]
+        with socket.socket() as s:
+            s.bind(('127.0.0.1', 0))
+            port = s.getsockname()[1]
+        server=uvicorn.Server(uvicorn.Config(create_app(self.node),host='127.0.0.1',port=port,
+                                             log_level='error',lifespan='off'))
+        serving=asyncio.create_task(server.serve())
+        async def stop():
+            server.should_exit=True
+            await serving
+        self.addAsyncCleanup(stop)
+        while not server.started:await asyncio.sleep(.02)
+        async def sweep_polling_the_worker():
+            async with self.node.lock:await asyncio.sleep(.5)
+        async with httpx.AsyncClient() as c:
+            async with c.stream('POST',f'http://127.0.0.1:{port}/trickle',content=b'audio') as r:
+                async for _ in r.aiter_raw():break
+                self.assertEqual(len(self.node.holds),1)
+                sweep=asyncio.create_task(sweep_polling_the_worker())
+                await asyncio.sleep(0)
+        await sweep
+        await asyncio.sleep(.2)
+        self.assertEqual(self.node.holds,{},'the hold is returned by its request, not pruned later')
 
     async def test_idle_eviction_terminates_worker(self):
         await self.node.warm('asr')

@@ -42,6 +42,14 @@ A multi-GPU worker holds one primary placement and several same-owner device lea
 - **A grant is usable.** A unit granted to a requested admission is not drained by an exclusive acquisition for `grant_hold_s` (30 s; blocker `granted`), so the caller can start the work it waited for; once it runs, it is `busy` and the facade refuses eviction.
 - The facade's "grant did not warm this provider" therefore means a genuine failure, not a lost race. A TTS caller that needs several calls (capabilities, then the job) may still wait behind a FLUX job that arrived between its calls — that is the queue working, and its wait is bounded by its own `harmony_wait_s`.
 
+### Busy means a request is in flight (2026-11-03)
+
+A process-node facade reports every unit of its worker `busy` while it holds an admitted request (one process: any request protects it from stop/evict), and the broker treats a busy unit as an exclusive-drain blocker.
+
+- **Observed** (xc-tower-ubuntu, 2026-11-03 ~01:39–02:15 tower time): `GET /status` showed `mesh://livestack/tower-asr-1` with asr/align/diarize all `busy: true` while the polyasr worker said every unit idle (`active_requests: 0`, 256 MiB on the card), and the facade's own `load.in_flight` was 1. Every exclusive admission of `4bac2869` timed out on blocker `{"kind":"asr","type":"busy"}`, so the image gateway answered 503 and the histo history-scroll pipeline could not paint.
+- **Cause:** the in-flight count leaked one. `finish()` awaited `self.lock` from the proxy response's `finally`; when an HTTP client went away (Starlette cancels the streaming task on `http.disconnect`) while the 2 s sweep held that lock polling the worker, the cancelled `finally` never reached the decrement. Nothing ever returned it.
+- **Rule now:** a hold is a token owned by the request's task. `finish(token)` is synchronous and runs first in cleanup, so cancellation cannot skip it, and a hold whose owning task has ended is released when `busy` is computed (logged as a warning), so missed cleanup cannot block a device past the request that took it. Regression tests: `node-py/tests/test_process_node.py` (`client_gone_mid_response…`, `a_hold_never_outlives…`).
+
 This is exclusivity over **participating managed tenants and valid leaseholders**, not a license to kill unmanaged GPU processes. Direct warm/ensure calls outside admission are outside that contract. External memory is measured and can block acquisition. Production activation of an exclusive drain is a separate operational action.
 
 ## Holding a device for a human
