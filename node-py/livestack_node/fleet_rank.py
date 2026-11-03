@@ -244,7 +244,11 @@ def warm_for(node: dict, kind: str,
                if isinstance(u, dict) and (u.get("attributes") or {}).get("class")]
     if not classed:
         return None                      # nothing to judge on; today's behaviour
-    return any(u.get("resident") and (u.get("attributes") or {}).get("class") == kind
+    # `kind` is a class (`llm`) or a unit's own name (`flash_next`), the same
+    # two vocabularies `_serves` accepts; a unit asked for by name is warm when
+    # that unit is resident.
+    return any(u.get("resident")
+               and ((u.get("attributes") or {}).get("class") == kind or u.get("kind") == kind)
                and all(_clause_meets(u.get("attributes") or {}, key, want)
                        for key, want in (require or {}).items())
                for u in classed)
