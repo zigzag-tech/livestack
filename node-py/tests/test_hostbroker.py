@@ -1593,6 +1593,47 @@ def test_exclusive_busy_tenant_is_not_evicted_and_release_allows_retry():
     assert len(_calls(peer, "reclaim")) == 1
 
 
+def test_exclusive_busy_tenant_waits_within_the_callers_window():
+    """xc-tower-ubuntu 2026-11-03: inpainting with harmony_wait_s 3600 was
+    refused after the 240 s drain bound because asr was busy. A tenant that is
+    finishing its work holds the drain up to the caller's window; only a stuck
+    drain is bounded by wait_timeout_s."""
+    peer = ExclusivePeer("http://alpha", "alpha", busy=True)
+    broker = _exclusive_broker(peer, clock=time.monotonic)
+    finish = _threading.Timer(0.4, lambda: setattr(peer, "_busy", False))
+    finish.start()
+    started = time.monotonic()
+    granted = broker.acquire_exclusive(
+        _exclusive_request("busy-then-idle"), "gpu0", 24_000,
+        wait_timeout_s=0.1, queue_wait_s=5)
+    finish.join()
+    assert granted["granted"] is True, granted
+    assert time.monotonic() - started >= 0.4
+    assert peer.calls[0] == ("evict", "alpha")
+
+    # The window still bounds it: busy past the caller's window times out.
+    peer = ExclusivePeer("http://alpha", "alpha", busy=True)
+    broker = _exclusive_broker(peer, clock=time.monotonic)
+    started = time.monotonic()
+    refused = broker.acquire_exclusive(
+        _exclusive_request("busy-past-window"), "gpu0", 24_000,
+        wait_timeout_s=0.05, queue_wait_s=0.3)
+    assert refused["state"] == "timeout"
+    assert 0.25 <= time.monotonic() - started < 1.5
+    assert peer.calls == []
+
+    # A stuck drain (memory unknown) is not extended by the caller's window.
+    peer = ExclusivePeer("http://alpha", "alpha", resident=False, free=None)
+    broker = _exclusive_broker(peer, clock=time.monotonic)
+    started = time.monotonic()
+    stuck = broker.acquire_exclusive(
+        _exclusive_request("stuck"), "gpu0", 24_000,
+        wait_timeout_s=0.1, queue_wait_s=30)
+    assert stuck["state"] == "timeout"
+    assert stuck["blockers"] == [{"type": "memory_unknown"}]
+    assert time.monotonic() - started < 1.5
+
+
 def test_exclusive_external_memory_and_unknown_memory_fail_closed():
     for free, expected in (
             (23_999, {"type": "external_memory", "free_bytes": 23_999,

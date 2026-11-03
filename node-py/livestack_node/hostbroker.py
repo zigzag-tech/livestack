@@ -273,6 +273,11 @@ def peer_key(peer) -> str:
 
 _EPS_TIME = 1e-9
 
+# Exclusive-drain blockers that clear on their own: a tenant finishing its
+# work, loading, just granted to a waiting caller, or under its residency
+# floor. A drain held only by these waits within the caller's window.
+SELF_CLEARING_BLOCKERS = frozenset({"busy", "in_flight", "granted", "residency_floor"})
+
 
 class Peer:
     """Duck type for one model-server process. A real impl wraps the peer's
@@ -435,6 +440,10 @@ class HostBroker:
         # (it is protected by being busy from then on).
         self._granted_at: Dict[Tuple[str, str], float] = {}
         self.grant_hold_s = float(grant_hold_s)
+        # draining exclusive request id -> the caller's own deadline (its
+        # queue_wait_s from arrival). While every blocker is a tenant finishing
+        # work, the drain waits up to this rather than `wait_timeout_s`.
+        self._exclusive_windows: Dict[str, float] = {}
         # Counters are exposed with epoch-second bucket starts; planner and
         # lease timestamps remain on the broker's monotonic clock.
         self._telemetry = _UnitTelemetry(time.time)
@@ -1495,6 +1504,11 @@ class HostBroker:
         if blockers:
             if any(block["type"] == "hard_pin" for block in blockers):
                 return self._exclusive_block(record, blockers, terminal=True)
+            window = self._exclusive_windows.get(record["request_id"])
+            if (window is not None and record["state"] == "draining"
+                    and all(block["type"] in SELF_CLEARING_BLOCKERS for block in blockers)):
+                record = self.exclusive_store.extend_drain(
+                    record["request_id"], min(now + record["wait_timeout_s"], window), now)
             return self._exclusive_block(record, blockers)
         if victims:
             try:
@@ -1540,6 +1554,16 @@ class HostBroker:
         tenants. A holder that stops heartbeating lapses at its TTL and the
         queue moves on, so a dead holder cannot block it forever. With
         ``queue_wait_s == 0`` another request's lease is refused at once.
+
+        ``wait_timeout_s`` bounds a drain that is STUCK (peer unavailable,
+        memory unknown, external memory), not one waiting for a tenant to
+        finish its work: while every blocker is self-clearing (busy, loading,
+        just granted, under its residency floor) the drain deadline rolls
+        forward, up to the caller's own window (arrival + ``queue_wait_s``).
+        Observed 2026-11-03 on xc-tower-ubuntu: histo inpainting requests
+        with ``harmony_wait_s: 3600`` were refused after 240 s with
+        "exclusive admission refused: timeout" because the asr tenant on the
+        device reported busy, and the client's retries repeated it every ~5 min.
 
         Observed 2026-11-02 on xc-tower-ubuntu: two FLUX.2 depth requests sent
         back to back; the second carried ``harmony_wait_s: 1800`` and was
@@ -1637,17 +1661,24 @@ class HostBroker:
                     self._exclusive_waiters.pop(device_id, None)
                 self._exclusive_arrived.pop(request.id, None)
                 self._exclusive_condition.notify_all()
-        deadline = self._now() + wait_timeout_s
-        while True:
-            record = self._drive_exclusive(record)
-            if record["state"] in {"exclusive", "released", "failed", "timeout"}:
-                return self._exclusive_result(record)
-            remaining = deadline - self._now()
-            if remaining <= 0:
-                record = self.exclusive_store.fail(record["request_id"], "timeout", self._now(), "timeout")
-                return self._exclusive_result(record)
-            with self._exclusive_condition:
-                self._exclusive_condition.wait(timeout=min(1.0, remaining))
+        self._exclusive_windows[record["request_id"]] = queue_deadline
+        try:
+            while True:
+                record = self._drive_exclusive(record)
+                if record["state"] in {"exclusive", "released", "failed", "timeout"}:
+                    return self._exclusive_result(record)
+                # The record's deadline, which _drive_exclusive extends while
+                # tenants are only finishing work.
+                remaining = record["expires_at"] - self._now()
+                if remaining <= 0:
+                    record = self.exclusive_store.fail(record["request_id"], "timeout", self._now(), "timeout")
+                    return self._exclusive_result(record)
+                # Re-check before a rolling deadline lapses, so a still-busy
+                # tenant extends it rather than the check landing just after.
+                with self._exclusive_condition:
+                    self._exclusive_condition.wait(timeout=min(1.0, max(remaining / 2, 0.01)))
+        finally:
+            self._exclusive_windows.pop(record["request_id"], None)
 
     def _devices_serving(self, kind: str, requires: Mapping) -> set:
         """Devices with a peer that declares ``kind`` (or a unit satisfying
