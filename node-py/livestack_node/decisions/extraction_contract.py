@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from .contract import ContractError
 
 PROFILE_ID = "pane-ask-27b-v1:unqualified"
+FLASH_NEXT_PROFILE_ID = "pane-ask-flash-next-v1:unqualified"
+EXTRACTION_PROFILE_IDS = frozenset((PROFILE_ID, FLASH_NEXT_PROFILE_ID))
 KINDS = {"confirm", "choice", "multi", "input", "open"}
 
 
