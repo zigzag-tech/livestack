@@ -23,7 +23,7 @@ from test_decision_service import PRINCIPALS, _headers
 from test_nominal_27b_adapter import engine_http, request
 
 
-def scenario(engine, state, *, fault=None):
+def scenario(engine, state, *, fault=None, request_profile=None):
     async def run():
         app = FastAPI()
         install_pane_ask_route(app, lambda: PRINCIPALS)
@@ -83,6 +83,7 @@ def scenario(engine, state, *, fault=None):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://fixture") as client:
                 headers = _headers(realm=None) if fault == "no_realm" else _headers()
                 req = request()
+                req["profile_id"] = request_profile or engine.profile_id
                 if fault in ("expired_running", "cancelled_running"):
                     if fault == "expired_running":
                         req["deadline_at_ms"] = int(time.time() * 1000) + 200
@@ -207,3 +208,22 @@ def test_running_execution_keeps_all_reservations_until_backend_completion(engin
         assert response.status_code == 504 and response.json()["cause"] == "deadline_exceeded"
     assert len(admissions) == 1 and releases == ["lease-test"]
     assert state["completed"].is_set()
+
+
+def test_flash_next_facade_forwards_new_profile_and_refuses_legacy_before_admission(engine_http):
+    from livestack_node.decisions.extraction_contract import FLASH_NEXT_PROFILE_ID, PROFILE_ID
+    engine, state = engine_http
+    flash = replace(engine, unit='flash_next', family='qwen', params_b=125,
+                    profile_id=FLASH_NEXT_PROFILE_ID)
+    response, admissions, releases, _ = scenario(flash, state)
+    assert response.status_code == 200
+    assert response.json()['profile_id'] == FLASH_NEXT_PROFILE_ID
+    assert admissions[0]['profile_id'] == FLASH_NEXT_PROFILE_ID
+    assert state['calls'][0]['model'] == 'flash_next'
+    assert state['protected'] == (True, 1, 1)
+    assert releases == ['lease-test']
+    state['calls'].clear()
+    response, admissions, releases, _ = scenario(flash, state, request_profile=PROFILE_ID)
+    assert response.status_code == 503
+    assert response.json()['cause'] == 'profile_unavailable'
+    assert admissions == releases == state['calls'] == []
