@@ -1505,6 +1505,30 @@ def _named_unit(requested: str) -> "str | None":
     return None
 
 
+def _named_route(named: "str | None", requirement) -> "str | None":
+    """The unit a NAMED request may be served by elsewhere in the fleet, or None.
+
+    Only a unit named outright (no requirement) whose declared attributes say
+    what it is (`class`): the fleet ranking then considers only nodes hosting a
+    unit of the same name that meets those attributes, so a named request is
+    never answered by a different model."""
+    if requirement is not None or named is None or named not in SPECS:
+        return None
+    return named if _identity_of(named).get("class") else None
+
+
+# Attributes that describe a unit's CAPACITY on one node, not what the unit is.
+_CAPACITY_ATTRIBUTES = frozenset({"max_concurrent"})
+
+
+def _identity_of(name: str) -> dict:
+    """What a unit IS, for finding the same unit on another node: its attributes
+    minus per-node capacity (`max_concurrent` -- zz-whitby's flash_next 3,
+    xc-tower-ubuntu's 1 -- would make the same unit look like another)."""
+    return {k: v for k, v in _attributes_for(SPECS[name]).items()
+            if k not in _CAPACITY_ATTRIBUTES}
+
+
 def _model_choice(body) -> "str | None":
     """The unit the `model` field CHOOSES, or None when the caller has no
     opinion.
@@ -2123,14 +2147,23 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # travels to pay a load when nothing warm anywhere can serve it.
     fleet_target, fleet_expect, view = None, "cold", None
     trigger = None
+    # A caller that NAMED a unit chose it: "nothing warm here" is never a reason
+    # to answer with whichever OTHER model is warm elsewhere. It is a reason to
+    # use the SAME unit warm elsewhere before cold-loading a second copy here:
+    # the fleet is asked only for nodes hosting a unit of that name AND meeting
+    # its declared attributes (`_named_route`). 2026-11-03, xc-tower-ubuntu:
+    # with flash_next the default, every `model: "local"` here tried to cold-load
+    # a 45 GB-RAM copy on a box already short of RAM, while zz-whitby held one
+    # warm. If nothing elsewhere has it, the ranking answers "here" and the
+    # unit loads here exactly as before.
+    named_route = _named_route(named, requirement)
     if FLEET_URL and not warm_only:
-        # A caller that NAMED a unit chose it: "nothing warm here" is a reason to
-        # load that unit, not to answer with whichever other model is warm
-        # elsewhere. Only a stated NEED (or no opinion) widens the trigger.
         trigger = _wants_fleet_route(
             prefer, request.headers,
-            no_warm_local=((named is None or requirement is not None)
+            no_warm_local=((named is None or requirement is not None or named_route is not None)
                            and not _local_ready(requirement, prefer, unit, regions)))
+    route_require = requirement if named_route is None else _identity_of(named_route)
+    route_kind = {"kind": named_route} if named_route is not None else {}
     if trigger:
         view = await _off_loop(lambda: _fleet_view(FLEET_URL))
         if view is None:
@@ -2138,8 +2171,8 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
                                   "trigger": trigger, "request_id": ctx["request_id"]}
         else:
             fleet_target, ctx["fleet_route"] = _fleet_choose(
-                view, requirement, prefer, SELF_BASE,
-                expected_tokens=_expected_tokens(parsed_body), regions=regions)
+                view, route_require, prefer, SELF_BASE,
+                expected_tokens=_expected_tokens(parsed_body), regions=regions, **route_kind)
             age = _view_age_s(FLEET_URL)
             ctx["fleet_route"].update(
                 trigger=trigger, request_id=ctx["request_id"],
@@ -2155,7 +2188,8 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
                     detail=f"harmony: no llm target in {'/'.join(regions)}: "
                            f"{ctx['fleet_route'].get('reason')}")
         if fleet_target:
-            print(f"[harmony-llm] fleet route ({trigger}): {requirement or 'class=llm'} "
+            print(f"[harmony-llm] fleet route ({trigger}): "
+                  f"{(f'unit {named_route} ' if named_route else '')}{route_require or 'class=llm'} "
                   f"prefer {[c.get('metric') for c in prefer]} -> {fleet_target}",
                   flush=True)
             local = next((n for n in _ordered(prefer)
@@ -2498,6 +2532,14 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
                if k.lower() not in {"host", "content-length"}}
     headers["x-request-id"] = ctx["request_id"]
     timeout = httpx.Timeout(_wait_budget(parsed_body) + float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300")))
+    if fleet_target and named_route is not None and isinstance(parsed_body, dict) \
+            and str(parsed_body.get("model") or "").strip() == "local":
+        # `local` means "the receiving node's default", which on another node may
+        # be another model. The target was ranked for hosting `named_route`, so
+        # ask it for that unit by name. Any other name travels as asked.
+        routed_body = json.loads(body)
+        routed_body["model"] = named_route
+        body = json.dumps(routed_body).encode()
     if fleet_target:
         # PLACED by the fleet: send marked routed (the receiver never re-routes),
         # with what we expect of it. One retry on a refusal that cost the caller
@@ -2506,9 +2548,9 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         ctx["fleet_route"]["attempts"] = attempts
 
         def _rechoose(tried, _view=view):
-            tgt, rec = _fleet_choose(_view, requirement, prefer, SELF_BASE,
+            tgt, rec = _fleet_choose(_view, route_require, prefer, SELF_BASE,
                                      expected_tokens=_expected_tokens(parsed_body),
-                                     regions=regions, exclude=tried)
+                                     regions=regions, exclude=tried, **route_kind)
             return tgt, (rec.get("expect") or "cold")
 
         ctx["sent_at"] = time.time()

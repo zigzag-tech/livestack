@@ -540,16 +540,72 @@ def test_an_indifferent_request_with_nothing_warm_here_goes_to_a_warm_peer(srv, 
         t.close()
 
 
+def _unit_node(target, kind, attributes, resident=True):
+    """A fleet row for `target` hosting one unit named `kind`."""
+    n = target.node("na", resident)
+    n["units"] = [{"kind": kind, "resident": resident, "attributes": attributes}]
+    return n
+
+
 def test_a_caller_that_named_a_unit_is_not_routed_to_another_model(srv, node, monkeypatch):
+    """Named is named: a warm node holding a DIFFERENT model (another unit name,
+    other attributes) is never a destination; the node admits its own load."""
     t = _Target([("200", {"ok": 1})])
     try:
         monkeypatch.setattr(srv, "FLEET_URL", "http://fleet.invalid:8801")
-        monkeypatch.setattr(srv, "_fleet_view",
-                            lambda url: (_ for _ in ()).throw(AssertionError("fleet consulted")))
+        other = _unit_node(t, "flash_next", {"class": "llm", "params_b": 125,
+                                             "context_len": 131072})
+        monkeypatch.setattr(srv, "_fleet_view", lambda url: {
+            "generated_at": time.time(), "hosts": {"far": {"nodes": [other]}}})
         with _client(srv) as c:
             r = c.post("/v1/chat/completions", json={"model": "llm_title", "messages": [
                 {"role": "user", "content": "x"}]})
         assert r.status_code == 503 and node["admit"] == 1     # its own admission, not a detour
+        assert t.got == []
+    finally:
+        t.close()
+
+
+def test_a_named_unit_warm_elsewhere_is_used_instead_of_a_cold_copy_here(srv, node, monkeypatch):
+    """2026-11-03 xc-tower-ubuntu: `local` (default flash_next) cold-loaded a
+    45 GB-RAM copy here while zz-whitby held flash_next warm. The same unit,
+    warm elsewhere, serves it; `local` is sent as that unit's name, because on
+    the receiver `local` means ITS default."""
+    t = _Target([("200", {"ok": 1})])
+    try:
+        monkeypatch.setattr(srv, "FLEET_URL", "http://fleet.invalid:8801")
+        # As a real node publishes it: launch-derived attributes included, and
+        # its own capacity (max_concurrent), which is not identity.
+        same = _unit_node(t, "llm_title", {"class": "llm", "params_b": 27,
+                                           "context_len": 24576, "thinking": False,
+                                           "tools": False, "max_concurrent": 3})
+        monkeypatch.setattr(srv, "_fleet_view", lambda url: {
+            "generated_at": time.time(), "hosts": {"far": {"nodes": [same]}}})
+        with _client(srv) as c:
+            r = c.post("/v1/chat/completions", json={"model": "local", "messages": [
+                {"role": "user", "content": "x"}]})
+        assert r.status_code == 200
+        assert node["admit"] == 0 and node["ensure"] == 0        # no cold copy here
+        got = t.got[0]
+        assert got["body"]["model"] == "llm_title"
+        assert got["routed"].endswith(";expect=warm;v=1")
+        rec = node["routes"][-1]["fleet_route"]
+        assert rec["trigger"] == "no_warm_local"
+    finally:
+        t.close()
+
+
+def test_a_same_named_unit_with_other_attributes_is_not_the_named_unit(srv, node, monkeypatch):
+    t = _Target([("200", {"ok": 1})])
+    try:
+        monkeypatch.setattr(srv, "FLEET_URL", "http://fleet.invalid:8801")
+        impostor = _unit_node(t, "llm_title", {"class": "llm", "params_b": 8})
+        monkeypatch.setattr(srv, "_fleet_view", lambda url: {
+            "generated_at": time.time(), "hosts": {"far": {"nodes": [impostor]}}})
+        with _client(srv) as c:
+            r = c.post("/v1/chat/completions", json={"model": "llm_title", "messages": [
+                {"role": "user", "content": "x"}]})
+        assert r.status_code == 503 and node["admit"] == 1
         assert t.got == []
     finally:
         t.close()

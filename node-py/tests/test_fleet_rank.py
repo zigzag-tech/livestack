@@ -457,3 +457,15 @@ def test_a_broken_node_is_still_refused():
     view = _view({"gone": {"nodes": [_node("http://gone/livestack", state="mia",
                                            ready=False)]}})
     assert rank(view, "asr")["chosen"] is None
+
+
+def test_a_unit_asked_for_by_name_is_warm_when_that_unit_is_resident():
+    from livestack_node.fleet_rank import warm_for
+    node = {"units": [{"kind": "flash_next", "resident": True,
+                       "attributes": {"class": "llm", "params_b": 125}}]}
+    assert warm_for(node, "flash_next") is True
+    assert warm_for(node, "llm") is True
+    assert warm_for(node, "flash_next", {"params_b": 27}) is False
+    cold = {"units": [{"kind": "flash_next", "resident": False,
+                       "attributes": {"class": "llm"}}]}
+    assert warm_for(cold, "flash_next") is False
