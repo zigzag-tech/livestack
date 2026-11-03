@@ -87,6 +87,9 @@ backup `/etc/systemd/system/zzz-exclusive-device-leases.conf.hostd.before-busy-w
 `~/.local/share/livestack-releases/deploy-busy-wait.sh [--rollback]` (waits for no active lease and no open
 :8211/:8227 request). Only hostd restarted; the image gateway already passed `harmony_wait_s` as `queue_wait_s`.
 The boot-id lease change (agent/lease-boot-expiry, above) is still NOT in this release.
+Restarting hostd also restarts `polyasr.service` (seen at 02:49:56 and 03:01:48): drop-in
+`polyasr.service.d/99-harmony-demand-policy.conf` has `Requires=`/`BindsTo=livestack-hostd.service`, so treat a
+hostd restart as an ASR restart too and pick a moment polyasr is idle.
 
 ## Deployed: hold-leak fix on every other facade (91b49f4b backported), 2026-11-03
 
