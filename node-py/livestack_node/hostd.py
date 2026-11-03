@@ -116,7 +116,7 @@ from typing import Any, Dict, List, Optional
 from .hostbroker import HostBroker, LocalDeviceMeterPeer, RestPeer
 from .device_leases import DeviceLeaseStore
 from .mesh_peer import MeshPeer, RelayRoute, facade_id
-from . import relay_control
+from . import meshlink_runtime, relay_control
 from .membership import MembershipPolicy, RosterFull, policy_from_env
 from .fleet_scheduler import SchedulerPolicy
 from .planner import Defer, Device, Request, Residency, Unit, Evict, Grant, Load, plan as _plan
@@ -553,6 +553,9 @@ def build_app(broker: HostBroker):
                                   "at": time.monotonic(), "source": "reported"}
         return {"ok": True}
 
+    meshlink_log = meshlink_runtime.RateLimitedLog(
+        lambda m: print(m, flush=True))
+
     @app.post("/peers")
     def register(payload: dict = Body(...)):
         """A node reporting for duty.
@@ -590,6 +593,14 @@ def build_app(broker: HostBroker):
             )
         except RosterFull as e:
             raise HTTPException(429, str(e))
+        except meshlink_runtime.MeshlinkUnavailable as e:
+            # A mesh:// announce this host cannot dial. Named and bounded: 503
+            # with the degradation, one log line per window — not a 500 and a
+            # traceback per retry (~20/min for days on xc-tower-ubuntu).
+            meshlink_log("peers-mesh", f"[hostd] POST /peers refused {url!r}: "
+                         f"{e.degradation}: {e.reason}")
+            raise HTTPException(503, {"degradation": e.degradation,
+                                      "detail": e.reason, "missing": e.missing})
 
     @app.get("/peers")
     def peers():
@@ -638,6 +649,7 @@ def build_app(broker: HostBroker):
         return {"peers": out, "membership": broker.membership_snapshot(),
                 "last_evicted_at": state["last_evicted_at"], "hosted": hosted,
                 "host_id": broker.host_id,
+                "meshlink": meshlink_runtime.probe(),
                 "links": {k: round(v, 1) for k, v in broker.link_ms.items()},
                 "counters": counters}
 
@@ -1412,6 +1424,7 @@ def _node_control_token_from_env(env=None) -> Optional[str]:
 
 
 def main():
+    meshlink_runtime.startup_check(lambda m: print(m, flush=True))
     # Nodes report for duty (POST /peers), so these localhost guesses are no
     # longer how membership is *meant* to work — but they stay, as seeds.
     #
