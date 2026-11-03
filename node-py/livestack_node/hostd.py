@@ -386,7 +386,8 @@ def build_app(broker: HostBroker):
                 raise HTTPException(400, "exclusive acquisition requires positive min_free_bytes")
             # `wait_s` on an exclusive admission is how long the caller will
             # queue behind ANOTHER request's lease on the device (FIFO per
-            # device); `wait_timeout_s` then bounds draining its tenants.
+            # device); `wait_timeout_s` then bounds a stuck drain, while a busy
+            # tenant finishing its work is waited for within `wait_s`.
             try:
                 return broker.acquire_exclusive(
                     req, req.selector.get("device_id"), min_free_bytes,

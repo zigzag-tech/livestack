@@ -296,6 +296,25 @@ class DeviceLeaseStore:
             assert result is not None
             return result
 
+    def extend_drain(self, request_id: str, expires_at: float, now: float) -> Dict[str, Any]:
+        """Move a live draining request's deadline out to ``expires_at`` (never earlier)."""
+        request_id = _identifier(request_id, "request_id")
+        expires_at = _now(expires_at)
+        now = _now(now)
+        with self._transaction():
+            self._db.execute(
+                """
+                UPDATE device_leases
+                SET expires_at = ?, updated_at = ?
+                WHERE request_id = ? AND state = 'draining' AND expires_at > ? AND expires_at < ?
+                """,
+                (expires_at, now, request_id, now, expires_at),
+            )
+            result = self._get(request_id)
+            if result is None:
+                raise ValueError("unknown request_id")
+            return result
+
     def heartbeat(self, lease_id: str, ttl_s: float, now: float) -> bool:
         lease_id = _identifier(lease_id, "lease_id")
         ttl_s = _seconds(ttl_s, "ttl_s", MAX_TTL_S)
