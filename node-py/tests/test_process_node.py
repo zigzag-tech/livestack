@@ -138,6 +138,7 @@ class ProcessNodeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.node.capability())['resident'], [])
 
     async def test_websocket_start_ack_does_not_allocate_gpu(self):
+        self.node.config['admit_on']='first_audio'
         # The real synchronous client runs off the asyncio fixture thread.
         def request():
             with TestClient(create_app(self.node)) as c:
@@ -169,6 +170,7 @@ class ProcessNodeTest(unittest.IsolatedAsyncioTestCase):
             self.node.cache_frame(s,frame[:8]+(4).to_bytes(8,'big')+b'audio')
 
     async def test_real_websocket_replays_audio_and_context_after_worker_eviction(self):
+        self.node.config['admit_on']='first_audio'
         script=Path(self.cfg['argv'][1])
         script.write_text("""
 import json,sys
@@ -203,19 +205,120 @@ uvicorn.run(app,host='127.0.0.1',port=int(sys.argv[1]),log_level='error')
         self.node.admit=admit
         frame=b'BASR'+bytes([1,1,0,0])+(0).to_bytes(8,'big')+b'audio'
         def request():
+            def frames(ws):
+                # `warming` progress frames are advisory and may precede any reply.
+                while True:
+                    m=ws.receive_json()
+                    if m['type']!='warming':return m
             with TestClient(create_app(self.node))as c:
                 with c.websocket_connect('/ws/transcribe')as ws:
                     ws.send_json({'type':'start','protocol':1,'sessionId':'replay','context':'private context'})
                     self.assertEqual(ws.receive_json()['type'],'started')
-                    ws.send_bytes(frame);self.assertEqual(ws.receive_json()['ackSeq'],0)
+                    ws.send_bytes(frame);self.assertEqual(frames(ws)['ackSeq'],0)
                 self.assertEqual(c.post('/livestack/model/evict',json={'unit':'asr'}).status_code,200)
                 with c.websocket_connect('/ws/transcribe')as ws:
                     ws.send_json({'type':'resume','protocol':1,'sessionId':'replay'})
                     self.assertEqual(ws.receive_json()['type'],'resumed')
                     ws.send_json({'type':'stop'})
-                    self.assertEqual(ws.receive_json()['type'],'ack')
-                    self.assertEqual(ws.receive_json(),{'type':'final','text':'private context','frames':1})
+                    self.assertEqual(frames(ws)['type'],'ack')
+                    self.assertEqual(frames(ws),{'type':'final','text':'private context','frames':1})
         await asyncio.to_thread(request)
+
+    # --- warm admission: the load overlaps with the person starting to speak ---
+
+    async def test_admission_starts_at_session_start_and_reports_warming(self):
+        async def admit(unit):
+            await asyncio.sleep(.6)
+            await self.node.warm(unit)
+            return {'granted':True,'device_id':self.cfg['device_id']}
+        self.node.admit=admit
+        self.node.config['warm_expected_s']=20
+        seen=[]
+        def request():
+            with TestClient(create_app(self.node)) as c:
+                with c.websocket_connect('/ws/transcribe') as ws:
+                    ws.send_json({'type':'start','protocol':1,'sessionId':'warm-session'})
+                    seen.append(ws.receive_json())
+                    # No audio has been sent: admission already runs, and the
+                    # client is told so instead of waiting in silence.
+                    seen.append(ws.receive_json())
+        await asyncio.to_thread(request)
+        self.assertEqual(seen[0]['type'],'started')
+        self.assertEqual(seen[1]['type'],'warming')
+        self.assertEqual(seen[1]['expectedMs'],20000)
+        self.assertEqual(seen[1]['sessionId'],'warm-session')
+        self.assertGreaterEqual(seen[1]['elapsedMs'],200)
+
+    async def test_refused_admission_says_why_in_frame_and_close(self):
+        async def admit(_unit):return {'granted':False}
+        self.node.admit=admit
+        from starlette.websockets import WebSocketDisconnect
+        got={}
+        def request():
+            with TestClient(create_app(self.node)) as c:
+                with c.websocket_connect('/ws/transcribe') as ws:
+                    ws.send_json({'type':'start','protocol':1,'sessionId':'refused'})
+                    ws.receive_json()
+                    got['frame']=ws.receive_json()
+                    try:ws.receive_json()
+                    except WebSocketDisconnect as exc:got['close']=(exc.code,exc.reason)
+        await asyncio.to_thread(request)
+        self.assertEqual(got['frame'],{'type':'error','error':'Harmony did not grant this device'})
+        self.assertEqual(got['close'],(1013,'Harmony did not grant this device'))
+        self.assertEqual(self.node.active,0)
+
+    async def test_disconnect_before_audio_releases_the_grant(self):
+        async def admit(unit):
+            await self.node.warm(unit)
+            return {'granted':True,'device_id':self.cfg['device_id']}
+        self.node.admit=admit
+        def request():
+            with TestClient(create_app(self.node)) as c:
+                with c.websocket_connect('/ws/transcribe') as ws:
+                    ws.send_json({'type':'start','protocol':1,'sessionId':'abandoned'})
+                    ws.receive_json()
+                    import time as _t;_t.sleep(1.5)
+        await asyncio.to_thread(request)
+        await asyncio.sleep(.2)
+        self.assertEqual(self.node.active,0,'a socket that never sent audio must not pin the device')
+
+    # --- adaptive keep-warm ---------------------------------------------------
+
+    async def test_default_idle_policy_is_unchanged(self):
+        await self.node.warm('asr')
+        self.node.last_served=__import__('time').monotonic()
+        self.node.last_used-=2
+        await self.node.sweep()
+        self.assertIsNone(self.node.process,'keep_warm_after_use_s defaults to off')
+
+    async def test_a_served_worker_stays_warm_longer_but_a_speculative_one_does_not(self):
+        self.node.config.update(keep_warm_after_use_s=30,keep_warm_max_s=900)
+        await self.node.warm('asr')            # speculative: nothing served
+        self.node.last_used-=2
+        await self.node.sweep()
+        self.assertIsNone(self.node.process,'a never-used warm is released at the floor')
+        await self.node.warm('asr')
+        self.node.last_served=__import__('time').monotonic()   # a real session ended
+        self.node.last_used-=2
+        await self.node.sweep()
+        self.assertIsNotNone(self.node.process,'a worker that just served stays warm')
+        self.node.last_used-=40
+        await self.node.sweep()
+        self.assertIsNone(self.node.process,'and is still released after the window')
+
+    async def test_keep_warm_is_capped_and_never_below_the_floor(self):
+        self.node.config.update(keep_warm_after_use_s=10**6,keep_warm_max_s=120)
+        self.node.last_served=1.0
+        self.assertEqual(self.node.keep_warm_window(),120)
+        self.node.config.update(keep_warm_after_use_s=5,idle_seconds=60)
+        self.assertEqual(self.node.keep_warm_window(),60)
+
+    async def test_planner_eviction_ignores_the_keep_warm_window(self):
+        self.node.config.update(keep_warm_after_use_s=600)
+        await self.node.warm('asr')
+        self.node.last_served=__import__('time').monotonic()
+        await self.node.evict('asr')
+        self.assertIsNone(self.node.process,'keep-warm is not a pin')
 
 
 if __name__ == '__main__': unittest.main()
