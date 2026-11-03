@@ -232,7 +232,8 @@ def exclusive_lease(kind: str, *, device_id: str, min_free_bytes: int,
 
     ``queue_wait_s`` is how long to wait in the device's FIFO line behind
     another request's lease before being refused; ``wait_timeout_s`` then
-    bounds draining the device once this request is at the head."""
+    bounds a stuck drain once this request is at the head (a tenant that is
+    only busy finishing its work is waited for within ``queue_wait_s``)."""
     if heartbeat_interval <= 0:
         raise ValueError("heartbeat_interval must be positive")
     res, base = _admit(
