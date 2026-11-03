@@ -147,3 +147,24 @@ def test_real_engine_deadline_collects_execution_without_fallback(engine_http):
     assert error.value.cause == "deadline_exceeded"
     assert len(state["calls"]) == 1
     assert state["completed"].is_set()
+
+
+def test_flash_next_profile_has_distinct_real_http_identity_and_no_legacy_substitution(engine_http):
+    from livestack_node.decisions.extraction_contract import FLASH_NEXT_PROFILE_ID
+    engine, state = engine_http
+    flash = replace(engine, unit="flash_next", params_b=125, family="qwen", profile_id=FLASH_NEXT_PROFILE_ID)
+    req = request()
+    req["profile_id"] = FLASH_NEXT_PROFILE_ID
+    result = infer(flash, req)
+    assert result["profile_id"] == FLASH_NEXT_PROFILE_ID
+    assert state["calls"][0]["model"] == "flash_next"
+    assert result["execution"]["model_revision"] == flash.model_revision
+    state["calls"].clear()
+    for candidate in [engine, replace(flash, params_b=27), replace(flash, family="other"),
+                      replace(flash, unit="another-125b")]:
+        with pytest.raises(ContractError):
+            infer(candidate, req)
+    assert state["calls"] == []
+    with pytest.raises(ContractError):
+        infer(flash, request())
+    assert state["calls"] == []

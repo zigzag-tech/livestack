@@ -28,10 +28,10 @@ def validate_registry_profile(raw, expected_sha256, engine, *, operator_waiver_r
         profile = json.loads(raw)
     except (ValueError, UnicodeError) as exc:
         raise ContractError('profile_unavailable', 'extraction registry profile is invalid JSON', 503) from exc
-    waiver = (validate_operator_waiver(operator_waiver_raw, profile_id=PROFILE_ID, engine=engine)
+    waiver = (validate_operator_waiver(operator_waiver_raw, profile_id=engine.profile_id, engine=engine)
               if operator_waiver_raw is not None else None)
-    if (not isinstance(profile, dict) or profile.get('profile_id') != PROFILE_ID
-            or (PROFILE_ID.endswith(':unqualified') and waiver is None)
+    if (not isinstance(profile, dict) or profile.get('profile_id') != engine.profile_id
+            or (engine.profile_id.endswith(':unqualified') and waiver is None)
             or (engine.qualification_hash.startswith('operator-waiver:') and waiver is None)
             or profile.get('qualification_hash') != engine.qualification_hash
             or profile.get('calibration_hash') != engine.qualification_hash
