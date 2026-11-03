@@ -126,6 +126,17 @@ LIVESTACK_ROUTE_PREFIX = relay_control.DEFAULT_ROUTE_PREFIX
 # Named degradations
 # ---------------------------------------------------------------------------
 
+class MeshRelayUnconfigured(meshlink_runtime.MeshlinkUnavailable, ValueError):
+    """meshlink imports, but this process has no relay configuration to dial
+    with (no cap key ring, no relay URLs). The same outcome as meshlink missing
+    — no ``mesh://`` peer can be dialled from here — so hostd refuses the
+    announce with the same named 503 rather than a 500 and a traceback per
+    retry (xc-tower-ubuntu 2026-11-03, ~10/min). Still a ValueError for callers
+    that caught the old exception."""
+
+    degradation = "mesh_relay_unconfigured"
+
+
 class MeshPeerError(RuntimeError):
     """Base for mesh dial failures. ``degradation`` is the stable name design.md
     assigns the class, so a probe failure can be attributed without parsing
@@ -293,13 +304,14 @@ class MeshPeer(RestPeer):
             _import_meshlink()
         self.realm, self.daemon_id, self._facade_prefix = parse_mesh_url(url)
         if relay_config is None or relay_config.cap_ring is None:
-            raise ValueError(
+            raise MeshRelayUnconfigured(
                 "mesh peer requires a relay config with a cap key ring "
                 "(LIVESTACK_RELAY_CAP_KEYS); minting no caller capability is "
-                "not a supported mode")
+                "not a supported mode", ["LIVESTACK_RELAY_CAP_KEYS"])
         if not relays:
-            raise ValueError(
-                f"mesh peer {url!r} has no relay candidates — set LIVESTACK_RELAY_URLS")
+            raise MeshRelayUnconfigured(
+                f"mesh peer {url!r} has no relay candidates — set LIVESTACK_RELAY_URLS",
+                ["LIVESTACK_RELAY_URLS"])
         self._relay_config = relay_config
         self._relays = {r.url: r for r in relays}
         self._account_id = account_id

@@ -82,3 +82,24 @@ def test_post_peers_mesh_announce_is_503_named_and_logged_once(no_meshlink, caps
     assert "Traceback" not in out
     assert broker.peers == []                              # no half-built row
     assert client.get("/status").json()["meshlink"]["available"] is False
+
+
+def test_post_peers_mesh_announce_without_relay_keys_is_503_named(monkeypatch, capsys):
+    """meshlink imports, but this hostd has no cap key ring: xc-tower-ubuntu
+    2026-11-03 answered each mesh:// announce with a ValueError 500 (~10/min)."""
+    monkeypatch.setattr(mesh_peer, "_MESHLINK_IMPORT_ERROR", None)
+    monkeypatch.setattr(mesh_peer, "mesh_route_py", object())
+    monkeypatch.delenv("LIVESTACK_RELAY_CAP_KEYS", raising=False)
+    broker = HostBroker(devices=[Device("gpu0", "h", capacity={"vram": 24})],
+                        peers=[], clock=lambda: 0.0)
+    client = TestClient(hostd.build_app(broker), raise_server_exceptions=False)
+    body = {"facade_url": "mesh://livestack/tower-asr/livestack", "host_id": "h"}
+    codes = [client.post("/peers", json=body) for _ in range(3)]
+    assert {r.status_code for r in codes} == {503}
+    detail = codes[0].json()["detail"]
+    assert detail["degradation"] == "mesh_relay_unconfigured"
+    assert detail["missing"] == ["LIVESTACK_RELAY_CAP_KEYS"]
+    out = capsys.readouterr().out
+    assert out.count("POST /peers refused") == 1
+    assert "Traceback" not in out
+    assert broker.peers == [] and broker.membership_snapshot() == []
