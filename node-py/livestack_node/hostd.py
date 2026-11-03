@@ -536,7 +536,9 @@ def build_app(broker: HostBroker):
             return {"ok": broker.exclusive_release(lease_id)}
         return {"ok": broker.hosted_release(lease_id, **extra)}
 
-    @app.post("/devices/{device_id}/hold")
+    # `:path`: a device id names its host (`zz-tower0/2aef6b61`), so a bare
+    # `{device_id}` 404s on every real card.
+    @app.post("/devices/{device_id:path}/hold")
     def device_hold(device_id: str, payload: dict = Body(...)):
         """Reserve (``{"reason": "..."}``) or release (``{"reason": null}``) a
         discovered device for a human. Takes effect on the next snapshot."""
