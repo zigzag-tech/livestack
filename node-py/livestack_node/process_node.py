@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 import copy
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import signal
@@ -28,6 +29,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 HOP_HEADERS = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
                'te', 'trailer', 'transfer-encoding', 'upgrade', 'host', 'content-length'}
 
+log = logging.getLogger('livestack.process_node')
+
 
 class ProcessNode:
     def __init__(self, config):
@@ -39,6 +42,12 @@ class ProcessNode:
         self.resident = set()
         self.active = 0
         self.last_used = time.monotonic()
+        # Monotonic end of the last REAL served session since the worker started
+        # (None until one ends). Drives the adaptive keep-warm window.
+        self.last_served = None
+        # Seconds the last admission that had to start the worker took; the
+        # estimate clients are shown while the next cold start is in progress.
+        self.last_warm_s = None
         self.lock = asyncio.Lock()
         self.http = httpx.AsyncClient(timeout=httpx.Timeout(180, connect=5), trust_env=False)
         self.worker_url = f"http://127.0.0.1:{config['worker_port']}"
@@ -179,6 +188,7 @@ class ProcessNode:
         self.resident.clear()
         self.last_child_report = {}
         self.last_error = None
+        self.last_served = None
         if self.cgroup is not None:
             self.cgroup.rmdir()
             self.cgroup = None
@@ -244,8 +254,26 @@ class ProcessNode:
         async with self.lock:
             await self._refresh()
             if (self._alive() and not self._protected() and
-                    time.monotonic()-self.last_used >= self.config.get('idle_seconds',60)):
+                    time.monotonic()-self.last_used >= self.keep_warm_window()):
                 await self._stop()
+
+    def keep_warm_window(self):
+        """Seconds a worker may sit idle before the sweep stops it.
+
+        `idle_seconds` (default 60) is the floor and, by itself, the whole
+        policy. `keep_warm_after_use_s` (default 0 = off) lengthens the window
+        only for a worker that has served a real session since it started, so
+        a person who just dictated is not charged a cold start for pausing,
+        while a worker warmed speculatively (a probe, a login-time open) is
+        still released at the floor. `keep_warm_max_s` bounds it (default
+        900). It is not a pin: the planner's `evict` ignores it, so a unit
+        still yields to a real demand for the device.
+        """
+        floor = self.config.get('idle_seconds', 60)
+        after_use = self.config.get('keep_warm_after_use_s', 0)
+        if not after_use or self.last_served is None:
+            return floor
+        return max(floor, min(after_use, self.config.get('keep_warm_max_s', 900)))
 
     async def admit(self, unit):
         broker = self.config.get('broker_url', 'http://127.0.0.1:8799')
@@ -262,21 +290,30 @@ class ProcessNode:
         if self.config.get('admission_hold'):raise HTTPException(503,self.config['admission_hold'])
         # Crucially outside self.lock: the broker dispatches /model/warm back
         # to this listener before acknowledging the grant.
+        began = time.monotonic()
+        cold = not self._alive()
         try: decision = await self.admit(unit)
-        except Exception: raise HTTPException(503,'Harmony admission unavailable') from None
+        except Exception as exc:
+            log.warning('admission failed: broker request raised %s', type(exc).__name__)
+            raise HTTPException(503,'Harmony admission unavailable') from None
         if (decision.get('granted') is not True or decision.get('degraded') or
                 decision.get('device_id') != self.config['device_id']):
+            log.warning('admission refused: granted=%r degraded=%r device_match=%r',
+                        decision.get('granted'), decision.get('degraded'),
+                        decision.get('device_id') == self.config['device_id'])
             raise HTTPException(503,'Harmony did not grant this device')
         async with self.lock:
             if not self._alive() or unit not in self.resident:
+                log.warning('admission granted but the provider is not resident')
                 raise HTTPException(503,'Harmony grant did not warm this provider')
             self.active += 1
             self.last_used = time.monotonic()
+        if cold: self.last_warm_s = time.monotonic() - began
 
     async def finish(self):
         async with self.lock:
             self.active -= 1
-            self.last_used = time.monotonic()
+            self.last_used = self.last_served = time.monotonic()
 
     def voices(self):
         directory = self.config.get('voices_dir')
@@ -509,9 +546,64 @@ def create_app(node):
         start=None
         first=None
         session=None
+        admission=None
+        start_id=None
+        holding=False
+        send_lock=asyncio.Lock()
+        unit=node.config['default_unit']
+
+        async def send_json(payload):
+            async with send_lock:await ws.send_json(payload)
+
+        async def refuse(reason):
+            # The client is told WHY, in an error frame and in the close reason
+            # (a close reason is bounded to 123 bytes), instead of a bare 1013.
+            log.warning('speech session refused: %s',reason)
+            try:
+                async with send_lock:
+                    await ws.send_json({'type':'error','error':reason})
+                    await ws.close(code=1013,reason=reason[:100])
+            except RuntimeError:pass
+
+        async def admit_and_report():
+            """Admit on its own task so the socket keeps answering while a cold
+            worker loads, and tell the client how long it has been and how long
+            it is expected to take. A failure closes the socket with its reason."""
+            nonlocal holding
+            began=time.monotonic()
+            task=asyncio.create_task(node.begin(unit))
+            grace=node.config.get('warm_notice_after_s',.25)
+            expected=node.config.get('warm_expected_s',node.last_warm_s)
+            try:
+                while True:
+                    done,_=await asyncio.wait({task},timeout=1 if time.monotonic()-began>=grace else grace)
+                    if done:break
+                    note={'type':'warming','elapsedMs':int((time.monotonic()-began)*1000)}
+                    if expected:note['expectedMs']=int(expected*1000)
+                    if start_id:note['sessionId']=start_id
+                    try:await send_json(note)
+                    except RuntimeError:return
+            except asyncio.CancelledError:
+                task.cancel()
+                await asyncio.gather(task,return_exceptions=True)
+                if not task.cancelled() and task.exception() is None:await node.finish()
+                raise
+            try:task.result()
+            except HTTPException as exc:await refuse(str(exc.detail))
+            except Exception as exc:await refuse('Harmony admission failed: '+type(exc).__name__)
+            else:holding=True
+
+        async def release():
+            nonlocal holding
+            if holding:
+                holding=False
+                await node.finish()
+
         try:
-            # Session setup is CPU work. An app opening its dictation socket at
-            # login must not allocate an accelerator until audio actually arrives.
+            # Admission starts at `start`/`resume` (the app opens the socket when
+            # the person taps the mic), so the load overlaps with them speaking.
+            # `admit_on: "first_audio"` restores allocate-on-first-byte for a
+            # client that opens its socket long before it records.
             while first is None:
                 message=await ws.receive()
                 if message['type']=='websocket.disconnect':return
@@ -522,6 +614,7 @@ def create_app(node):
                         if data.get('protocol')!=1 or not data.get('sessionId'):
                             await ws.send_json({'type':'error','error':'invalid ASR session setup'});continue
                         start=message['text']
+                        start_id=data['sessionId']
                         session=node.session(data['sessionId'],data['type']=='resume')
                         if data['type']=='start':session['start']=dict(data)
                         elif session['start'] is None:
@@ -531,10 +624,15 @@ def create_app(node):
                         ack={'type':'resumed' if data['type']=='resume' else 'started',
                              'protocol':1,'sessionId':data['sessionId'],'ackSeq':-1}
                         if int(data.get('control') or 1)>=2:ack['control']=2
-                        await ws.send_json(ack)
+                        await send_json(ack)
+                        if admission is None and node.config.get('admit_on','start')=='start':
+                            admission=asyncio.create_task(admit_and_report())
                         continue
                 first=message
-            await node.begin(node.config['default_unit'])
+            if admission is None:
+                admission=asyncio.create_task(admit_and_report())
+            await admission
+            if not holding:return
             try:
                 backend_url=node.worker_url.replace('http://','ws://')+'/'+path
                 if ws.url.query:backend_url+='?'+ws.url.query
@@ -582,14 +680,17 @@ def create_app(node):
                     finally:
                         for task in tasks:task.cancel()
                         await asyncio.gather(*tasks,return_exceptions=True)
-            finally:await node.finish()
+            finally:await release()
         except WebSocketDisconnect:pass
-        except RuntimeError:
-            try:await ws.close(code=1013,reason="Harmony speech session unavailable; retry")
-            except RuntimeError:pass
-        except Exception:
-            try:await ws.close(code=1013,reason='Harmony inference unavailable; retry')
-            except RuntimeError:pass
+        except RuntimeError as exc:
+            await refuse('Harmony speech session unavailable: '+str(exc)[:60])
+        except Exception as exc:
+            await refuse('Harmony inference unavailable: '+type(exc).__name__)
+        finally:
+            if admission is not None and not admission.done():
+                admission.cancel()
+                await asyncio.gather(admission,return_exceptions=True)
+            await release()
 
     return app
 
