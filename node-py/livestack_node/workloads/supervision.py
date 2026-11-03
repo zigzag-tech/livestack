@@ -18,6 +18,7 @@ import time
 
 from .model import WorkloadError, encode
 from . import docker_runtime
+from .control_plane import HostCommandFailed
 if sys.platform == 'win32':
     import msvcrt
 else:
@@ -92,7 +93,10 @@ class SystemdExecutor:
         return self.prefix + attempt_id + '.service'
 
     def command(self, *args, check=True):
-        return subprocess.run(args, check=check, capture_output=True, text=True, timeout=30)
+        try:
+            return subprocess.run(args, check=check, capture_output=True, text=True, timeout=30)
+        except subprocess.CalledProcessError as error:
+            raise HostCommandFailed(error) from error
 
     def _inspect_manager(self, manager, unit):
         reply = self.command('systemctl', manager, 'show', unit,

@@ -180,3 +180,16 @@ authority is upgraded.
   `in_flight` > 0, every min(idle/4, 30) s, failures logged and never fatal); the embed
   node's own loop is removed. Servers that still call `maybe_evict()` themselves
   (polyasr) sweep twice; that is idempotent under the manager's guard.
+
+## 9. Addendum (2026-10-18): the GPU planner reads the ledger too
+
+§6 left "two planners, one machine" half-solved: placement honoured model
+servers' host RAM, the host broker did not honour attempts'. The seam §6 named —
+a `host` input to the GPU planner's world rather than a dispatch-time skip — is
+now `host_ledger.py`: attempts' outstanding claims are subtracted from the
+broker's measured host pool (still pure `plan()`), and a `ram_bytes` load the
+planner defers for host memory is published as WAITING so placement drains new
+attempts for it. Priority as §6 wanted it: inference wins, at the next attempt
+boundary, without killing batch work. A cold server the broker plans is no
+longer charged its learned peak (it holds nothing until a load waits).
+HARMONY.md, "One host-RAM ledger for both planners".

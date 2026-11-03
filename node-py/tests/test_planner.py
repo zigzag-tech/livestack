@@ -789,6 +789,48 @@ def test_a_specialist_unit_is_not_a_candidate_for_generic_demand():
     assert g3 and g3[0].kind == "ocr", "naming the unit is still an explicit choice"
 
 
+def test_a_unit_with_several_specialist_capabilities_serves_demand_naming_any_of_them():
+    """FLUX.2 Fun Union does depth guidance and inpainting with one controller, so its unit declares both. Demand that
+    names either may use it; generic image demand, naming neither, still never lands on it."""
+    image = dict(priority=30, residency=Residency.UNPINNED, reload_cost=120,
+                 spread_group="imagegen", min_residency_s=0)
+    units = {
+        "qwen_image": Unit("qwen_image", {"vram": 20.5}, **image,
+                           attributes={"class": "imagegen", "task": "text_to_image", "params_b": 20}),
+        "flux_union": Unit("flux_union", {"vram": 20}, **image,
+                           attributes={"class": "imagegen", "task": ["text_to_image", "inpaint"], "params_b": 32,
+                                       "depth_guide": True, "inpaint": True}),
+    }
+    def granted(requires):
+        w = WorldState(devices=(gpu("gpu0"),), units=units,
+                       requests=(Request("r", "", created_at=1000, requires=requires),), now=1000)
+        g = [x for x in plan(w).of(Grant) if x.request_id == "r"]
+        return g[0].kind if g else None
+    assert granted({"class": "imagegen", "task": "inpaint", "inpaint": True}) == "flux_union"
+    assert granted({"class": "imagegen", "task": "text_to_image", "depth_guide": True}) == "flux_union"
+    assert granted({"class": "imagegen", "params_b>=": 20}) == "qwen_image", "generic demand skips the specialist"
+
+
+def test_a_depth_guided_image_unit_serves_only_demand_that_names_depth_guide():
+    image = dict(priority=30, residency=Residency.UNPINNED, reload_cost=120,
+                 spread_group="imagegen", min_residency_s=0)
+    units = {
+        "qwen_image": Unit("qwen_image", {"vram": 20.5}, **image,
+                           attributes={"class": "imagegen", "params_b": 20}),
+        "flux_depth": Unit("flux_depth", {"vram": 20}, **image,
+                           attributes={"class": "imagegen", "params_b": 32, "depth_guide": True}),
+    }
+
+    def granted(requires):
+        w = WorldState(devices=(gpu("gpu0"),), units=units,
+                       requests=(Request("r", "", created_at=1000, requires=requires),), now=1000)
+        return [g.kind for g in plan(w).of(Grant) if g.request_id == "r"]
+
+    # The depth unit is smaller, so without the rule it would be ranked first.
+    assert granted({"class": "imagegen", "params_b>=": 20}) == ["qwen_image"]
+    assert granted({"class": "imagegen", "depth_guide": True}) == ["flux_depth"]
+
+
 def test_naming_a_kind_still_means_that_kind():
     w = WorldState(devices=(gpu("gpu0"),), units=_catalogue(),
                    requests=(Request("r1", "llm_small", created_at=1000),), now=1000)

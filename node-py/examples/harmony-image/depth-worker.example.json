@@ -1,0 +1,29 @@
+{
+  "unit": "qwen_image_2512_depth_nf4",
+  "host_id": "xc-tower-ubuntu",
+  "device_id": "xc-tower-ubuntu/OWNER_APPROVED_CUDA_DEVICE_ID",
+  "broker": "http://127.0.0.1:18799",
+  "port": 18215,
+  "token_file": "/home/ubuntu/harmony-image/worker.token",
+  "model": "Qwen/Qwen-Image-2512",
+  "revision": "25468b98e3276ca6700de15c6628e51b7de54a26",
+  "snapshot": "/home/ubuntu/.cache/huggingface/hub/models--Qwen--Qwen-Image-2512/snapshots/25468b98e3276ca6700de15c6628e51b7de54a26",
+  "params_b": 20,
+  "resident_bytes": 12000000000,
+  "quantization": "nf4",
+  "steps": 50,
+  "true_cfg_scale": 4.0,
+  "negative_prompt": "",
+  "max_sequence_length": 512,
+  "cpu_threads": 12,
+  "idle_seconds": 900,
+  "max_dimension": 1024,
+  "depth_guide": {
+    "model": "InstantX/Qwen-Image-ControlNet-Union",
+    "revision": "b13036f066d6dee7c20513e263d3d673055e9de8",
+    "snapshot": "/home/ubuntu/.cache/huggingface/hub/models--InstantX--Qwen-Image-ControlNet-Union/snapshots/b13036f066d6dee7c20513e263d3d673055e9de8",
+    "config_sha256": "6d80a5e2ab3abeb773b06f917b54a72f60c35ce91091f59f79243fb0f5d3d4bd",
+    "weight_sha256": "d51dca0073366a675108d5b83c3b7ef941cf2214c9a1c95c23f1e9a228ddbdb0",
+    "weight_bytes": 3536027816
+  }
+}

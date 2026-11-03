@@ -1,0 +1,1 @@
+{'pytest': '9.1.1', 'PIL': '12.3.0', 'torch': '2.6.0+cu124', 'diffusers': '0.40.0', 'transformers': '5.17.0', 'fastapi': '0.142.1', 'httpx': '0.28.1'}

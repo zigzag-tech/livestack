@@ -22,6 +22,7 @@ import os
 import threading
 import time
 from collections import deque
+from contextlib import contextmanager
 
 from dataclasses import replace
 from typing import Callable, Dict, List, Mapping, Optional, Tuple
@@ -32,6 +33,7 @@ from .planner import (
 )
 from .membership import MIA, MembershipPolicy, PeerRoster, RosterFull, probe_interval
 from .ledger import Candidate, Decision, JsonlLedger
+from .device_leases import DeviceLeaseStore
 
 
 class _UnitTelemetry:
@@ -271,6 +273,11 @@ def peer_key(peer) -> str:
 
 _EPS_TIME = 1e-9
 
+# Exclusive-drain blockers that clear on their own: a tenant finishing its
+# work, loading, just granted to a waiting caller, or under its residency
+# floor. A drain held only by these waits within the caller's window.
+SELF_CLEARING_BLOCKERS = frozenset({"busy", "in_flight", "granted", "residency_floor"})
+
 
 class Peer:
     """Duck type for one model-server process. A real impl wraps the peer's
@@ -284,6 +291,40 @@ class Peer:
     def device_capacity(self) -> Optional[Mapping[str, float]]: ...  # pragma: no cover
     def warm(self, kind: str) -> None: ...              # pragma: no cover
     def evict(self, kind: str) -> None: ...             # pragma: no cover
+
+
+class LocalDeviceMeterPeer(Peer):
+    """A broker-local CUDA meter for a device with no model-server facade."""
+    def __init__(self, host_id: str, device_id: str, logical_device: int):
+        if type(logical_device) is not int or logical_device < 0:
+            raise ValueError("logical_device must be a nonnegative CUDA index")
+        from .meters import cuda_meter
+        self.base = f"local-meter://{device_id}"
+        self.host_id = host_id
+        self.device_id = device_id
+        self._meter = cuda_meter(logical_device)
+
+    def units(self):
+        return {}
+
+    def placements(self):
+        return []
+
+    def _read(self, key):
+        value = self._meter()
+        return value.get(key) if value else None
+
+    def device_memory(self):
+        return self._read("free")
+
+    def device_capacity(self):
+        return self._read("capacity")
+
+    def warm(self, kind: str) -> None:
+        raise RuntimeError("a device meter cannot warm a unit")
+
+    def evict(self, kind: str) -> None:
+        raise RuntimeError("a device meter cannot evict a unit")
 
 
 class HostBroker:
@@ -302,7 +343,9 @@ class HostBroker:
                  emitter_id: str = "host-broker",
                  in_flight_ttl_s: float = 900.0,
                  residency_grace_s: float = 90.0,
-                 mesh_suspect_probe_s: Optional[float] = None):
+                 mesh_suspect_probe_s: Optional[float] = None,
+                 exclusive_store=None,
+                 grant_hold_s: float = 30.0):
         # devices: a FIXED list (single-host / tests). If None, devices are
         # DISCOVERED from the peers' reported device_ids (federated / multi-host),
         # each sized from device_config[device_id] or default_capacity. That is the
@@ -358,6 +401,7 @@ class HostBroker:
         # being a candidate, so demand falls back to the GPU with no other
         # special case in the planner.
         self.hosted_available: Dict[str, bool] = {}
+        self.device_holds: Dict[str, str] = {}
         # Kinds no peer will ever report (e.g. "build" on a peerless BUILD-host
         # broker). Without them, admit() for such a kind defers "unknown kind".
         self.extra_units: Dict[str, Unit] = dict(extra_units or {})
@@ -373,6 +417,33 @@ class HostBroker:
         # lease ends. None on a host broker: nothing is recorded.
         self.policy_runtime = None
         self._lease_lock = threading.Lock()     # the reconcile thread snapshots too
+        self.exclusive_store = exclusive_store or DeviceLeaseStore(":memory:")
+        self._exclusive_condition = threading.Condition()
+        # Arrival order of exclusive acquisitions queued behind another
+        # request's lease, per device (guarded by _exclusive_condition).
+        self._exclusive_waiters: Dict[str, List[str]] = {}
+        # ONE arrival order per device across kinds. Exclusive waiters and
+        # plain admissions held by hostd (`wait_s`) used to queue in separate
+        # lines, so a FLUX job that arrived after a waiting TTS request took
+        # the device every time a lease ended (xc-tower-ubuntu, 2026-11-02/03;
+        # see HARMONY.md "One arrival order per device"). Both lines now record
+        # when each waiter arrived, and each yields to an older waiter of the
+        # other line that can be served on the same device.
+        # exclusive request id -> arrival (guarded by _exclusive_condition).
+        self._exclusive_arrived: Dict[str, float] = {}
+        # held plain admission id -> {"arrived", "kind", "requires",
+        # "deferred_at"}: the start of its latest attempt that was not granted.
+        self._admission_waiters: Dict[str, dict] = {}
+        # (kind, device) -> when a requested admission was granted it. An
+        # exclusive drain leaves that unit alone for `grant_hold_s`, so the
+        # caller can start the work it waited for before the unit is evicted
+        # (it is protected by being busy from then on).
+        self._granted_at: Dict[Tuple[str, str], float] = {}
+        self.grant_hold_s = float(grant_hold_s)
+        # draining exclusive request id -> the caller's own deadline (its
+        # queue_wait_s from arrival). While every blocker is a tenant finishing
+        # work, the drain waits up to this rather than `wait_timeout_s`.
+        self._exclusive_windows: Dict[str, float] = {}
         # Counters are exposed with epoch-second bucket starts; planner and
         # lease timestamps remain on the broker's monotonic clock.
         self._telemetry = _UnitTelemetry(time.time)
@@ -407,6 +478,10 @@ class HostBroker:
         # rather than the planning that precedes it: the plan is the product.
         self.dispatch = dispatch
         self.ledger = ledger
+        # The shared HOST-RAM ledger (host_ledger.HostLedger) of THIS machine,
+        # set by the host broker that dispatches on it (never by a fleet
+        # broker): task attempts' claims come in, `ram_bytes` loads go out.
+        self.host_ledger = None
         self.emitter = emitter
         self.emitter_id = emitter_id
         # Per peer, an EWMA (0.7 old / 0.3 new) of the wall-clock cost of one
@@ -430,7 +505,8 @@ class HostBroker:
         self._capability_observed_at_ms: Dict[str, int] = {}
         self.capability_ttl_s = float(os.environ.get("LIVESTACK_CAPABILITY_TTL", "15"))
         self.roster = PeerRoster(membership, clock=clock or time.monotonic, log=log,
-                                 on_transition=self._emit_transition)
+                                 on_transition=self._emit_transition,
+                                 on_evict=self._forget_peer)
         self._last_probe_error: Dict[str, str] = {}
         # peer key -> the STABLE degradation name (mesh_tunnel_down,
         # relay_quota) of the last probe failure that carried one. Only
@@ -467,6 +543,12 @@ class HostBroker:
         measured_caps = measured_caps or {}
         out = []
         for did, hid in sorted(discovered.items()):
+            # A held device is the operator's, not the planner's: it is never a
+            # placement, eviction or warm target. Dropped from the world, so
+            # nothing else has to know it exists (placements a peer still reports
+            # on it are already ignored for an unknown device).
+            if self.device_holds.get(did) or self.device_config.get(did, {}).get("hold"):
+                continue
             # Capacity precedence: explicit device_config (operator intent) > MEASURED
             # (the device's real total / recommended working set) > default guess. So a
             # node that reports its true size auto-sizes its budget instead of being
@@ -559,12 +641,71 @@ class HostBroker:
             claim = max(0.0, float((units.get(pl.kind).footprint
                                     if units.get(pl.kind) else {}).get("ram_bytes", 0.0)))
             loading[hid] = loading.get(hid, 0.0) + claim
+        # THE OTHER PLANNER'S CLAIMS (host_ledger): a task attempt admitted to
+        # this machine may grow to its cap, and MemAvailable shows only what it
+        # has touched so far. Without this, an attempt promised 10 GiB holding 2
+        # left 8 GiB that looked free, and a 45 GiB load could be granted into it.
+        promised = self._ledger_attempts_outstanding()
+        self._last_units = units          # what note_waiting sizes a refused load by
         hosts: Dict[str, Dict[str, float]] = {}
         host_reserve: Dict[str, Dict[str, float]] = {}
         for hid, (_at, avail) in freshest.items():
-            hosts[hid] = {"ram_bytes": max(0.0, avail - reserve - loading.get(hid, 0.0))}
+            held = float(promised) if hid == self.host_id else 0.0
+            hosts[hid] = {"ram_bytes": max(0.0, avail - reserve - loading.get(hid, 0.0) - held)}
             host_reserve[hid] = {"ram_bytes": reserve}
+        self._ledger_sync_loads(units, placements, device_hosts)
         return hosts, host_reserve
+
+    def _ledger_attempts_outstanding(self) -> int:
+        if self.host_ledger is None:
+            return 0
+        try:
+            from .hostview import attempt_memory
+            return self.host_ledger.attempt_outstanding_bytes(attempt_memory())
+        except Exception:                 # planning input, never a planning failure
+            return 0
+
+    # A load entry outlives the last cycle that saw it by this long; the host
+    # broker replans every few seconds, so a dead broker's entries lapse fast.
+    LEDGER_LOAD_TTL_S = 30.0
+
+    def _ledger_sync_loads(self, units: Mapping[str, Unit], placements: List[Placement],
+                           device_hosts: Mapping[str, str]) -> None:
+        """Publish this machine's `ram_bytes` units that are LOADING, and clear
+        the entry of one that became resident. A WAITING entry (`note_waiting`)
+        is left to lapse on its own: the request that needs the unit refreshes
+        it for as long as it keeps asking."""
+        if self.host_ledger is None or not self.host_id:
+            return
+        try:
+            ram = {k: float(u.footprint.get("ram_bytes", 0) or 0) for k, u in units.items()
+                   if isinstance(u.footprint, Mapping) and u.footprint.get("ram_bytes")}
+            here = [p for p in placements if p.kind in ram
+                    and device_hosts.get(p.device_id) == self.host_id]
+            for p in here:
+                if p.loading:
+                    self.host_ledger.put("load", p.kind, ttl_s=self.LEDGER_LOAD_TTL_S,
+                                         ram_bytes=int(ram[p.kind]), state="loading",
+                                         reason=f"loading on {p.device_id}")
+                else:
+                    self.host_ledger.drop("load", p.kind)
+        except Exception:
+            pass
+
+    def note_waiting(self, kinds, reason: str) -> None:
+        """A `ram_bytes` load was refused for host memory: say so on the
+        ledger, so task placement stops admitting attempts here (the drain).
+        The refused request refreshes this by asking again."""
+        if self.host_ledger is None:
+            return
+        units = getattr(self, "_last_units", {}) or {}
+        for kind in kinds:
+            u = units.get(kind)
+            ram = float((u.footprint or {}).get("ram_bytes", 0)) if u is not None and isinstance(
+                u.footprint, Mapping) else 0.0
+            if ram > 0:
+                self.host_ledger.put("load", kind, ttl_s=self.LEDGER_LOAD_TTL_S,
+                                     ram_bytes=int(ram), state="waiting", reason=reason[:200])
 
     # -- hosted lease ledger (the broker IS the source of truth here) ---------
     def _now(self, now: Optional[float] = None) -> float:
@@ -727,6 +868,15 @@ class HostBroker:
             self._lease_outcome(l, now, expired=True)
         return n
 
+    def set_device_hold(self, device_id: str, reason: Optional[str]) -> None:
+        """Reserve a discovered device for a human (a falsy ``reason`` releases it).
+        Memory only; a hold that must survive a restart is ``hold`` in
+        LIVESTACK_DEVICES."""
+        if reason:
+            self.device_holds[device_id] = reason
+        else:
+            self.device_holds.pop(device_id, None)
+
     def set_hosted_available(self, device_id: str, available: bool) -> None:
         """Flip the health gate hostd's prober feeds. An unhealthy backend simply
         stops being a candidate; nothing else has to know why."""
@@ -768,9 +918,15 @@ class HostBroker:
         """
         key = facade_url.rstrip("/")
         existing = next((p for p in self.peers if peer_key(p) == key), None)
-        if existing is None:
-            self.peers.append(make_peer(key))
+        # Peer object first (a peer that cannot be built — e.g. a mesh:// URL
+        # where meshlink is not importable — must not leave a roster row that is
+        # never probed), then the roster, and only then the append: a refused
+        # registration (`RosterFull`) must not leave a peer object behind that is
+        # probed and planned without a roster row.
+        new_peer = make_peer(key) if existing is None else None
         rec = self.roster.register(key, **meta)
+        if new_peer is not None:
+            self.peers.append(new_peer)
         return {"peer": key, "source": rec.source,
                 "state": self.roster.state_of(key),
                 "peers": len(self.peers)}
@@ -783,15 +939,20 @@ class HostBroker:
         gone = self.roster.prunable()
         rows = {r["peer"]: r for r in self.roster.snapshot()} if gone else {}
         for key in gone:
-            self.peers = [p for p in self.peers if peer_key(p) != key]
             self.roster.drop(key)
-            self._last_probe_error.pop(key, None)
-            self._probe_degradation.pop(key, None)
-            self.peer_report.pop(key, None)
+            self._forget_peer(key)
             row = rows.get(key, {})
             self._log(f"[membership] pruned absent peer: {key} "
                       f"({row.get('source', '?')}, unseen {row.get('unseen_seconds', '?')}s)")
         return gone
+
+    def _forget_peer(self, key: str) -> None:
+        """Drop everything kept per peer once the roster has let it go — by a
+        prune, or by yielding its slot to a newcomer (`PeerRoster`)."""
+        self.peers = [p for p in self.peers if peer_key(p) != key]
+        self._last_probe_error.pop(key, None)
+        self._probe_degradation.pop(key, None)
+        self.peer_report.pop(key, None)
 
     def membership_snapshot(self) -> List[dict]:
         """Roster with per-peer state, age, and the last probe error — so
@@ -900,7 +1061,8 @@ class HostBroker:
 
     # -- world assembly (soft state: re-snapshot peers every time) ------------
     def snapshot(self, requests: Optional[List[Request]] = None,
-                 last_evicted_at: Optional[Mapping[str, float]] = None) -> WorldState:
+                 last_evicted_at: Optional[Mapping[str, float]] = None,
+                 device_lease_id: Optional[str] = None) -> WorldState:
         # Keyed by (kind, peer) so two nodes serving one kind on one host are
         # both recorded rather than the second being dropped by a setdefault.
         # Folded to the planner's per-kind map by aggregate_units() below.
@@ -1105,13 +1267,22 @@ class HostBroker:
         resolved = self._resolve_devices(discovered, measured_caps)
         hosts, host_reserve = self._host_pools(
             units, placements, {d.id: d.host_id for d in resolved})
+        device_leases = {
+            record["device_id"]: self.exclusive_store.state(record["device_id"])
+            for record in self.exclusive_store.active()
+        }
+        if device_lease_id is not None:
+            lease = self.exclusive_store.get_lease(device_lease_id)
+            if (lease is not None and lease["state"] == "exclusive"
+                    and lease["expires_at"] > now):
+                device_leases.pop(lease["device_id"], None)
         return WorldState(devices=tuple(resolved),
                           units=units,
                           placements=tuple(placements), requests=tuple(requests or ()),
                           now=now, last_evicted_at=dict(last_evicted_at or {}),
                           measured_free=measured,
                           hosts=hosts, host_reserve=host_reserve,
-                          demand=self.demand(now))
+                          demand=self.demand(now), device_leases=device_leases)
 
     # -- demand ----------------------------------------------------------------
     #
@@ -1271,11 +1442,352 @@ class HostBroker:
         """
         return {did: host for (_kind, did), (_at, host) in self._in_flight.items()}
 
+    def use_exclusive_store(self, store) -> None:
+        self.exclusive_store.close()
+        self.exclusive_store = store
+
+    @staticmethod
+    def _exclusive_result(record: dict, blockers=None) -> dict:
+        granted = record.get("state") == "exclusive"
+        return {
+            "granted": granted,
+            "exclusive_device": True,
+            "device_id": record["device_id"],
+            "lease_id": record.get("lease_id") if granted else None,
+            "request_id": record["request_id"],
+            "state": record["state"],
+            "free_bytes": record.get("free_bytes"),
+            "min_free_bytes": record["min_free_bytes"],
+            "blockers": record.get("blockers") if blockers is None else blockers,
+            "reason": record.get("reason"),
+        }
+
+    def _exclusive_block(self, record: dict, blockers, terminal=False, terminal_state="failed"):
+        now = self._now()
+        record = self.exclusive_store.blockers(record["request_id"], blockers, now)
+        if terminal:
+            record = self.exclusive_store.fail(record["request_id"], blockers[0]["type"], now, terminal_state)
+        with self._exclusive_condition:
+            self._exclusive_condition.notify_all()
+        return record
+
+    def _drive_exclusive(self, record: dict) -> dict:
+        if record["state"] in {"released", "failed", "timeout"}:
+            return record
+        now = self._now()
+        if record["state"] == "draining" and record["expires_at"] <= now:
+            blockers = record.get("blockers") or [{"type": "timeout", "detail": "exclusive acquisition timed out"}]
+            return self._exclusive_block(record, blockers, terminal=True, terminal_state="timeout")
+        if record["state"] == "exclusive":
+            return record
+        world = self.snapshot()
+        device_id = record["device_id"]
+        placements = [p for p in world.placements if p.device_id == device_id]
+        blockers = []
+        victims = []
+        for placement in placements:
+            unit = world.units.get(placement.kind)
+            if unit is None:
+                blockers.append({"type": "peer_unavailable", "kind": placement.kind})
+            elif placement.loading:
+                blockers.append({"type": "in_flight", "kind": placement.kind})
+            elif unit.residency == Residency.HARD_PIN:
+                blockers.append({"type": "hard_pin", "kind": placement.kind})
+            elif placement.busy:
+                blockers.append({"type": "busy", "kind": placement.kind})
+            elif now - self._granted_at.get((placement.kind, device_id), float("-inf")) < self.grant_hold_s:
+                blockers.append({"type": "granted", "kind": placement.kind})
+            elif now - placement.loaded_at < unit.min_residency_s and record["state"] != "expired_draining":
+                blockers.append({"type": "residency_floor", "kind": placement.kind})
+            else:
+                victims.append(placement)
+        if blockers:
+            if any(block["type"] == "hard_pin" for block in blockers):
+                return self._exclusive_block(record, blockers, terminal=True)
+            window = self._exclusive_windows.get(record["request_id"])
+            if (window is not None and record["state"] == "draining"
+                    and all(block["type"] in SELF_CLEARING_BLOCKERS for block in blockers)):
+                record = self.exclusive_store.extend_drain(
+                    record["request_id"], min(now + record["wait_timeout_s"], window), now)
+            return self._exclusive_block(record, blockers)
+        if victims:
+            try:
+                for placement in victims:
+                    peer = self._peer_for(placement.kind, device_id)
+                    if peer is None:
+                        return self._exclusive_block(record, [{"type": "peer_unavailable", "kind": placement.kind}])
+                    peer.evict(placement.kind)
+                    self._in_flight.pop((placement.kind, device_id), None)
+                    for remembered in [key for key in self._resident_at
+                                       if key[1] == placement.kind and key[2] == device_id]:
+                        self._resident_at.pop(remembered, None)
+                for peer in {peer for peer in self.peers if peer.device_id == device_id}:
+                    peer.reclaim()
+            except Exception as exc:
+                return self._exclusive_block(record, [{"type": "peer_unavailable", "detail": str(exc)[:500]}])
+            return self._drive_exclusive(record)
+        if record["state"] == "expired_draining":
+            self.exclusive_store.release(record["lease_id"], now)
+            return self.exclusive_store.get(record["request_id"])
+        free = world.measured_free.get(device_id) if world.measured_free else None
+        if not free or "vram_bytes" not in free:
+            return self._exclusive_block(record, [{"type": "memory_unknown"}])
+        free_bytes = int(free["vram_bytes"])
+        if free_bytes < record["min_free_bytes"]:
+            return self._exclusive_block(record, [{
+                "type": "external_memory", "free_bytes": free_bytes,
+                "min_free_bytes": record["min_free_bytes"],
+            }])
+        record = self.exclusive_store.mark_exclusive(record["request_id"], record["lease_id"], free_bytes, now)
+        with self._exclusive_condition:
+            self._exclusive_condition.notify_all()
+        return record
+
+    def acquire_exclusive(self, request: Request, device_id: str, min_free_bytes: int,
+                          wait_timeout_s=240.0, ttl_s=120.0, queue_wait_s=0.0) -> dict:
+        """Take a whole-device lease on ``device_id`` for ``request``.
+
+        ``queue_wait_s`` is how long the caller will wait for ANOTHER request's
+        lease on the device to end. Waiters queue in arrival order per device;
+        the head begins its own acquisition once the device has no active
+        lease, and ``wait_timeout_s`` then bounds draining the device's
+        tenants. A holder that stops heartbeating lapses at its TTL and the
+        queue moves on, so a dead holder cannot block it forever. With
+        ``queue_wait_s == 0`` another request's lease is refused at once.
+
+        ``wait_timeout_s`` bounds a drain that is STUCK (peer unavailable,
+        memory unknown, external memory), not one waiting for a tenant to
+        finish its work: while every blocker is self-clearing (busy, loading,
+        just granted, under its residency floor) the drain deadline rolls
+        forward, up to the caller's own window (arrival + ``queue_wait_s``).
+        Observed 2026-11-03 on xc-tower-ubuntu: histo inpainting requests
+        with ``harmony_wait_s: 3600`` were refused after 240 s with
+        "exclusive admission refused: timeout" because the asr tenant on the
+        device reported busy, and the client's retries repeated it every ~5 min.
+
+        Observed 2026-11-02 on xc-tower-ubuntu: two FLUX.2 depth requests sent
+        back to back; the second carried ``harmony_wait_s: 1800`` and was
+        refused immediately with ``other_owner`` because this path never
+        queued. Callers describe the job; they must not sequence GPU work.
+        """
+        if not self.dispatch:
+            raise ValueError("exclusive acquisition requires a dispatching host broker")
+        if not isinstance(device_id, str) or not device_id:
+            raise ValueError("exclusive acquisition requires selector.device_id")
+        if (isinstance(queue_wait_s, bool) or not isinstance(queue_wait_s, (int, float))
+                or not 0 <= queue_wait_s <= 86400):
+            raise ValueError("queue_wait_s must be between 0 and 86400 seconds")
+        world = self.snapshot()
+        device = next((d for d in world.devices if d.id == device_id), None)
+        if device is None or device.hosted:
+            raise ValueError("exclusive acquisition requires a local non-hosted device")
+        capacity = (device.capacity or {}).get("vram_bytes")
+        if capacity is not None and min_free_bytes > capacity:
+            # No release can ever make this fit: waiting would only hold the line.
+            return {"granted": False, "exclusive_device": True, "device_id": device_id,
+                    "lease_id": None, "request_id": request.id, "state": "failed",
+                    "free_bytes": None, "min_free_bytes": min_free_bytes,
+                    "blockers": [{"type": "exceeds_capacity", "capacity_bytes": capacity}],
+                    "reason": "exceeds_capacity"}
+        started = self._now()
+        queue_deadline = started + queue_wait_s
+        with self._exclusive_condition:
+            line = self._exclusive_waiters.setdefault(device_id, [])
+            if request.id not in line:
+                line.append(request.id)
+            self._exclusive_arrived.setdefault(request.id, started)
+        # When this waiter first saw the device without a lease: an older held
+        # admission that has been planned since then and still not granted
+        # cannot use the device either, and stops holding this one back.
+        free_since = None
+        try:
+            while True:
+                self._lapse_dead_exclusive(device_id)
+                with self._exclusive_condition:
+                    line = self._exclusive_waiters[device_id]
+                    position = line.index(request.id)
+                blocker = None
+                admission = None
+                if position == 0:
+                    if self.exclusive_store.active(device_id):
+                        free_since = None
+                    elif free_since is None:
+                        free_since = self._now()
+                    admission = self._older_admission(device_id, started, free_since)
+                    if admission is None:
+                        try:
+                            record = self.exclusive_store.begin(
+                                request.id, device_id, request.owner, min_free_bytes,
+                                wait_timeout_s, ttl_s, self._now())
+                            break
+                        except RuntimeError:
+                            active = self.exclusive_store.active(device_id)
+                            if active:
+                                blocker = active[0]
+                else:
+                    active = self.exclusive_store.active(device_id)
+                    blocker = active[0] if active else None
+                now = self._now()
+                if now >= queue_deadline:
+                    if blocker is None:
+                        # Free device, earlier arrivals still ahead in line.
+                        ahead = position + (admission is not None)
+                        return {"granted": False, "exclusive_device": True,
+                                "device_id": device_id, "lease_id": None,
+                                "request_id": request.id, "state": "queued",
+                                "free_bytes": None, "min_free_bytes": min_free_bytes,
+                                "blockers": [{"type": "queued", "ahead": ahead,
+                                              **({"admission": admission} if admission else {})}],
+                                "reason": (f"waited {now - started:.0f}s of {queue_wait_s:g}s; "
+                                           f"{ahead} earlier request(s) still ahead")}
+                    result = self._exclusive_result(
+                        blocker, [{"type": "other_owner", "owner": blocker["owner"]}])
+                    result.update(
+                        granted=False, lease_id=None, state="other_owner",
+                        request_id=request.id, min_free_bytes=min_free_bytes,
+                        reason=(None if queue_wait_s <= 0 else
+                                f"waited {now - started:.0f}s of {queue_wait_s:g}s; device "
+                                f"still held by request {blocker['request_id']} "
+                                f"({blocker['state']})"))
+                    return result
+                with self._exclusive_condition:
+                    self._exclusive_condition.wait(timeout=min(1.0, queue_deadline - now))
+        finally:
+            with self._exclusive_condition:
+                line = self._exclusive_waiters.get(device_id, [])
+                if request.id in line:
+                    line.remove(request.id)
+                if not line:
+                    self._exclusive_waiters.pop(device_id, None)
+                self._exclusive_arrived.pop(request.id, None)
+                self._exclusive_condition.notify_all()
+        self._exclusive_windows[record["request_id"]] = queue_deadline
+        try:
+            while True:
+                record = self._drive_exclusive(record)
+                if record["state"] in {"exclusive", "released", "failed", "timeout"}:
+                    return self._exclusive_result(record)
+                # The record's deadline, which _drive_exclusive extends while
+                # tenants are only finishing work.
+                remaining = record["expires_at"] - self._now()
+                if remaining <= 0:
+                    record = self.exclusive_store.fail(record["request_id"], "timeout", self._now(), "timeout")
+                    return self._exclusive_result(record)
+                # Re-check before a rolling deadline lapses, so a still-busy
+                # tenant extends it rather than the check landing just after.
+                with self._exclusive_condition:
+                    self._exclusive_condition.wait(timeout=min(1.0, max(remaining / 2, 0.01)))
+        finally:
+            self._exclusive_windows.pop(record["request_id"], None)
+
+    def _devices_serving(self, kind: str, requires: Mapping) -> set:
+        """Devices with a peer that declares ``kind`` (or a unit satisfying
+        ``requires``), as of the last snapshot."""
+        from .planner import _unit_satisfies
+        out = set()
+        for (unit_kind, key), unit in list(self.peer_units.items()):
+            if unit_kind == kind if kind else (requires and _unit_satisfies(unit, requires)):
+                device_id = self._peer_device.get(key)
+                if device_id:
+                    out.add(device_id)
+        return out
+
+    @contextmanager
+    def admission_waiting(self, request: Request, arrived: float):
+        """Hold ``request`` (a plain admission hostd keeps for `wait_s`, which
+        arrived at ``arrived`` on this broker's clock) in the device arrival
+        order for as long as the caller waits."""
+        with self._exclusive_condition:
+            self._admission_waiters[request.id] = {
+                "arrived": arrived, "kind": request.kind,
+                "requires": dict(request.requires or {}), "deferred_at": None}
+        try:
+            yield
+        finally:
+            with self._exclusive_condition:
+                self._admission_waiters.pop(request.id, None)
+                self._exclusive_condition.notify_all()
+
+    def admission_deferred(self, request_id: str, attempted_at: float) -> None:
+        """A held admission's attempt that began at ``attempted_at`` was not granted."""
+        with self._exclusive_condition:
+            waiter = self._admission_waiters.get(request_id)
+            if waiter is not None:
+                waiter["deferred_at"] = attempted_at
+
+    def _older_admission(self, device_id: str, arrived: float,
+                         free_since: Optional[float]) -> Optional[str]:
+        """A held admission that arrived before ``arrived`` and can be served on
+        ``device_id``, which an exclusive acquisition there must let go first.
+
+        One that was planned on the free device (an attempt begun after
+        ``free_since``) and still not granted is not waiting for this device:
+        a lower-priority request, or one that cannot fit, would otherwise hold
+        the exclusive line until its own budget ran out."""
+        with self._exclusive_condition:
+            waiters = [(w["arrived"], rid, w) for rid, w in self._admission_waiters.items()
+                       if w["arrived"] < arrived]
+        for _, rid, waiter in sorted(waiters, key=lambda row: row[:2]):
+            if (free_since is not None and waiter["deferred_at"] is not None
+                    and waiter["deferred_at"] >= free_since):
+                continue
+            if device_id in self._devices_serving(waiter["kind"], waiter["requires"]):
+                return rid
+        return None
+
+    def exclusive_ahead(self, request: Request, arrived: float) -> bool:
+        """True when every device that can serve the held admission ``request``
+        has an exclusive acquisition queued that arrived before it."""
+        devices = self._devices_serving(request.kind, request.requires or {})
+        with self._exclusive_condition:
+            return bool(devices) and all(
+                any(self._exclusive_arrived.get(rid, arrived) < arrived
+                    for rid in self._exclusive_waiters.get(device_id, []))
+                for device_id in devices)
+
+    def _lapse_dead_exclusive(self, device_id: str) -> None:
+        """Expire leases past their TTL and finish draining expired ones on
+        ``device_id``, so a queued waiter is not left to the reconcile cadence."""
+        self.exclusive_store.expire(self._now())
+        for record in self.exclusive_store.active(device_id):
+            if record["state"] == "expired_draining":
+                self._drive_exclusive(record)
+
+    def reconcile_exclusive(self) -> None:
+        now = self._now()
+        self.exclusive_store.expire(now)
+        for record in self.exclusive_store.active():
+            try:
+                self._drive_exclusive(record)
+            except Exception as exc:
+                self.exclusive_store.blockers(record["request_id"], [{"type": "internal_error", "detail": str(exc)[:500]}], self._now())
+
+    def exclusive_heartbeat(self, lease_id: str, ttl_s=120.0) -> bool:
+        accepted = self.exclusive_store.heartbeat(lease_id, ttl_s, self._now())
+        if accepted:
+            with self._exclusive_condition:
+                self._exclusive_condition.notify_all()
+        return accepted
+
+    def exclusive_release(self, lease_id: str) -> bool:
+        accepted = self.exclusive_store.release(lease_id, self._now())
+        if accepted:
+            with self._exclusive_condition:
+                self._exclusive_condition.notify_all()
+        return accepted
+
+    def valid_exclusive_owner(self, lease_id: str, owner: str, device_id: str) -> bool:
+        lease = self.exclusive_store.get_lease(lease_id)
+        return bool(lease and lease["state"] == "exclusive"
+                    and lease["owner"] == owner and lease["device_id"] == device_id
+                    and lease["expires_at"] > self._now())
+
     def plan_and_apply(self, requests: Optional[List[Request]] = None,
-                       last_evicted_at: Optional[Mapping[str, float]] = None):
+                       last_evicted_at: Optional[Mapping[str, float]] = None,
+                       device_lease_id: Optional[str] = None):
         """Snapshot the fleet, plan, and dispatch every action to the owning peer.
         Evicts are applied before loads so VRAM is freed first. Returns the Plan."""
-        world = self.snapshot(requests, last_evicted_at)
+        world = self.snapshot(requests, last_evicted_at, device_lease_id)
         p = plan(world, self.policy)
         requested_ids = {r.id for r in (requests or [])}
         semantic = {r.id: r for r in world.requests if not r.kind}
@@ -1293,16 +1805,23 @@ class HostBroker:
             peer = self._peer_for(ev.kind, ev.device_id)
             if peer is not None:
                 self._log(f"[hostbroker] evict {ev.kind}@{ev.device_id}: {ev.reason}")
-                peer.evict(ev.kind)
-                self._telemetry.increment(ev.kind, "evicted")
                 # An evicted unit is no longer arriving, whatever we dispatched
                 # before. Leaving the entry would reserve the card we just freed.
+                # Dropped BEFORE the call, like the warm records its decision
+                # first: an evict that raised used to skip this line, so a
+                # hung node kept a phantom in-flight placement for the full TTL
+                # (llm_general on xc-tower-ubuntu, 2026-11-01 11:51:48).
                 self._in_flight.pop((ev.kind, ev.device_id), None)
                 # An eviction we ordered is not a blink: drop the stickiness so
                 # the card reads free immediately.
                 for remembered in [k for k in self._resident_at
                                    if k[1] == ev.kind and k[2] == ev.device_id]:
                     self._resident_at.pop(remembered, None)
+                # A raise still aborts the plan (the loads after it were planned
+                # into the room this evict was to free); if the unit is in fact
+                # still resident, the node's next report says so.
+                peer.evict(ev.kind)
+                self._telemetry.increment(ev.kind, "evicted")
         for ld in p.of(Load):
             peer = self._peer_for(ld.kind, ld.device_id)
             if peer is None:
@@ -1341,6 +1860,18 @@ class HostBroker:
                     self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id} failed "
                               f"before dispatch ({type(e).__name__}: {e}) — load "
                               f"never started, not tracking it in flight")
+                elif _definite_failure(e):
+                    # The node ANSWERED, and the answer was a failure (an HTTP
+                    # 500 from the load, a 409 refusal). Its warm handler is
+                    # synchronous, so a response means the load is over — not
+                    # running. Keeping the record held the card for the whole
+                    # `in_flight_ttl_s` (900 s) against a load that had already
+                    # died: xc-tower-ubuntu 2026-11-01, sdxl_depth_int8 answered
+                    # 500 at 12:01:16 and blocked GPU1 until 12:16:04.
+                    self._in_flight.pop((ld.kind, ld.device_id), None)
+                    self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id} failed "
+                              f"({type(e).__name__}: {e}) — the node answered, the "
+                              f"load is over; not tracking it in flight")
                 else:
                     # Keep the record. A warm that does not confirm is usually a
                     # warm still running, and assuming otherwise is what duplicates
@@ -1349,6 +1880,10 @@ class HostBroker:
                     self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id} did not "
                               f"confirm ({type(e).__name__}: {e}) — treating it as "
                               f"in flight")
+        now = self._now()
+        for grant in p.of(Grant):
+            if grant.request_id in requested_ids and grant.device_id:
+                self._granted_at[(grant.kind, grant.device_id)] = now
         self._record_request_grants(p, requested_ids)
         return p
 
@@ -1598,6 +2133,7 @@ class HostBroker:
                                         if k.endswith(":")}}
                       if pol else None),
             "vantage_host": self.host_id,
+            "device_leases": self.exclusive_store.active(),
             "hosts": {
                 h: ({"nodes": sorted(n, key=lambda r: r["peer"])}
                     | ({"links": matrix[h]} if h in matrix else {}))
@@ -1936,6 +2472,21 @@ class HostBroker:
 import json as _json
 
 from . import transport
+
+
+# Statuses that report the ABSENCE of an answer from the node (a proxy or relay
+# that gave up waiting), not the node's own answer. A warm that comes back with
+# one of these may still be loading.
+_NO_ANSWER_STATUSES = frozenset({408, 502, 504})
+
+
+def _definite_failure(exc: BaseException) -> bool:
+    """Did the node itself answer this dispatch with a failure? True for an HTTP
+    error response (other than a gateway timeout); False for a timeout, a reset
+    or anything else where the node's outcome is unknown."""
+    status = getattr(exc, "code", None)
+    return (isinstance(exc, transport.HTTPError) and isinstance(status, int)
+            and status not in _NO_ANSWER_STATUSES)
 
 
 def _http(url, body=None, timeout=5, headers=None):

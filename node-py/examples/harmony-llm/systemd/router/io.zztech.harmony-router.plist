@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Harmony router on macOS: a launchd user agent (the Linux twin is
+     harmony-router.service). scripts/harmony-router-rollout.sh substitutes
+     __HOME__ and the env values from ~/.config/harmony-router/env, then
+     bootstraps it into gui/$UID. Loopback only; GPU hosts do not run it. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>io.zztech.harmony-router</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/.local/share/harmony-router/venv/bin/python</string>
+    <string>router.py</string>
+  </array>
+  <key>WorkingDirectory</key><string>__HOME__/.local/share/harmony-router/src/node-py/examples/harmony-llm</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key><string>__HOME__/.local/share/harmony-router/src/node-py</string>
+__ENV__
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/harmony-router.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/harmony-router.log</string>
+</dict>
+</plist>

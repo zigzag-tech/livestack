@@ -48,6 +48,7 @@ import {
   type Operation,
   type PlanAction,
 } from './client.js';
+import type { FleetObservation, FleetObservationSource } from './fleetStream.js';
 import { DEFAULT_VIEW_MAX_AGE_S, isWaiting, operationOnTrack, planIsWellFormed, viewIsFresh } from './gates.js';
 import { fleetHandbacks, newLoopState, type LoopState } from './handbacks.js';
 import { registeredWorkflow, triage, type WorkflowDecision } from './workflows.js';
@@ -63,6 +64,8 @@ export const ROUTINE_POLICY = [
 
 export interface TickDeps {
   client: FleetClient;
+  /** Authenticated account-scope `harmony.fleet/1` observation source. */
+  fleetSource: FleetObservationSource;
   /** The queue this tick is about. The loop does not own it; a caller does. */
   jobs: JobRequest[];
   /** A conversation per job. Default: no repair at all, stated as such. */
@@ -110,6 +113,7 @@ export async function fleetTick(deps: TickDeps): Promise<TickResult> {
   const state = deps.state ?? newLoopState();
   const log = deps.log ?? (() => {});
   const viewMaxAgeS = deps.viewMaxAgeS ?? DEFAULT_VIEW_MAX_AGE_S;
+  let fleetObservation: FleetObservation | undefined;
   const result: TickResult = {
     admitted: [],
     queued: [],
@@ -127,13 +131,23 @@ export async function fleetTick(deps: TickDeps): Promise<TickResult> {
       ),
     { id: `${ROUTINE_ID}:observe`, goal: ROUTINE_GOAL, handbacks: {}, budget: { wallMs: 60_000 } },
     async (step) => {
-      const view = await step({
+      const observation = await step<FleetObservation>({
         id: 'assemble_state',
-        goal: 'Read the fleet as the broker sees it, recently enough to plan against.',
+        goal: 'Read complete, fresh fleet host facts from the authenticated harmony.fleet/1 account stream.',
         effect: READ_EFFECT,
-        run: () => deps.client.view(),
-        gate: (v) => viewIsFresh(v, now(), viewMaxAgeS),
+        run: async () => {
+          fleetObservation = await deps.fleetSource.read();
+          return fleetObservation;
+        },
+        gate: (value) => !value
+          ? [{ rule: 'fleet-stream-unknown', msg: 'harmony.fleet/1 observation source returned no value' }]
+          : value.status === 'fresh'
+          ? viewIsFresh(value.view, now(), viewMaxAgeS)
+          : [{ rule: `fleet-stream-${value.status}`, msg: `harmony.fleet/1 ${value.status}: ${value.reason ?? 'observation unavailable'}` }],
       });
+      if (observation.status !== 'fresh' || !observation.view) {
+        throw new Error('fleet_observation_gate_passed_without_fresh_view');
+      }
       const plan = await step({
         id: 'plan',
         goal: 'Get one action for every queued job from the broker, which is the only thing that decides placement.',
@@ -141,13 +155,21 @@ export async function fleetTick(deps: TickDeps): Promise<TickResult> {
         run: () => deps.client.plan({ jobs: deps.jobs, ...(deps.regions ? { regions: deps.regions } : {}) }),
         gate: (p) => planIsWellFormed(p),
       });
-      return { view, plan };
+      return { view: observation.view, plan };
     },
   );
   collect(result, observe);
   if (!observe.ok) {
-    result.blocked = { stepId: observe.blocked.stepId, reason: observe.blocked.reason };
-    log(`[fleetd] tick blocked at ${observe.blocked.stepId}: ${observe.blocked.reason}`);
+    const blocked = fleetObservation && fleetObservation.status !== 'fresh'
+      ? {
+          stepId: 'assemble_state',
+          reason: `harmony.fleet/1 ${fleetObservation.status}: ${fleetObservation.reason ?? 'observation unavailable'}`,
+        }
+      : 'blocked' in observe
+      ? observe.blocked
+      : { stepId: observe.waiting.stepId, reason: `waiting until ${observe.waiting.resumeAt}` };
+    result.blocked = { stepId: blocked.stepId, reason: blocked.reason };
+    log(`[fleetd] tick blocked at ${blocked.stepId}: ${blocked.reason}`);
     return result;
   }
   result.view = observe.value.view;
@@ -228,7 +250,7 @@ async function runAction(
       id: ROUTINE_ID,
       goal: ROUTINE_GOAL,
       policy: ROUTINE_POLICY,
-      handbacks: fleetHandbacks({ client: deps.client, state: deps.state, now: deps.now }),
+      handbacks: fleetHandbacks({ client: deps.client, fleetSource: deps.fleetSource, state: deps.state, now: deps.now }),
       budget: { wallMs: 120_000, escalations: 1 },
     },
     async (step) =>
@@ -300,6 +322,13 @@ async function runAction(
   );
 
   if (outcome.ok) return { result: outcome.value, outcome };
+  if ('waiting' in outcome) {
+    const afterS = Math.max(1, Math.ceil((Date.parse(outcome.waiting.resumeAt) - Date.now()) / 1000));
+    const waiting: ActionOutcome = current
+      ? { action, outcome: 'waiting', operation: current, afterS }
+      : { action, outcome: 'blocked', reason: `waiting until ${outcome.waiting.resumeAt}` };
+    return { result: waiting, outcome };
+  }
   return {
     result: {
       action,

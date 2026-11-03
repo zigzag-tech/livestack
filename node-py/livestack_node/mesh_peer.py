@@ -57,6 +57,7 @@ dial.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import threading
 import time
@@ -64,7 +65,7 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Callable, List, Mapping, Optional, Sequence, Tuple
 
-from . import relay_control
+from . import meshlink_runtime, relay_control, transport
 from .hostbroker import RestPeer
 
 mesh_route_py = None
@@ -88,17 +89,21 @@ def _import_meshlink() -> None:
     global mesh_route_py, ls_h1, websockets, FRAME_LIMIT, _MESHLINK_IMPORT_ERROR
     if mesh_route_py is not None and websockets is not None:
         return
+    # LIVESTACK_MESHLINK_DIR is applied and validated here (meshlink_runtime):
+    # the checkout is an explicit setting, not an accident of sys.path.
     try:
+        meshlink_runtime.require()
         import mesh_route_py as _mrp
         from mesh_outbound_py import mux as _mux
         from mesh_outbound_py.connectors import ls_h1 as _ls_h1
         import websockets as _ws
-    except ImportError as e:
+    except (ImportError, meshlink_runtime.MeshlinkUnavailable) as e:
         _MESHLINK_IMPORT_ERROR = e
-        raise RuntimeError(
-            "meshlink packages are not importable (mesh_route_py, "
-            "mesh_outbound_py) — the meshlink checkout must be on sys.path; "
-            f"original error: {e}")
+        if isinstance(e, meshlink_runtime.MeshlinkUnavailable):
+            raise
+        raise meshlink_runtime.MeshlinkUnavailable(
+            f"meshlink packages are not importable (mesh_route_py, "
+            f"mesh_outbound_py): {e}", []) from e
     mesh_route_py, ls_h1, websockets = _mrp, _ls_h1, _ws
     FRAME_LIMIT = _mux.FRAME_LIMIT
     _MESHLINK_IMPORT_ERROR = None
@@ -120,6 +125,17 @@ LIVESTACK_ROUTE_PREFIX = relay_control.DEFAULT_ROUTE_PREFIX
 # ---------------------------------------------------------------------------
 # Named degradations
 # ---------------------------------------------------------------------------
+
+class MeshRelayUnconfigured(meshlink_runtime.MeshlinkUnavailable, ValueError):
+    """meshlink imports, but this process has no relay configuration to dial
+    with (no cap key ring, no relay URLs). The same outcome as meshlink missing
+    — no ``mesh://`` peer can be dialled from here — so hostd refuses the
+    announce with the same named 503 rather than a 500 and a traceback per
+    retry (xc-tower-ubuntu 2026-11-03, ~10/min). Still a ValueError for callers
+    that caught the old exception."""
+
+    degradation = "mesh_relay_unconfigured"
+
 
 class MeshPeerError(RuntimeError):
     """Base for mesh dial failures. ``degradation`` is the stable name design.md
@@ -288,13 +304,14 @@ class MeshPeer(RestPeer):
             _import_meshlink()
         self.realm, self.daemon_id, self._facade_prefix = parse_mesh_url(url)
         if relay_config is None or relay_config.cap_ring is None:
-            raise ValueError(
+            raise MeshRelayUnconfigured(
                 "mesh peer requires a relay config with a cap key ring "
                 "(LIVESTACK_RELAY_CAP_KEYS); minting no caller capability is "
-                "not a supported mode")
+                "not a supported mode", ["LIVESTACK_RELAY_CAP_KEYS"])
         if not relays:
-            raise ValueError(
-                f"mesh peer {url!r} has no relay candidates — set LIVESTACK_RELAY_URLS")
+            raise MeshRelayUnconfigured(
+                f"mesh peer {url!r} has no relay candidates — set LIVESTACK_RELAY_URLS",
+                ["LIVESTACK_RELAY_URLS"])
         self._relay_config = relay_config
         self._relays = {r.url: r for r in relays}
         self._account_id = account_id
@@ -336,10 +353,13 @@ class MeshPeer(RestPeer):
 
         `url` is always `f"{self.base}/<facade path>"` assembled by RestPeer;
         split it back into (method, facade path, body) and run one ls-h1
-        roundtrip. HTTP >= 400 is NOT special here (RestPeer/`_http` treats any
-        status as a parsed body; the broker's error paths are exception-based),
-        so the (status, headers, body) tuple is folded back into RestPeer's
-        json-parsed-return shape."""
+        roundtrip. The (status, headers, body) tuple is folded back into
+        RestPeer's shape: a parsed body on success, and `transport.HTTPError` on
+        HTTP >= 400 — RestPeer's dial raises exactly that, and the broker tells
+        a node that ANSWERED with a failure (a warm that 500s is over, not
+        loading) from one whose outcome is unknown by it. Returning the error
+        body as if it were a success made a failed mesh warm look like a load in
+        progress for the whole in-flight TTL."""
         parts = urllib.parse.urlsplit(url)
         if parts.scheme != MESH_SCHEME or parts.netloc != self.realm:
             raise ValueError(
@@ -358,9 +378,12 @@ class MeshPeer(RestPeer):
         # one stream per request (the quota lane tests two live streams at
         # once). The Picker — the only shared mutable state — is guarded
         # per-call inside _dial.
-        status, _resp_headers, raw = self._loop.run(
+        status, resp_headers, raw = self._loop.run(
             self._dial(method, facade_path, request_headers, data, timeout),
             timeout)
+        if status >= 400:
+            raise transport.HTTPError(url, status, f"HTTP {status}", resp_headers,
+                                      io.BytesIO(raw or b""))
         return json.loads(raw.decode()) if raw else {}
 
     # -- the tunnel dial ------------------------------------------------------

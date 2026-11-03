@@ -368,3 +368,56 @@ class TestRankLedgerRowsCarryTheNodeRegion:
         assert rec["request"]["region_policy"]["allow"] == ["na"]
         assert any("region cn" in r["why"]
                    for r in rec["request"]["region_policy"]["rejected"])
+
+
+def _llm(host, region, resident, probe=1.0):
+    """An llm-serving node; `resident` says whether an llm unit is loaded."""
+    return {"host_id": host, "peer": f"http://{host}:8188/livestack", "state": "fresh",
+            "ready": resident, "kinds": ["llm"], "region": region, "probe_ms": probe,
+            "units": [{"kind": "llm", "resident": resident, "attributes": {"class": "llm"}}]}
+
+
+class TestRegionIsEligibilityNotAPostFilter:
+    """A warm node in a FORBIDDEN region must not suppress a cold node in an
+    ALLOWED one. Filtered after ranking, 'warm first' had already dropped the cold
+    node and the caller got no target although one could serve."""
+
+    FLEET = view([_llm("na-warm", "na", True), _llm("cn-cold", "cn", False, 300.0)])
+
+    def test_warm_forbidden_does_not_suppress_cold_allowed(self):
+        r = rank(self.FLEET, "llm", now=1000.0, allow_regions=["cn"])
+        assert r["chosen"] == "http://cn-cold:8188"
+        row = next(c for c in r["candidates"] if c.target_id == "http://na-warm:8188")
+        assert row.outcome == "filtered" and "region na, wanted cn" in row.reason
+
+    def test_unknown_region_is_excluded_unless_allowed(self):
+        nowhere = {**_llm("nowhere", None, True), "region": None}
+        f = view([nowhere])
+        assert rank(f, "llm", now=1000.0, allow_regions=["na"])["chosen"] is None
+        assert rank(f, "llm", now=1000.0, allow_regions=["na"], allow_unknown_region=True)["chosen"]
+
+    def test_no_restriction_ranks_identically(self):
+        assert rank(self.FLEET, "llm", now=1000.0)["targets"] == \
+            rank(self.FLEET, "llm", now=1000.0, allow_regions=[])["targets"]
+
+    def test_through_http_the_cold_allowed_node_is_chosen(self):
+        from fastapi.testclient import TestClient
+
+        from livestack_node.hostd import build_app
+
+        class _Broker:
+            peers = []
+
+            def fleet_view(self):
+                return TestRegionIsEligibilityNotAPostFilter.FLEET
+
+            def emit_rank(self, result):
+                pass
+
+            def membership_snapshot(self):
+                return []
+
+        body = TestClient(build_app(_Broker())).get(
+            "/fleet/rank", params={"kind": "llm", "regions": "cn"}).json()
+        assert body["chosen"] == "http://cn-cold:8188"
+        assert any("region na" in r["why"] for r in body["region_policy"]["rejected"])

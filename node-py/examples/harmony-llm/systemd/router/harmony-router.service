@@ -1,0 +1,22 @@
+# Harmony router: the localhost ingress to the regional LLM fleet.
+#
+# A systemd USER unit (Linux and WSL): `systemctl --user enable --now harmony-router`
+# after scripts/harmony-router-rollout.sh has laid down the pinned source, venv and
+# env file. Needs `loginctl enable-linger $USER` to survive logout. It binds
+# loopback only (HARMONY_ROUTER_HOST in the env file); GPU hosts do not run it.
+[Unit]
+Description=Harmony router (localhost ingress to the regional LLM fleet)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/harmony-router/env
+Environment=PYTHONPATH=%h/.local/share/harmony-router/src/node-py
+WorkingDirectory=%h/.local/share/harmony-router/src/node-py/examples/harmony-llm
+ExecStart=%h/.local/share/harmony-router/venv/bin/python router.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

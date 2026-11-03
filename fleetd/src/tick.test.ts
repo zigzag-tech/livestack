@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import { noRepairHost } from 'jingway-framework/server/wovine/noRepairHost.js';
 import type { WovineHost } from 'jingway-framework/common/routines/wovine.js';
 
-import { FakeBroker, NOW, err, operation, plan, refused, unreachable, view } from './fakeBroker.js';
+import { FakeBroker, FakeFleetObservationSource, NOW, err, operation, plan, refused, unreachable, view } from './fakeBroker.js';
 import { HANDBACK_NAMES, fleetHandbacks, newLoopState } from './handbacks.js';
 import { tracedHost } from './observability.js';
 import { fleetTick } from './tick.js';
@@ -47,6 +47,7 @@ function tick(client: FakeBroker, extra: Partial<Parameters<typeof fleetTick>[0]
     run: () =>
       fleetTick({
         client,
+        fleetSource: new FakeFleetObservationSource(),
         jobs: JOBS,
         now: () => NOW,
         settleBudgetMs: 0,
@@ -79,23 +80,23 @@ test('the green path costs zero escalations and zero tokens', async () => {
 });
 
 test('an unreadable view dispatches nothing — not even a plan call', async () => {
-  const client = new FakeBroker({ view: unreachable() });
-  const result = await tick(client).run();
+  const client = new FakeBroker();
+  const result = await tick(client, { fleetSource: new FakeFleetObservationSource({ status: 'degraded', reason: unreachable().message }) }).run();
   assert.equal(result.blocked?.stepId, 'assemble_state');
   assert.equal(client.count('plan'), 0);
   assert.equal(client.count('startOperation'), 0);
 });
 
 test('an empty view is blocked, because it is not evidence of an empty fleet', async () => {
-  const client = new FakeBroker({ view: view({ hosts: {} }) });
-  const result = await tick(client).run();
+  const client = new FakeBroker();
+  const result = await tick(client, { fleetSource: new FakeFleetObservationSource({ status: 'fresh', view: view({ hosts: {} }) }) }).run();
   assert.equal(result.blocked?.stepId, 'assemble_state');
   assert.equal(client.count('startOperation'), 0);
 });
 
 test('a stale view is blocked rather than planned against', async () => {
-  const client = new FakeBroker({ view: view({ generated_at: NOW - 600 }) });
-  const result = await tick(client).run();
+  const client = new FakeBroker();
+  const result = await tick(client, { fleetSource: new FakeFleetObservationSource({ status: 'fresh', view: view({ generated_at: NOW - 600 }) }) }).run();
   assert.equal(result.blocked?.stepId, 'assemble_state');
 });
 
@@ -221,7 +222,7 @@ test('a deprovision the broker refuses because the node is busy is a correct out
 // --- the surfaces, asserted closed ------------------------------------------
 test('the handback surface is exactly the declared one', () => {
   const names: string[] = Object.keys(
-    fleetHandbacks({ client: new FakeBroker(), state: newLoopState(), now: () => NOW }),
+    fleetHandbacks({ client: new FakeBroker(), fleetSource: new FakeFleetObservationSource(), state: newLoopState(), now: () => NOW }),
   ).sort();
   for (const forbidden of ['provision', 'deprovision', 'choose_tier', 'relax_region_policy', 'set_quota', 'set_budget']) {
     assert.ok(!names.includes(forbidden), `${forbidden} must never be a handback`);
@@ -232,10 +233,10 @@ test('the handback surface is exactly the declared one', () => {
 });
 
 test('no handback mutates region, quota or budget', () => {
-  const handbacks = fleetHandbacks({ client: new FakeBroker(), state: newLoopState(), now: () => NOW });
+  const handbacks = fleetHandbacks({ client: new FakeBroker(), fleetSource: new FakeFleetObservationSource(), state: newLoopState(), now: () => NOW });
   // The one that names a policy RECORDS a request and returns nothing granting.
   const state = newLoopState();
-  const surface = fleetHandbacks({ client: new FakeBroker(), state, now: () => NOW });
+  const surface = fleetHandbacks({ client: new FakeBroker(), fleetSource: new FakeFleetObservationSource(), state, now: () => NOW });
   return surface.request_policy_change!.run(
     { kind: 'region', reason: 'the only capacity left is in na' },
     new AbortController().signal,
@@ -248,7 +249,7 @@ test('no handback mutates region, quota or budget', () => {
 
 test('a cooldown is capped and scoped to one pool', async () => {
   const state = newLoopState();
-  const surface = fleetHandbacks({ client: new FakeBroker(), state, now: () => NOW });
+  const surface = fleetHandbacks({ client: new FakeBroker(), fleetSource: new FakeFleetObservationSource(), state, now: () => NOW });
   await surface.refresh_availability!.run({ pool_id: 'p', seconds: 900 }, new AbortController().signal);
   assert.equal(state.cooldowns.get('p'), NOW + 900);
   assert.equal(state.cooldowns.get('other'), undefined, 'a shortage on one pool must not cool the rest');
@@ -285,7 +286,7 @@ test('every repair, summary and event leaves with the job and operation id', asy
     sink: (e) => entries.push({ type: e.type, job_id: e.job_id, run_id: e.run_id, ...(e.operation_id ? { operation_id: e.operation_id } : {}) }),
   });
   seen = 'OP1';
-  await fleetTick({ client, jobs: JOBS, now: () => NOW, settleBudgetMs: 0, hostFor: () => host, observeHost: host });
+  await fleetTick({ client, fleetSource: new FakeFleetObservationSource(), jobs: JOBS, now: () => NOW, settleBudgetMs: 0, hostFor: () => host, observeHost: host });
   assert.ok(entries.length > 0);
   assert.ok(entries.every((e) => e.job_id === 'job-0' && e.run_id === 'run-1'));
   assert.ok(entries.some((e) => e.type === 'summary'));
@@ -306,7 +307,7 @@ test('a trace sink that throws is reported and changes nothing', async () => {
     },
     onSinkError: (e) => errors.push(e),
   });
-  const result = await fleetTick({ client, jobs: JOBS, now: () => NOW, settleBudgetMs: 0, hostFor: () => host, observeHost: host });
+  const result = await fleetTick({ client, fleetSource: new FakeFleetObservationSource(), jobs: JOBS, now: () => NOW, settleBudgetMs: 0, hostFor: () => host, observeHost: host });
   assert.equal(result.results[0]!.outcome, 'settled');
   assert.ok(errors.length > 0, 'a paper trail that goes quiet must not look like a system with nothing to say');
 });

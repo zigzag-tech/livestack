@@ -27,3 +27,110 @@ overrides, `0`/`off` disables, a bad value refuses to start; the daemon sets `pr
 pruning is on). Startup logs `[hostd] peer prune window: 86400s`. A pruned seed returns at the next
 broker start; a registered peer returns when it announces. The previous release is
 `sensenova-base-16575876`.
+
+## Deployed: inpainting through Harmony (commits b1da9c93, 724ec228), 2026-11-02
+
+An image request that sends `init_image` and `mask_image` is task=inpaint (derived by the contract, with the
+specialist requirement `inpaint: true`); the FLUX.2 Fun Union unit serves it with the controller it already loads.
+
+- Fleet broker (planner): release `admit-wait-on-regional-3ea2476f-depth-specialist-2ce0c3c6-inpaint-b1da9c93` =
+  the previous release plus b1da9c93's `requirements.py` (a unit attribute listing values offers each) and its
+  `_specialist_only` change (`inpaint` joins `ocr`/`depth_guide`; a unit holding several specialist capabilities is
+  served by demand naming any of them), applied by hand where the release's comment differed. Its planner and
+  requirement tests plus the two new ones passed in the release before the switch. Drop-in
+  `livestack-fleetd.service.d/zzzz-depth-specialist.conf`; backup `/etc/systemd/system/zzzz-depth-specialist.conf.fleetd.before-inpaint-20261102`.
+- Image gateway and the FLUX.2 depth unit: release `imagegen-20261102-724ec228` (main at 724ec228). Gateway drop-in
+  `harmony-image-gateway.service.d/50-depth-units.conf` (backup `/etc/systemd/system/50-depth-units.conf.gateway.before-inpaint-20261102`);
+  process-node config `~/.local/share/harmony-process-node/harmony-image-flux2-depth.json` now points there and its
+  unit declares `task: [text_to_image, inpaint]` and `inpaint: true` (backup beside it, `.before-inpaint-20261102`).
+
+Roll back by restoring the three backups, `daemon-reload`, and restarting `livestack-fleetd`,
+`harmony-image-gateway` and `harmony-image-flux2-depth`. The SDXL and Qwen image units are unchanged.
+
+## Pending deploy: device leases released across reboot (branch agent/lease-boot-expiry), 2026-11-02
+
+`DeviceLeaseStore` stamps leases with hostd's `time.monotonic` clock, which restarts near 0 at reboot. After
+xc-tower-ubuntu rebooted on 2026-11-01, two harmony-image leases from the previous boot (expires_at ~2192059
+against an uptime of ~200 s) stayed `exclusive`, blocking admission and a deploy guard, and were released by hand.
+Leases now record the kernel boot id (`/proc/sys/kernel/random/boot_id`), and opening the store (hostd start)
+releases every active lease from another boot with `reason = previous_boot`. Rows from before this change have
+no boot id and are released at the first start, so deploy while `GET /status` shows no `device_leases` held.
+**Not yet deployed: xc-tower-ubuntu needs a hostd deploy** (only `device_leases.py` changed; cherry-pick onto the
+pinned release as above and run `tests/test_device_leases.py`).
+
+## Deployed: process-node holds cannot leak (commit 91b49f4b), 2026-11-03
+
+Not a hostd change: the fix is in the process-node facade, `process_node.py`. Facade releases live in
+`~/.local/share/harmony-process-node/releases/<first 16 hex of the file's sha256>/` (the file plus
+`mesh_outbound_py/`, copied unchanged from the previous release), selected by `ExecStart` in each unit's
+`<unit>.service.d/zz-harmony-process-node.conf`.
+
+- **polyasr** (`mesh://livestack/tower-asr-1`, 8766/8767): release `b1c2dbe83851f6ef` = `cfb288cc9d14c9ea`
+  (identical to main's file at f5cd4793) + 91b49f4b. Drop-in backup
+  `/etc/systemd/system/zz-harmony-process-node.conf.polyasr.before-hold-leak-20261103`. Restarting the facade
+  stops its worker (it lives in the facade's cgroup); it was idle (`active_requests 0`), and starts again on the
+  next admission. After the switch `GET :8799/status` shows asr/align/diarize `busy: false`, facade
+  `load.in_flight 0`, and the image gateway's queued exclusive lease on `4bac2869` was granted.
+- Every other facade was rolled the same day; see the next section. A leaked hold shows as `load.in_flight > 0`
+  on `GET <facade>/livestack/capability` over a worker that reports nothing in flight; restarting that facade
+  clears it.
+
+Roll back: restore the backup drop-in, `daemon-reload`, restart `polyasr`.
+
+## Deployed: a busy tenant waits within the caller's window (commit 6190c349), 2026-11-03
+
+hostd on xc-tower-ubuntu runs release `busy-wait-6190c349-on-admit-fifo-e9edbd61` = the previous
+`admit-fifo-e9edbd61-on-exclusive-queue-426851de` plus 6190c349's `hostbroker.py` and `device_leases.py`
+(applied as a patch; its exclusive tests and `test_device_leases.py` pass against the release, apart from the
+boot-id and device-hold tests whose features that release predates). Drop-in `zzz-exclusive-device-leases.conf`;
+backup `/etc/systemd/system/zzz-exclusive-device-leases.conf.hostd.before-busy-wait-*`. Deploy/rollback script:
+`~/.local/share/livestack-releases/deploy-busy-wait.sh [--rollback]` (waits for no active lease and no open
+:8211/:8227 request). Only hostd restarted; the image gateway already passed `harmony_wait_s` as `queue_wait_s`.
+The boot-id lease change (agent/lease-boot-expiry, above) is still NOT in this release.
+Restarting hostd also restarts `polyasr.service` (seen at 02:49:56 and 03:01:48): drop-in
+`polyasr.service.d/99-harmony-demand-policy.conf` has `Requires=`/`BindsTo=livestack-hostd.service`, so treat a
+hostd restart as an ASR restart too and pick a moment polyasr is idle.
+
+## Deployed: hold-leak fix on every other facade (91b49f4b backported), 2026-11-03
+
+Each facade stayed on its own release with only 91b49f4b applied, by `node-py/scripts/backport-process-node-holds.py`
+(it asserts the shape it edits and refuses anything else). None was moved to main's facade. The new release
+dir is `<sha16 of the patched file>` with the base release's `mesh_outbound_py/` copied unchanged. Before
+the switch, each patched file was run against a real uvicorn server with the tower's library versions
+(starlette 1.10, uvicorn 0.43). The case is an HTTP client leaving mid-response while the facade lock is
+held: every base release leaked one hold there and every patched one held none. Each unit was rolled only
+when idle (`in_flight 0`, no unit busy). Its unit file or drop-in is backed up as
+`<file>.<unit>.before-hold-leak-20261103`. Drop-ins are backed up to `/etc/systemd/system/`, and drama3's to
+`~/.config/systemd/user/`.
+
+| unit | base release | new release | switched in |
+|---|---|---|---|
+| polytts, harmony-deepseek-ocr2 | e2fb4bbace24e144 | 5becb83f6f59ab10 | `<unit>.service.d/zz-harmony-process-node.conf` |
+| harmony-glm-ocr, -hunyuan-ocr, -paddleocr-v6, -paddleocr-vl, -perception, -sam21, -sensenova-0 | 3e4360c1bbc9b020 | 31dc6bc1ea08cfcd | same |
+| harmony-image | image-wait | 5619d4e8d1e093c4 | same |
+| harmony-image-sdxl-depth, harmony-image-flux2-depth | depth-lease | 4ba2ae7f23aa9fe6 | the unit file itself (no drop-in) |
+| harmony-polytts-drama3-unconditioned (**user** unit, `systemctl --user`) | admit-wait | d446ef9c9bbbe746 | `~/.config/systemd/user/<unit>.service.d/zz-harmony-process-node.conf` |
+
+- `admit-wait` had been edited in place (`process_node.py.before-engine-route` sits beside it). Its read-only
+  `attach()` path, used to poll an existing job, now takes a hold token too.
+- `harmony-image-flux2-depth` serves the histo history-scroll inpainting. It was rolled last, at 02:50:05,
+  between sections, with `~/histo-scroll/PAUSE` set (the chain stops on a failed request and checks PAUSE
+  before each take). PAUSE was removed at 03:02:01, after the hostd switch below.
+- After the roll, all 14 facades report `in_flight 0`, every unit `busy: false`, and no worker running.
+
+Roll back one unit: restore its backup, `daemon-reload` (`--user` for drama3), restart it. Restarting a
+facade stops its worker.
+
+## Deployed: hostd mesh:// announce is a named 503 (57fbfd61, f5cd4793), 2026-11-03
+
+Release `busy-wait-6190c349-on-admit-fifo-e9edbd61-meshlink-503-f5cd4793` is the busy-wait release, unchanged,
+plus those two commits hand-applied: `hostd.py` hunks, `mesh_peer.py`, new `meshlink_runtime.py`,
+`tests/test_meshlink_runtime.py`. The busy-wait release itself is recorded by the exclusive-503 change. On the
+tower, with hostd's venv, `tests/test_meshlink_runtime.py` passed (7). A TestClient `POST /peers mesh://…` without
+`LIVESTACK_RELAY_CAP_KEYS` answered 503 `mesh_relay_unconfigured`. The drop-in is
+`livestack-hostd.service.d/zzz-exclusive-device-leases.conf`, backed up as
+`/etc/systemd/system/zzz-exclusive-device-leases.conf.hostd.before-busy-wait-meshlink-20261103`. hostd was
+restarted once, at 03:01:48 (up 03:01:50), with no lease or image connection open. The process's PYTHONPATH
+is the new release, `GET /status` carries `meshlink`, and a mesh:// announce now logs one
+`[hostd] POST /peers refused … mesh_relay_unconfigured` line, not a 500 and a traceback.
+`LIVESTACK_RELAY_CAP_KEYS` is still unset on this host, so mesh:// peers stay unregistered by design.

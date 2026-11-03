@@ -143,3 +143,37 @@ def test_the_whole_device_claim_fits_the_whole_device_not_capacity_minus_slack()
     p = plan(w)
     assert [a.kind for a in p.of(Evict)] == ["llm_general"]
     assert [a.kind for a in p.of(Load)] == ["flash_next"]
+
+
+def _with_device_lease(world, state):
+    leases = {} if state is None else {"gpu0": {"state": state}}
+    return WorldState(**{**world.__dict__, "device_leases": leases})
+
+
+def test_active_device_leases_fence_demand_but_shared_and_absent_do_not():
+    request = Request("ordinary", "llm_general", created_at=100.0)
+    for state in ("draining", "exclusive", "expired_draining"):
+        p = plan(_with_device_lease(world_with(requests=(request,)), state))
+        assert p.of(Load) == [], state
+        assert p.of(Grant) == [], state
+        assert p.of(Evict) == [], state
+        assert [d.request_id for d in p.of(Defer)] == ["ordinary"], state
+
+    for state in (None, "shared", "released"):
+        p = plan(_with_device_lease(world_with(requests=(request,)), state))
+        assert [a.kind for a in p.of(Load)] == ["llm_general"], state
+        assert [(g.request_id, g.device_id) for g in p.of(Grant)] == [
+            ("ordinary", "gpu0")], state
+
+
+def test_active_device_leases_also_fence_hard_pin_and_soft_pin_placement():
+    hard = Unit("hard", {"vram_bytes": 4.0}, priority=1,
+                residency=Residency.HARD_PIN, min_resident=1)
+    soft = Unit("soft", {"vram_bytes": 5.0}, priority=20,
+                residency=Residency.SOFT_PIN)
+    for state in ("draining", "exclusive", "expired_draining"):
+        w = _with_device_lease(world_with(units={"hard": hard, "soft": soft}), state)
+        assert plan(w).actions == (), state
+
+    shared = _with_device_lease(world_with(units={"hard": hard, "soft": soft}), "shared")
+    assert {a.kind for a in plan(shared).of(Load)} == {"hard", "soft"}

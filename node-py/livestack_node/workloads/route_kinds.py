@@ -18,6 +18,7 @@ import urllib.error
 from livestack_node import transport
 
 from .download import download_into
+from .liveness import Liveness
 from .model import WorkloadError
 from .routes import Route, register_kind
 
@@ -35,6 +36,7 @@ class HttpRoute(Route):
         super().__init__(descriptor)
         self.client, self.edge_key, self.parallel, self.clock = client, edge_key, parallel, clock
         self.chunk = descriptor.options.get('chunk_bytes', UPLOAD_CHUNK)
+        self.liveness = Liveness.from_options(descriptor.options)
         self._status = (0.0, None)
         self._resumable = None   # learned per route: does the endpoint have objects/<d>/upload?
 
@@ -170,7 +172,7 @@ class HttpRoute(Route):
             options['parallel'] = self.parallel
         try:
             download_into(self.client, digest, self.headers(ctx['headers']), out, ctx['max_bytes'], start=start,
-                          **options)
+                          liveness=self.liveness, report=ctx.setdefault('detail', {}), **options)
         finally:
             ctx['moved'] = ctx.get('moved', 0)+max(0, out.tell()-start)
 

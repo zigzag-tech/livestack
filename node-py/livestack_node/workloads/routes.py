@@ -317,12 +317,12 @@ class RouteSet:
             else:
                 return
 
-    def record(self, route, peer, ok, trail, *, nbytes=0, seconds=0.0, error=None):
+    def record(self, route, peer, ok, trail, *, nbytes=0, seconds=0.0, error=None, detail=None):
         self.health(route, peer).record(ok, nbytes, seconds)
         outcome = 'ok' if ok else 'failed'
         self.count(route, outcome)
         trail.add(route.name, outcome, '' if ok else '%s: %s' % (type(error).__name__, error), bytes=nbytes,
-                  seconds=round(seconds, 3))
+                  seconds=round(seconds, 3), **(detail or {}))
         if not ok:
             logging.warning('route %s abandoned after %d bytes: %s: %s', route.name, nbytes, type(error).__name__, error)
 

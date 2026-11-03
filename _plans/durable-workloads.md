@@ -142,6 +142,16 @@ when these references can be released. The blob sweep materializes this bounded
 reference set once per sweep. Real SQLite/blob tests verify both preservation
 and eventual removal, and reject missing, foreign and mismatched artifacts.
 
+A `succeeded` completion is accepted only with a supervisor receipt containing
+integer `exit_code: 0` and explicit integer zero values for both
+`resources.oom_kill` and `resources.pids_max_events`. WorkloadStore persists the
+receipt evidence with attribution `workload`, reason `handler_exit_code_zero`,
+and a typed success cause. Ordinary job reads, the authority's `done` partial,
+and the hash-bound owner-scoped result manifest use the same receipt classifier
+and expose the same attribution and reason. A legacy success without a complete
+receipt remains attributed `unknown` with reason `success_evidence_unavailable`;
+its stored state does not prove a clean exit.
+
 The native worker now polls independently, measures RAM/CPU/disk headroom,
 downloads and verifies the assigned source, launches an installed handler,
 uploads bounded logs and declared artifacts, and acknowledges completion only
@@ -986,3 +996,27 @@ rows collected after 24 h); only the capability's SHA-256 verifier is stored.
 Optional `public_base_url` in the service config sets the host in `upload_url`.
 Code: `node-py/livestack_node/workloads/upload_grants.py`; tests:
 `test_workload_upload_grants.py`.
+
+### Native workload intent authority adapter (source-proven)
+
+`workloads.service` recovers the real `WorkloadStore`, constructs its
+owner-scoped `BlobStore`, and passes both into
+`start_for_workload_authority`. With no custom resolver, the factory resolves a
+`harmony.workload/1` `{ref, digest, bytes, media}` request from the authenticated
+principal's CAS namespace. It enforces `application/json`, a one-MiB maximum,
+exact size and SHA-256, valid UTF-8, and a JSON object before invoking normal
+WorkloadStore admission. Body `owner` cannot choose a different principal; the
+authority's `intent_id` replaces any request key before strict handler,
+resource, and input-object checks.
+
+The stream `IntentLedger` owns intent identity and terminal partials.
+WorkloadStore owns job and attempt state and emits placement decisions into
+its separately bounded decision ledger. `node-py/tests/test_streams_workload_authority_integration.py`
+exercises the production factory over isolated framed ingress with real SQLite
+and CAS stores. It checks one job/decision on replay, no job or attempt for
+invalid or unauthorized references, unavailable-service attribution, and
+owner-only durable cancellation. All fixture databases and objects are
+temporary; this proof does not start the service, contact production, modify
+authority configuration, or affect live jobs. The previously recorded
+`spec_resolver_unconfigured` limitation is stale. HTTP remains the bounded CAS
+transfer plane and is not a fallback for workload submission or observation.

@@ -40,6 +40,8 @@ import enum
 from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional, Tuple, Union
 
+from .requirements import attrs_meet
+
 _EPS = 1e-9
 
 # --- generic resource vectors ------------------------------------------------
@@ -284,6 +286,9 @@ class WorldState:
     # host_id -> the reserve subtracted from `hosts`, kept for the placement
     # record only (the planner never spends it twice). Absent = unmeasured.
     host_reserve: Mapping[str, Res] = field(default_factory=dict)
+    # device_id -> active broker-owned lease state. Draining and other owners'
+    # exclusive leases make the device unavailable to ordinary placement.
+    device_leases: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
 
 
 # --- actions ----------------------------------------------------------------
@@ -298,6 +303,14 @@ class Load:
     # is explained from the ledger alone: who needed the room, who brought it
     # back. Empty only for actions older than the field.
     caused_by: str = ""
+    # What this load may occupy: the device's free resources when it was
+    # decided, after this cycle's evictions. `hostbroker` forwards it to the
+    # node with the warm call so the engine sizes itself to it. Without it a load
+    # that is dispatched by the plan (rather than by a request's /admit) fell back
+    # to the unit's configured fraction of the WHOLE card, which cannot see the
+    # other tenants: llm_general asked 0.96 of a card with 21.2 of 23.6 GiB free
+    # and vLLM refused to start (2026-10-19).
+    budget: Dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -527,6 +540,11 @@ class _World:
         `host_free`, so one `_fits` call answers both questions and an eviction
         gives its `ram_bytes` back to the pool it came from."""
         d = self.devices[device_id]
+        if self.w.device_leases.get(device_id, {}).get("state") in {
+                "draining", "exclusive", "expired_draining"}:
+            budget = {k: 0.0 for k in d.capacity}
+            budget.update(self.host_free(d.host_id))
+            return budget
         if any(self.w.units[k].exclusive_device for k in self.resident[device_id]):
             # An exclusive tenant OWNS the device: nothing on it is free, and the
             # reserve/headroom that protects co-tenants has nobody left to
@@ -597,10 +615,22 @@ class _World:
 
     def load(self, kind: str, device_id: str, reason: str,
              caused_by: str = "") -> None:
+        # Sized BEFORE the unit is charged to the device, so its own footprint
+        # is not subtracted from the room it is being given.
+        budget = self._launch_budget(kind, device_id)
         self.resident[device_id][kind] = Placement(kind=kind, device_id=device_id,
                                                     loaded_at=self.w.now)
         self.actions.append(Load(kind=kind, device_id=device_id, reason=reason,
-                                 caused_by=caused_by))
+                                 caused_by=caused_by, budget=budget))
+
+    def _launch_budget(self, kind: str, device_id: str) -> Dict[str, float]:
+        unit = self.w.units.get(kind)
+        if unit is not None and unit.exclusive_device:
+            # The whole device (see `grant`).
+            budget = dict(self.devices[device_id].capacity)
+            budget.update(self.host_free(self._host_of(device_id) or ""))
+            return budget
+        return dict(self.free(device_id, unit))
 
     def evict(self, kind: str, device_id: str, reason: str,
               caused_by: str = "") -> None:
@@ -644,59 +674,11 @@ class _World:
         self.actions.append(Defer(request_id=req.id, reason=reason))
 
 
-_CMPS = (">=", "<=", "!=", ">", "<")
-
-
 def _unit_satisfies(u: Unit, requires: Mapping[str, object]) -> bool:
-    """Does this unit meet every stated requirement?
-
-    A key may carry a comparison suffix (`params_b>=`); bare keys are equality.
-    A requirement naming an attribute the unit does not declare is NOT met —
-    silence is not a yes, or an unlabelled unit would satisfy everything.
-    """
-    for key, want in requires.items():
-        op = ""
-        name = key
-        for c in _CMPS:
-            if key.endswith(c):
-                op, name = c, key[: -len(c)]
-                break
-        name = name.strip()
-        if name not in u.attributes:
-            return False
-        have = u.attributes[name]
-        try:
-            if op == "":
-                # A LIST want is "a value in this list" — the request language's
-                # `context_len=[131072,]` spelling (harmony-engine-units
-                # scenario: "a request says require:class=llm,context_len=[131072,]").
-                # Matching it as equality silently satisfied nothing.
-                if isinstance(want, (list, tuple, set)):
-                    if have not in want:
-                        return False
-                elif have != want:
-                    return False
-            elif op == "!=":
-                if isinstance(want, (list, tuple, set)):
-                    if have in want:
-                        return False
-                elif have == want:
-                    return False
-            elif op == ">=":
-                if not float(have) >= float(want):
-                    return False
-            elif op == ">":
-                if not float(have) > float(want):
-                    return False
-            elif op == "<=":
-                if not float(have) <= float(want):
-                    return False
-            elif op == "<":
-                if not float(have) < float(want):
-                    return False
-        except (TypeError, ValueError):
-            return False                    # non-numeric where a number was needed
-    return True
+    """Does this unit meet every stated requirement? The evaluator is
+    `livestack_node.requirements.attrs_meet` (comparison suffixes, lists,
+    `{"not": ..}`; an undeclared attribute is not met)."""
+    return attrs_meet(u.attributes, requires)
 
 
 # SPECIALIST-ONLY ATTRIBUTES. A unit declaring one (e.g. `ocr: true`) serves
@@ -708,19 +690,23 @@ def _unit_satisfies(u: Unit, requires: Mapping[str, object]) -> bool:
 # xc-tower-ubuntu 2026-09-19: a generic {class: llm} request was placed on
 # `ocr_ovis2`, which stopped the resident 27B to do it. Naming the unit still
 # works — an explicit choice never passes through candidate selection.
-_SPECIALIST_ONLY_ATTRS = ("ocr",)
+# `depth_guide`: a depth-ControlNet image unit needs a control image and whole-
+# device leases; generic image demand ({"params_b>=": 20}) matching it on
+# `class`/`params_b` would place a 32B FLUX.2 run holding both GPUs for ~25 min
+# where a Qwen text-to-image was meant.
+# `inpaint`: an image unit that repaints a masked area of a supplied image; only demand that sends an image and a mask
+# (the contract derives `inpaint` from them) is inpainting work.
+# A unit may hold several specialist capabilities (FLUX.2 Fun Union does depth guidance and inpainting with one
+# controller): demand naming ANY of them may use it, demand naming none may not.
+_SPECIALIST_ONLY_ATTRS = ("ocr", "depth_guide", "inpaint")
 
 
 def _specialist_only(u: Unit, requires: Mapping[str, object]) -> bool:
-    """Unit declares a specialist attribute the requirement does not name."""
-    for attr in _SPECIALIST_ONLY_ATTRS:
-        if attr in requires:
-            continue
-        val = (u.attributes or {}).get(attr)
-        if val is True or (isinstance(val, str)
-                           and val.strip().lower() in ("true", "1", "yes")):
-            return True
-    return False
+    """Unit declares specialist capabilities and the requirement names none of them."""
+    def declared(val) -> bool:
+        return val is True or (isinstance(val, str) and val.strip().lower() in ("true", "1", "yes"))
+    held = [attr for attr in _SPECIALIST_ONLY_ATTRS if declared((u.attributes or {}).get(attr))]
+    return bool(held) and not any(attr in requires for attr in held)
 
 
 def candidate_kinds(world: WorldState, req: Request) -> List[str]:
@@ -761,7 +747,8 @@ def _hosted_has_room(world: "_World", d: Device) -> bool:
 
 
 def _device_matches(d: Device, selector: Mapping[str, str]) -> bool:
-    return all(d.labels.get(k) == v for k, v in selector.items())
+    return all(d.id == v if k == "device_id" else d.labels.get(k) == v
+               for k, v in selector.items())
 
 
 def _can_serve(unit: Unit, d: Device) -> bool:
@@ -1041,6 +1028,42 @@ def _host_pool_reason(world: "_World", unit: Unit) -> "Optional[str]":
     return best[1] if best else None
 
 
+def _device_fit_reason(world: "_World", unit: Unit, pol: PlannerPolicy,
+                       eff_prio: int, kind: str) -> str:
+    """The refusal, with the arithmetic: per candidate card, what the unit needs,
+    what is free for it (reserve and measured foreign memory already taken), and
+    the shortfall left after evicting everything evictable. Without the figures
+    "no device can fit even with preemption" cost an afternoon on 2026-10-19: the
+    27B was 1.9 GB short on a card whose 2.5 GB of other tenants' idle CUDA
+    contexts are invisible to the planner as residents, and nothing said so.
+    The leading phrase is kept: callers match on it."""
+    need = _admission_need(unit)
+    parts = []
+    for d in world.w.devices:
+        if d.hosted or not _device_matches(d, unit.selector) or not _can_serve(unit, d):
+            continue
+        free = world.free(d.id, unit)
+        victims = _victims_to_free(world, d.id, need, eff_prio, pol, kind, unit=unit)
+        residents = [p.kind for p in world.resident[d.id].values()]
+        recoverable = {}
+        if victims is None:
+            for p in world.resident[d.id].values():
+                if p.kind != kind:
+                    recoverable = _add(recoverable, world._charged(world.w.units[p.kind], d.id))
+        short = {k: need[k] - (free.get(k, 0.0) + recoverable.get(k, 0.0))
+                 for k in need if need[k] > free.get(k, 0.0) + recoverable.get(k, 0.0) + _EPS}
+        meas = (world.w.measured_free or {}).get(d.id, {})
+        parts.append(
+            f"{d.id}: free {dict(free)} (measured free {dict(meas)}, reserve "
+            f"{dict(world.reserve(d.id, unit))}), residents {residents or 'none'}, "
+            f"short by {short or 'nothing (blocked by pins/priority)'} even if every "
+            f"evictable resident left")
+    if not parts:
+        return "no device can fit even with preemption"
+    return (f"no device can fit even with preemption: {unit.kind} needs "
+            f"{dict(need)} ({unit.footprint_source}); " + "; ".join(parts))
+
+
 @dataclass
 class _Option:
     device_id: str
@@ -1106,6 +1129,9 @@ def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
     best: Optional[_Option] = None
     for d in world.w.devices:
         if not _device_matches(d, {**unit.selector, **req.selector}):
+            continue
+        if world.w.device_leases.get(d.id, {}).get("state") in {
+                "draining", "exclusive", "expired_draining"}:
             continue
         if not _can_serve(unit, d):
             continue
@@ -1328,6 +1354,8 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
                 break
         if opt is None or unit is None:
             reason = "no device can fit even with preemption"
+            if u is not None and not u.exclusive_device and not _host_dims(_admission_need(u)):
+                reason = _device_fit_reason(W, u, pol, e, kind)
             if u is not None and u.exclusive_device:
                 # A whole-device claim fails on EVICTABILITY, and the refusal
                 # names the tenant that will not leave (spec: "A unit may claim

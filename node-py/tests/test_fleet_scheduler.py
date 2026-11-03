@@ -143,6 +143,42 @@ def test_no_feasible_target_queues():
 
 
 # --- deadline / EDF ---------------------------------------------------------
+def test_job_past_its_derived_deadline_is_still_placed():
+    # BATCH derives created_at + 12 h. An idle local target with room must take a job
+    # that waited 5 days: the lapsed derived deadline once filtered it out of EVERY
+    # target ("no target can meet deadline") although the caller stated none.
+    day = 24 * 3600.0
+    st = FleetState(targets=(local(free=1),),
+                    jobs=(job("old", sla=Sla.BATCH, created_at=0.0),), now=5 * day)
+    p = schedule(st)
+    assert ids(p.of(Admit)) == ["old"] and not p.of(Queue)
+
+
+def test_explicit_lapsed_deadline_still_filters():
+    # Failure control: only the DERIVED deadline relaxes once lapsed; an explicit one
+    # the caller stated stays a hard filter.
+    st = FleetState(targets=(local(free=1),),
+                    jobs=(job("late", sla=Sla.BATCH, created_at=0.0, deadline=100.0),),
+                    now=1000.0)
+    p = schedule(st)
+    assert ids(p.of(Queue)) == ["late"] and not p.of(Admit)
+
+
+def test_lapsed_interactive_deadline_still_filters():
+    # Failure control: INTERACTIVE is "fast or not at all"; its lapsed 30 s stays hard.
+    st = FleetState(targets=(local(free=1),),
+                    jobs=(job("i", sla=Sla.INTERACTIVE, created_at=0.0),), now=600.0)
+    p = schedule(st)
+    assert ids(p.of(Queue)) == ["i"] and not p.of(Admit)
+
+
+def test_unlapsed_derived_deadline_still_filters_a_slow_target():
+    # Failure control: a derived deadline that has NOT lapsed keeps driving tier choice.
+    st = FleetState(targets=(local(free=0), spot(max_instances=1, latency=90.0)),
+                    jobs=(job("j", sla=Sla.INTERACTIVE, created_at=0.0, dur=5.0),), now=0)
+    p = schedule(st)
+    assert not p.of(Admit) or p.of(Admit)[0].target_id != "spot"
+
 def test_pool_cap_forces_the_less_urgent_job_to_queue():
     # One SPOT instance available (max_instances=1), local full, two jobs of differing
     # urgency -> the earlier-deadline job gets it, the other queues.

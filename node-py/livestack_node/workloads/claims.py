@@ -279,7 +279,8 @@ def describe(row, now):
     return dict(enabled=bool(row['enabled']), generation=row['generation'], owner=row['owner'],
                 reason=row['reason'], expires_in_s=(None if row['expires_at'] is None
                                                     else round(row['expires_at'] - now, 1)),
-                needs_operator=bool(row['needs_operator']), draining=_live_drain(row, now))
+                needs_operator=bool(row['needs_operator']), draining=_live_drain(row, now),
+                set_age_s=(None if row['updated_at'] is None else round(max(0.0, now - row['updated_at']), 1)))
 
 
 def draining_now(store, principals=None):

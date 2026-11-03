@@ -92,8 +92,45 @@ class Limits:
     # against strictly lower effective priority (placement._hold_for_priority). Set from authority.json
     # `limits.handler_priority`; the authority reads it at start only (like every limit, SIGHUP skips it).
     handler_priority: dict = field(default_factory=dict)
+    # Authority-wide wall-clock bounds on SHARED capacity (rule 10: a named bound and its enforcer,
+    # WorkloadStore._job_verdict). An attempt running longer than `max_attempt_seconds` is fenced and its job
+    # fails `attempt_wall_clock_exceeded`; a job queued longer than `max_queue_age_seconds` expires
+    # `queue_age_exceeded`. A submitter may only LOWER the attempt bound (`max_attempt_seconds`, schema 4).
+    # The only way to run longer is an explicit, reasoned `wall_clock_exceptions` entry per handler:
+    # {handler: {"max_attempt_seconds": N, "reason": "why this cannot be split"}}; empty by default.
+    # Read at authority start only, like every limit.
+    max_attempt_seconds: float = 10800
+    max_queue_age_seconds: float = 86400
+    wall_clock_exceptions: dict = field(default_factory=dict)
+
+    HARD_ATTEMPT_CEILING = 86400
+
+    def attempt_ceiling(self, handler):
+        """(seconds, source) of the longest an attempt of `handler` may run: `exception` or `global`."""
+        entry = self.wall_clock_exceptions.get(handler)
+        if entry is not None:
+            return entry["max_attempt_seconds"], "exception"
+        return self.max_attempt_seconds, "global"
 
     def __post_init__(self):
+        for name_ in ("max_attempt_seconds", "max_queue_age_seconds"):
+            value = getattr(self, name_)
+            if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+                    or not 30 <= value <= self.HARD_ATTEMPT_CEILING):
+                raise ValueError(f"{name_} must be in [30, {self.HARD_ATTEMPT_CEILING}]; it cannot be disabled")
+        exceptions = self.wall_clock_exceptions
+        if not isinstance(exceptions, dict) or len(exceptions) > 16:
+            raise ValueError("wall_clock_exceptions must map at most 16 handler ids to entries")
+        for handler, entry in exceptions.items():
+            seconds = entry.get("max_attempt_seconds") if isinstance(entry, dict) else None
+            reason = entry.get("reason") if isinstance(entry, dict) else None
+            if (not isinstance(handler, str) or not handler or not isinstance(entry, dict)
+                    or set(entry) != {"max_attempt_seconds", "reason"}
+                    or isinstance(seconds, bool) or not isinstance(seconds, (int, float))
+                    or not self.max_attempt_seconds < seconds <= self.HARD_ATTEMPT_CEILING
+                    or not isinstance(reason, str) or not 8 <= len(reason.strip()) <= 240):
+                raise ValueError("a wall_clock_exceptions entry is {max_attempt_seconds above the global bound and "
+                                 f"at most {self.HARD_ATTEMPT_CEILING}, reason: 8..240 characters}} (%r)" % (handler,))
         declared = self.handler_priority
         if (not isinstance(declared, dict) or len(declared) > 64
                 or any(not isinstance(k, str) or not k or isinstance(v, bool) or not isinstance(v, int)
@@ -457,13 +494,14 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     allowed = {"version", "key", "handler", "input_digest", "input_objects", "payload", "need",
                "admit", "selector", "labels", "estimate_seconds", "deadline", "priority",
                "locality_host", "retain", "environment", "handler_release", "scope",
-               "max_queue_seconds", "progress_deadline_seconds"}
+               "max_queue_seconds", "progress_deadline_seconds", "max_attempt_seconds"}
     version = value.get("version")
     # Version 4 is version 3 plus work scopes and the opt-in deadlines; an authority that predates it
     # refuses a scoped submission loudly instead of ignoring the scope.
     if set(value) - allowed or version not in (1, 2, 3, 4) or (version == 1 and "input_objects" in value) \
             or (version not in (3, 4) and "environment" in value) \
-            or (version != 4 and {"scope", "max_queue_seconds", "progress_deadline_seconds"} & set(value)):
+            or (version != 4 and {"scope", "max_queue_seconds", "progress_deadline_seconds",
+                                                 "max_attempt_seconds"} & set(value)):
         raise WorkloadError("unsupported workload schema or fields")
     handler = name(value.get("handler"), "handler")
     if handler not in handlers:
@@ -546,6 +584,14 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
                         or not low <= seconds <= 86400:
                     raise WorkloadError(f"{field_} must be in [{low}, 86400]")
                 result[field_] = seconds
+    if "max_attempt_seconds" in value:
+        # A submitter may only lower the authority's bound for this handler, never raise it.
+        seconds, source = limits.attempt_ceiling(handler)
+        asked = value["max_attempt_seconds"]
+        if isinstance(asked, bool) or not isinstance(asked, (int, float)) or not 30 <= asked <= seconds:
+            raise WorkloadError(f"max_attempt_seconds must be in [30, {seconds:g}]: the authority's {source} "
+                                "wall-clock bound for this handler; a submission can only lower it")
+        result["max_attempt_seconds"] = asked
     if "scope" in value:
         result["scope"] = scope_ref(value["scope"], limits)
     elif handler in limits.scope_required_handlers:

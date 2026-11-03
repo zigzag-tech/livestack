@@ -129,6 +129,29 @@ def user_app_slice(cgroup_root='/sys/fs/cgroup', uid=None):
     return Path(cgroup_root)/f'user.slice/user-{uid}.slice/user@{uid}.service/app.slice'
 
 
+def attempt_memory(cgroup_root='/sys/fs/cgroup', attempts_dir=None):
+    """Attempt id -> non-reclaimable bytes, for every running task attempt's
+    cgroup (`harmony-work-*-<attempt>.service`) in this user's app slice and in
+    system.slice. Shared by the workers' report and the host broker's ledger
+    reading, so both sides measure attempts the same way."""
+    cgroup_root = Path(cgroup_root)
+    directories = ([attempts_dir] if attempts_dir is not None else
+                   [user_app_slice(cgroup_root), cgroup_root/'system.slice'])
+    out = {}
+    for directory in directories:
+        try:
+            entries = sorted(os.scandir(directory), key=lambda e: e.name)
+        except OSError:
+            continue
+        for entry in entries:
+            match = ATTEMPT_UNIT.fullmatch(entry.name)
+            if match and len(out) < MAX_ATTEMPTS:
+                reading = cgroup_nonreclaimable(entry.path)
+                if reading is not None:
+                    out[match.group(1)] = reading
+    return out
+
+
 class HostView:
     """Samples the host for a worker report and remembers what it has learned.
 
@@ -139,7 +162,12 @@ class HostView:
     """
 
     def __init__(self, *, services=(), peaks_path=None, attempts_dir=None,
-                 reserve_bytes=1024**3, proc='/proc', cgroup_root='/sys/fs/cgroup', clock=time.monotonic):
+                 reserve_bytes=1024**3, proc='/proc', cgroup_root='/sys/fs/cgroup', clock=time.monotonic,
+                 ledger=None):
+        # The shared host-RAM ledger (host_ledger.HostLedger): a service the host
+        # broker PLANS is charged only for the loads it has waiting or in flight,
+        # not its learned peak — see _services.
+        self.ledger = ledger
         # An entry is a relative cgroup path, or {"path": ..., "residence": url}
         # for a model server whose /livestack/residence says whether its units
         # are loaded (and so whether its load spike can still happen).
@@ -173,24 +201,13 @@ class HostView:
         return max(0, pages-previous[1])*os.sysconf('SC_PAGE_SIZE')/(now-previous[0])
 
     def _attempts(self):
-        directories = ([self.attempts_dir] if self.attempts_dir is not None else
-                       [user_app_slice(self.cgroup_root), self.cgroup_root/'system.slice'])
-        out = {}
-        for directory in directories:
-            try:
-                entries = sorted(os.scandir(directory), key=lambda e: e.name)
-            except OSError:
-                continue
-            for entry in entries:
-                match = ATTEMPT_UNIT.fullmatch(entry.name)
-                if match and len(out) < MAX_ATTEMPTS:
-                    reading = cgroup_nonreclaimable(entry.path)
-                    if reading is not None:
-                        out[match.group(1)] = reading
-        return out
+        return attempt_memory(self.cgroup_root, self.attempts_dir)
 
     def _services(self):
         out, changed = {}, False
+        planned, loads = {}, []
+        if self.ledger is not None:
+            planned, loads = self.ledger.planned_services(), self.ledger.loads()
         for service in self.services:
             reading = cgroup_nonreclaimable(self.cgroup_root/service)
             current = 0 if reading is None else reading
@@ -201,6 +218,21 @@ class HostView:
             if learned != self.peaks.get(service):
                 self.peaks[service], changed = learned, True
             out[service] = {'current_bytes': current, 'peak_bytes': learned}
+            if service in planned:
+                # PLANNED BY THE HOST BROKER (host_ledger): its host RAM is
+                # spoken for only while one of its units waits for room or is
+                # loading. A cold planned service holds nothing — charging its
+                # learned peak held ~40 GB of zz-whitby for a Strata nobody was
+                # using. A waiting load is charged in full, which is what DRAINS
+                # new attempts (they stop fitting) until the load can run.
+                # Expressed in the fields the authority already accepts: the
+                # outstanding part is peak - current, and only an explicit
+                # resident=True clears it.
+                outstanding = max(0, sum(l['ram_bytes'] for l in loads
+                                         if l['unit'] in planned[service]) - current)
+                out[service] = {'current_bytes': current, 'peak_bytes': current + outstanding,
+                                'resident': outstanding == 0}
+                continue
             if service in self.residence_urls:
                 # A stopped unit (no cgroup) has nothing resident, whatever answers.
                 out[service]['resident'] = (False if reading is None

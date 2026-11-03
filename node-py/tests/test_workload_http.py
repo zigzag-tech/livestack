@@ -13,6 +13,7 @@ import pytest
 from livestack_node.workloads.http import Principal, WorkloadServer
 from livestack_node.workloads.store import WorkloadStore
 from livestack_node.workloads.client import WorkloadClient
+from livestack_node.workloads.model import encode
 from livestack_node.workloads.transfer import InputTransfer
 
 
@@ -37,6 +38,7 @@ def api(tmp_path):
                 return response.status, json.load(response)
         except urllib.error.HTTPError as e:
             return e.code, json.load(e)
+    call.store = store
     yield call
     server.shutdown()
     thread.join(timeout=5)
@@ -150,7 +152,42 @@ def test_worker_identity_is_bound_to_credential_and_result_is_fenced(api):
     a = out['assignment']
     assert a['job_id'] == job['id'] and a['worker'] == 'w1'
     completion = dict(boot='boot', attempt_id=a['attempt_id'], fence=a['fence'], input_digest=hashlib.sha256(b'input fixture').hexdigest(),
-                      outcome='succeeded', result={'ok': True})
+                      outcome='succeeded', result={'exit_code': 0,
+                          'resources': {'oom_kill': 0, 'pids_max_events': 0}, 'ok': True})
     assert api('worker/complete', dict(completion, fence=99), token=token)[0] == 409
-    assert api('worker/complete', completion, token=token)[1]['state'] == 'succeeded'
-    assert api('jobs/'+job['id'])[1]['result']['result'] == {'ok': True}
+    invalid_receipts = (
+        {'resources': {'oom_kill': 0, 'pids_max_events': 0}, 'ok': True},
+        {'exit_code': '0', 'resources': {'oom_kill': 0, 'pids_max_events': 0}, 'ok': True},
+    )
+    for result in invalid_receipts:
+        status, _ = api('worker/complete', dict(completion, result=result), token=token)
+        assert status == 409
+        unchanged = api('jobs/'+job['id'])[1]
+        assert unchanged['state'] == 'running'
+        assert unchanged['attempts'][0]['state'] == 'running'
+
+    status, completed = api('worker/complete', completion, token=token)
+    assert status == 200 and completed['state'] == 'succeeded'
+    current = api('jobs/'+job['id'])[1]
+    assert current['result']['result'] == {
+        'exit_code': 0, 'resources': {'oom_kill': 0, 'pids_max_events': 0}, 'ok': True}
+    manifest = api('jobs/'+job['id']+'/result')[1]
+    assert manifest['attribution'] == completed['result']['attribution'] == current['result']['attribution']
+    assert manifest['reason'] == completed['result']['reason'] == current['result']['reason'] == completed['reason']
+    assert manifest['result']['cause'] == completed['result']['cause'] == current['result']['cause'] == completed['cause']
+
+    legacy_completion = {key: value for key, value in completed['result'].items()
+                         if key not in ('attribution', 'reason', 'cause')}
+    legacy_completion['result'] = {'exit_code': 0, 'ok': True}
+    with api.store.transaction() as db:
+        db.execute('UPDATE attempts SET result=? WHERE id=?',
+                   (encode(legacy_completion, api.store.limits.record_bytes), a['attempt_id']))
+        db.execute('UPDATE jobs SET result=?,reason=NULL,cause=? WHERE id=?',
+                   (encode(legacy_completion, api.store.limits.record_bytes),
+                    encode({'kind': 'succeeded', 'retry': 'no', 'evidence': {}}, 2048), job['id']))
+    legacy = api('jobs/'+job['id'])[1]
+    legacy_manifest = api('jobs/'+job['id']+'/result')[1]
+    unknown = ('unknown', 'success_evidence_unavailable')
+    assert (legacy['result']['attribution'], legacy['result']['reason']) == unknown
+    assert (legacy_manifest['attribution'], legacy_manifest['reason']) == unknown
+    assert legacy['cause'] == legacy_manifest['cause']

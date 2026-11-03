@@ -31,7 +31,11 @@ Config via env:
     LIVESTACK_BROKER_PORT default 8799
     LIVESTACK_DEVICES    hosted devices, e.g. {"buildhost-a": {"hosted": true,
                          "concurrency": 1, "labels": {"arch": "linux/amd64"}}}
+                         A held device is reserved for a human and never planned on:
+                         {"host-a/gpu0": {"hold": "histo training"}}
     LIVESTACK_UNITS      kinds no peer reports, e.g. {"build": {"priority": 20}}
+    LIVESTACK_DEVICE_METERS JSON device ID -> logical CUDA index for local devices
+                         without a model facade; supplies lease memory measurements
     LIVESTACK_PROBES     health probes for hosted devices:
                          {"buildhost-a": {"cmd": "docker info", "interval_s": 60}}
     LIVESTACK_LEASE_TTL_S hosted-lease expiry without heartbeats (default 120)
@@ -104,17 +108,64 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
+from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
-from .hostbroker import HostBroker, RestPeer
+from .hostbroker import HostBroker, LocalDeviceMeterPeer, RestPeer
+from .device_leases import DeviceLeaseStore
 from .mesh_peer import MeshPeer, RelayRoute, facade_id
-from . import relay_control
+from . import meshlink_runtime, relay_control
 from .membership import MembershipPolicy, RosterFull, policy_from_env
 from .fleet_scheduler import SchedulerPolicy
 from .planner import Defer, Device, Request, Residency, Unit, Evict, Grant, Load, plan as _plan
 
 GB = 1_000_000_000
+
+# `wait_s` on POST /admit: the longest a caller may ask to be held, and how often
+# a held request is planned again.
+ADMIT_WAIT_MAX_S = 3600.0
+ADMIT_WAIT_POLL_S = 1.0
+
+
+class AdmitQueue:
+    """Arrival order among held /admit requests with the same requirement.
+
+    Only the head of a requirement's line plans; the rest wait their turn, so a
+    later arrival cannot take room an earlier one is waiting for. A request
+    leaves the line when it is answered or its caller gives up, whichever
+    comes first.
+    """
+
+    def __init__(self):
+        import threading
+        self._lock = threading.Lock()
+        self._lines: Dict[str, List[str]] = {}
+
+    def waiting(self, key, req_id):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def hold():
+            with self._lock:
+                self._lines.setdefault(key, []).append(req_id)
+            try:
+                yield
+            finally:
+                with self._lock:
+                    line = self._lines.get(key, [])
+                    if req_id in line:
+                        line.remove(req_id)
+                    if not line:
+                        self._lines.pop(key, None)
+        return hold()
+
+    def is_head(self, key, req_id):
+        with self._lock:
+            line = self._lines.get(key)
+            return bool(line) and line[0] == req_id
+
 
 # Priority policy (lower = more important). The ASR pipeline (asr/align/diarize)
 # outranks TTS, which outranks chipgen — so a digest'''s align can preempt idle
@@ -174,7 +225,8 @@ def build_broker(peer_urls: List[str], device_config=None,
                  default_vram_gb: float = 24.0, default_reserved_gb: float = 2.0,
                  membership=None, extra_units=None, dispatch: bool = True,
                  ledger=None, emitter_id: str = "host-broker",
-                 node_control_token: Optional[str] = None) -> HostBroker:
+                 node_control_token: Optional[str] = None,
+                 device_meters=None) -> HostBroker:
     """Federated by default: devices are DISCOVERED from the peers (one per reported
     device_id, across however many hosts), sized from device_config[device_id] or the
     default. Point peer_urls at nodes on several hosts and the same broker plans and
@@ -188,6 +240,10 @@ def build_broker(peer_urls: List[str], device_config=None,
                        fallback_footprints=DEFAULT_FOOTPRINTS,
                        control_token=node_control_token)
              for u in peer_urls]
+    if not isinstance(device_meters or {}, dict):
+        raise ValueError("device_meters must map device IDs to logical CUDA indices")
+    peers.extend(LocalDeviceMeterPeer(device_id.rsplit("/", 1)[0], device_id, index)
+                 for device_id, index in (device_meters or {}).items())
     return HostBroker(devices=None, peers=peers, device_config=device_config or {},
                       default_capacity={"vram_bytes": int(default_vram_gb * GB),
                                         "reserved": int(default_reserved_gb * GB)},
@@ -203,13 +259,7 @@ def build_app(broker: HostBroker):
     from fastapi.responses import HTMLResponse
 
     from .ui import page as ui_page
-    from .identity_facts import IdentitySnapshotPublisher, valid_identity
     app = FastAPI(title="Livestack Harmony broker")
-    authority_id = os.environ.get("LIVESTACK_IDENTITY_AUTHORITY_ID", "").strip()
-    identity_publisher = (
-        IdentitySnapshotPublisher("livestack", authority_id)
-        if valid_identity(authority_id, max_bytes=220) else None
-    )
     # One journal line per mutating request and per auth refusal, with source
     # address and principal name — the evidence the R.3 inventory gate reads
     # ("zero 401s from an address not in the inventory"). Reads stay silent;
@@ -221,6 +271,11 @@ def build_app(broker: HostBroker):
             headers.get("authorization"),
             getattr(broker, "fleet_principals", None)))
     state = {"last_evicted_at": {}}
+    if hasattr(broker, "use_exclusive_store"):
+        ledger_dir = os.environ.get("LIVESTACK_LEDGER_DIR") or os.path.expanduser("~/.cache/livestack")
+        os.makedirs(ledger_dir, exist_ok=True)
+        broker.use_exclusive_store(DeviceLeaseStore(
+            os.path.join(ledger_dir, "device-exclusivity.sqlite3")))
     # Hosted-backend health probes (LIVESTACK_PROBES), run on the reconcile
     # loop's cadence. probe_state is what /status reports under "hosted".
     import json as _json
@@ -244,6 +299,8 @@ def build_app(broker: HostBroker):
             return principal_for(principals, bearer_token(authorization)).name
         except AuthError:
             return None
+
+    admit_queue = AdmitQueue()
 
     @app.post("/admit")
     def admit(payload: dict = Body(...), authorization: str = Header(None)):
@@ -305,6 +362,57 @@ def build_app(broker: HostBroker):
                       # from an anonymous caller to LIFT an owner — it only
                       # annotates whichever owner the credential path resolved.
                       owner_asserted=bool(payload.get("owner_asserted")))
+        try:
+            wait_s = float(payload.get("wait_s", 0) or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "'wait_s' must be a number of seconds")
+        if not 0 <= wait_s <= ADMIT_WAIT_MAX_S:
+            raise HTTPException(400, f"'wait_s' must be between 0 and {ADMIT_WAIT_MAX_S:g}")
+        exclusive = payload.get("exclusive_device", False)
+        if type(exclusive) is not bool:
+            raise HTTPException(400, "exclusive_device must be a boolean")
+        device_lease_id = payload.get("device_lease_id")
+        device_lease_ids = payload.get("device_lease_ids")
+        if device_lease_ids is not None:
+            if (device_lease_id is not None or exclusive
+                    or not isinstance(device_lease_ids, list) or not device_lease_ids
+                    or any(not isinstance(value, str) or not value for value in device_lease_ids)
+                    or len(set(device_lease_ids)) != len(device_lease_ids)):
+                raise HTTPException(400, "device_lease_ids must be a nonempty unique list without other lease fields")
+            device_lease_id = device_lease_ids[0]
+        if exclusive:
+            min_free_bytes = payload.get("min_free_bytes")
+            if type(min_free_bytes) is not int or min_free_bytes <= 0:
+                raise HTTPException(400, "exclusive acquisition requires positive min_free_bytes")
+            # `wait_s` on an exclusive admission is how long the caller will
+            # queue behind ANOTHER request's lease on the device (FIFO per
+            # device); `wait_timeout_s` then bounds a stuck drain, while a busy
+            # tenant finishing its work is waited for within `wait_s`.
+            try:
+                return broker.acquire_exclusive(
+                    req, req.selector.get("device_id"), min_free_bytes,
+                    payload.get("wait_timeout_s", 240.0), payload.get("ttl_seconds", 120.0),
+                    queue_wait_s=wait_s)
+            except Exception as e:
+                return {"granted": False, "exclusive_device": True,
+                        "reason": str(e), "device_id": req.selector.get("device_id")}
+        if device_lease_id is not None:
+            lease = broker.exclusive_store.get_lease(device_lease_id)
+            lease_device = lease.get("device_id") if lease is not None else None
+            selected_device = req.selector.get("device_id") or lease_device
+            if not broker.valid_exclusive_owner(device_lease_id, owner, selected_device):
+                return {"granted": False, "reason": "invalid, expired, or mismatched device_lease_id",
+                        "device_id": req.selector.get("device_id")}
+            if selected_device != req.selector.get("device_id"):
+                req = replace(req, selector={**req.selector, "device_id": selected_device})
+            if device_lease_ids is not None:
+                leases = [broker.exclusive_store.get_lease(value) for value in device_lease_ids]
+                if (any(lease is None for lease in leases)
+                        or len({lease["device_id"] for lease in leases}) != len(leases)
+                        or any(not broker.valid_exclusive_owner(value, owner, lease["device_id"])
+                               for value, lease in zip(device_lease_ids, leases))):
+                    return {"granted": False, "reason": "invalid, expired, or mismatched device_lease_ids",
+                            "device_id": selected_device}
         # NOTE on the degrade branch below. It answers `granted: True` for ANY
         # exception, which tells the caller to proceed — and a caller that loads
         # a model on that word puts it on a card the planner never cleared.
@@ -314,40 +422,94 @@ def build_app(broker: HostBroker):
         # `granted: False` with a reason, so a refusal and an outage stop
         # looking alike. Distinguishing FAULTS from refusals inside
         # `plan_and_apply` is the remaining half and wants its own change.
-        try:
-            p = broker.plan_and_apply([req], state["last_evicted_at"])
-        except Exception as e:  # a peer down etc. — degrade: let the caller proceed
-            return {"granted": True, "device_id": None, "degraded": str(e)}
-        _track(p)
-        grant = next((g for g in p.of(Grant) if g.request_id == req.id), None)
-        dev = grant.device_id if grant is not None else None
-        served_kind = grant.kind if grant is not None else None
-        lease_id = None
-        if dev is not None and broker.device_config.get(dev, {}).get("hosted"):
-            # A hosted grant is only half-done until the ledger knows: without a
-            # lease the next admit would double-book the same concurrency slot.
-            # A checkout failure must NOT void the grant — the caller got its
-            # device; the ledger is bookkeeping, and snapshot expiry heals it.
+        # `wait_s`: how long the caller can wait for room. A refusal inside the
+        # window is not an answer — the request stays here, planned again as
+        # the fleet changes (a unit registering, a device being cleared), and
+        # each pass renews the unmet-demand signal the reconcile loop prepares
+        # room from. Waiters for the same requirement are served in arrival
+        # order; a different requirement is never held up behind them.
+
+        def attempt():
             try:
-                lease_id = broker.hosted_checkout(dev, served_kind or kind, req.owner)
-            except Exception as e:
-                print(f"[harmony] hosted checkout failed dev={dev}: {e}", flush=True)
-        return {"granted": dev is not None, "device_id": dev, "plan": p.summary(),
-                # WHICH unit satisfied it. A caller that asked for "an llm >= 20B"
-                # has no other way to know what it got, and it needs the name to
-                # address the completion.
-                "kind": served_kind,
-                # How much room the unit actually has, so the node can size the
-                # engine to it instead of an operator guessing a fraction.
-                "budget": dict(grant.budget) if grant is not None else {},
-                "lease_id": lease_id,
-                **({} if dev is not None else
-                   {"reason": "the planner could not place it on any device",
-                    # The planner's own words, so a node can tell "no unit
-                    # like that is known" (a transient registration gap) from
-                    # "known, and not placed" (a refusal to respect).
-                    "defer_reason": next((d.reason for d in p.of(Defer)
-                                          if d.request_id == req.id), None)})}
+                if device_lease_id is None:
+                    p = broker.plan_and_apply([req], state["last_evicted_at"])
+                else:
+                    p = broker.plan_and_apply([req], state["last_evicted_at"], device_lease_id)
+            except Exception as e:  # a peer down etc. — degrade: let the caller proceed
+                if device_lease_id is not None:
+                    return {"granted": False, "reason": str(e), "device_id": req.selector.get("device_id")}
+                return {"granted": True, "device_id": None, "degraded": str(e)}
+            _track(p)
+            grant = next((g for g in p.of(Grant) if g.request_id == req.id), None)
+            dev = grant.device_id if grant is not None else None
+            defer = next((d.reason for d in p.of(Defer) if d.request_id == req.id), None)
+            if dev is None and defer and "host memory" in defer:
+                # DRAIN, DON'T KILL (host_ledger.py): a model load that does not
+                # fit the host's RAM is written to the ledger as WAITING, so task
+                # placement admits no new attempt here until it does. The caller
+                # keeps asking (harmony-llm retries a host-memory defer), and each
+                # ask refreshes the entry; when it stops, the entry lapses.
+                from .planner import _unit_satisfies
+                units = getattr(broker, "_last_units", {}) or {}
+                broker.note_waiting(
+                    [k for k, u in units.items()
+                     if (k == kind or (requires and _unit_satisfies(u, requires)))],
+                    defer)
+            served_kind = grant.kind if grant is not None else None
+            lease_id = None
+            if dev is not None and broker.device_config.get(dev, {}).get("hosted"):
+                # A hosted grant is only half-done until the ledger knows: without a
+                # lease the next admit would double-book the same concurrency slot.
+                # A checkout failure must NOT void the grant — the caller got its
+                # device; the ledger is bookkeeping, and snapshot expiry heals it.
+                try:
+                    lease_id = broker.hosted_checkout(dev, served_kind or kind, req.owner)
+                except Exception as e:
+                    print(f"[harmony] hosted checkout failed dev={dev}: {e}", flush=True)
+            return {"granted": dev is not None, "device_id": dev, "plan": p.summary(),
+                    # WHICH unit satisfied it. A caller that asked for "an llm >= 20B"
+                    # has no other way to know what it got, and it needs the name to
+                    # address the completion.
+                    "kind": served_kind,
+                    # How much room the unit actually has, so the node can size the
+                    # engine to it instead of an operator guessing a fraction.
+                    "budget": dict(grant.budget) if grant is not None else {},
+                    "lease_id": lease_id,
+                    **({} if dev is not None else
+                       {"reason": "the planner could not place it on any device",
+                        # The planner's own words, so a node can tell "no unit
+                        # like that is known" (a transient registration gap) from
+                        # "known, and not placed" (a refusal to respect).
+                        "defer_reason": next((d.reason for d in p.of(Defer)
+                                              if d.request_id == req.id), None)})}
+
+        if wait_s <= 0:
+            return attempt()
+        wait_key = json.dumps([kind, requires, req.selector], sort_keys=True, default=str)
+        deadline = time.monotonic() + wait_s
+        # The broker keeps one arrival order per device across kinds: this
+        # request lets an exclusive acquisition that arrived before it go
+        # first, and an exclusive one arriving later yields to it (see
+        # HostBroker.admission_waiting). Brokers without it plan as before.
+        from contextlib import nullcontext
+        holding = getattr(broker, "admission_waiting", None)
+        arrived = broker._now() if holding else 0.0
+        with admit_queue.waiting(wait_key, req.id), (holding(req, arrived) if holding else nullcontext()):
+            while True:
+                if admit_queue.is_head(wait_key, req.id) and not (
+                        holding and broker.exclusive_ahead(req, arrived)):
+                    attempted_at = broker._now() if holding else 0.0
+                    out = attempt()
+                    if out.get("granted") or time.monotonic() >= deadline:
+                        return out
+                    if holding:
+                        broker.admission_deferred(req.id, attempted_at)
+                elif time.monotonic() >= deadline:
+                    return {"granted": False, "device_id": None, "plan": {},
+                            "reason": ("still waiting behind earlier requests for the same requirement"
+                                       " or for the device"),
+                            "defer_reason": None}
+                time.sleep(min(ADMIT_WAIT_POLL_S, max(0.0, deadline - time.monotonic())))
 
     # `:path`, because a fleet lease id names its device and a hosted device
     # id is a URL (`http://100.64.0.18:8190-<ms>-<seq>`). A bare `{lease_id}`
@@ -355,9 +517,11 @@ def build_app(broker: HostBroker):
     # heartbeat for such a lease was a 404 and it lived out its TTL — enough
     # to hold a caller's whole quota between calls (attune, 2026-09-23).
     @app.post("/lease/{lease_id:path}/heartbeat")
-    def lease_heartbeat(lease_id: str):
+    def lease_heartbeat(lease_id: str, payload: Optional[dict] = Body(default=None)):
         """Proof of life from a hosted leaseholder. Unknown/expired is a False,
         not an error — the answer the client needs is 'do I still hold the slot'."""
+        if lease_id.startswith("device-lease-"):
+            return {"ok": broker.exclusive_heartbeat(lease_id, (payload or {}).get("ttl_seconds", 120.0))}
         return {"ok": broker.hosted_heartbeat(lease_id)}
 
     @app.post("/lease/{lease_id:path}/release")
@@ -368,7 +532,18 @@ def build_app(broker: HostBroker):
         §1). A value that is not exactly that shape is REFUSED (422), never
         coerced: an outcome that was guessed is worse than none."""
         extra = _release_report(payload or {})
+        if lease_id.startswith("device-lease-"):
+            return {"ok": broker.exclusive_release(lease_id)}
         return {"ok": broker.hosted_release(lease_id, **extra)}
+
+    # `:path`: a device id names its host (`zz-tower0/2aef6b61`), so a bare
+    # `{device_id}` 404s on every real card.
+    @app.post("/devices/{device_id:path}/hold")
+    def device_hold(device_id: str, payload: dict = Body(...)):
+        """Reserve (``{"reason": "..."}``) or release (``{"reason": null}``) a
+        discovered device for a human. Takes effect on the next snapshot."""
+        broker.set_device_hold(device_id, payload.get("reason"))
+        return {"ok": True, "holds": dict(broker.device_holds)}
 
     @app.post("/devices/{device_id}/health")
     def device_health(device_id: str, payload: dict = Body(...)):
@@ -380,6 +555,9 @@ def build_app(broker: HostBroker):
                                   "tail": payload.get("detail", ""),
                                   "at": time.monotonic(), "source": "reported"}
         return {"ok": True}
+
+    meshlink_log = meshlink_runtime.RateLimitedLog(
+        lambda m: print(m, flush=True))
 
     @app.post("/peers")
     def register(payload: dict = Body(...)):
@@ -418,6 +596,14 @@ def build_app(broker: HostBroker):
             )
         except RosterFull as e:
             raise HTTPException(429, str(e))
+        except meshlink_runtime.MeshlinkUnavailable as e:
+            # A mesh:// announce this host cannot dial. Named and bounded: 503
+            # with the degradation, one log line per window — not a 500 and a
+            # traceback per retry (~20/min for days on xc-tower-ubuntu).
+            meshlink_log("peers-mesh", f"[hostd] POST /peers refused {url!r}: "
+                         f"{e.degradation}: {e.reason}")
+            raise HTTPException(503, {"degradation": e.degradation,
+                                      "detail": e.reason, "missing": e.missing})
 
     @app.get("/peers")
     def peers():
@@ -466,6 +652,7 @@ def build_app(broker: HostBroker):
         return {"peers": out, "membership": broker.membership_snapshot(),
                 "last_evicted_at": state["last_evicted_at"], "hosted": hosted,
                 "host_id": broker.host_id,
+                "meshlink": meshlink_runtime.probe(),
                 "links": {k: round(v, 1) for k, v in broker.link_ms.items()},
                 "counters": counters}
 
@@ -480,29 +667,6 @@ def build_app(broker: HostBroker):
         and a page that could preempt from a phone is a second one.
         """
         return HTMLResponse(ui_page())
-
-    @app.get("/fleet/identity-facts")
-    def fleet_identity_facts(authorization: str = Header(None)):
-        """Authenticated complete cut of explicitly configured node identities."""
-        if identity_publisher is None:
-            raise HTTPException(503, "identity_authority_not_configured")
-        principals = getattr(broker, "fleet_principals", None)
-        if principals is None:
-            raise HTTPException(503, "identity_fact_auth_not_configured")
-        if not authorization:
-            raise HTTPException(401, "authorization_required")
-        from .fleet_auth import AuthError, bearer_token, principal_for
-        try:
-            principal_for(principals, bearer_token(authorization))
-        except AuthError as error:
-            raise HTTPException(error.status, error.detail) from error
-        # Refresh the same soft-state view consumed by /fleet. identity_relations
-        # only includes capability observations younger than the Fact TTL.
-        broker.fleet_view()
-        relations, source_state = broker.identity_relations()
-        cut = identity_publisher.snapshot(relations)
-        cut["source_state"] = source_state
-        return cut
 
     @app.get("/fleet")
     def fleet():
@@ -600,8 +764,13 @@ def build_app(broker: HostBroker):
             preferences = parse_preferences(prefer)
         except PreferenceError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        wanted = [r.strip().lower() for r in (regions or "").split(",") if r.strip()]
+        # Region is a policy on ELIGIBILITY and is applied inside the ranker,
+        # before warm/cold: filtered afterwards, a warm node in a refused region
+        # had already suppressed the cold one in an allowed region.
         result = _rank(broker.fleet_view(), kind, vantage=via or vantage,
-                       ttl_s=ttl_s, prefer=preferences)
+                       ttl_s=ttl_s, prefer=preferences, allow_regions=wanted,
+                       allow_unknown_region=allow_unknown_region)
         # `region` is RECORDED, never applied. It is the asker's region as the
         # emitter knew it, which is what makes a ledger record readable later —
         # but WHERE the work may run is `regions`, below.
@@ -613,19 +782,15 @@ def build_app(broker: HostBroker):
         # endpoints are for.
         result["principal"] = _read_principal(broker, authorization)
 
-        wanted = [r.strip().lower() for r in (regions or "").split(",") if r.strip()]
         if wanted:
-            from .client import eligible_targets
-            kept, rejected = eligible_targets(result, allow_regions=set(wanted),
-                                              allow_unknown_region=allow_unknown_region)
-            result["targets"] = kept
+            from .fleet_rank import REGION_FILTERED
+            rejected = [{"target_id": c.target_id, "why": c.reason[len(REGION_FILTERED):]}
+                        for c in result["candidates"]
+                        if c.reason.startswith(REGION_FILTERED)]
             result["region_policy"] = {"allow": wanted,
                                        "allow_unknown": bool(allow_unknown_region),
                                        "rejected": rejected}
-            # The chosen row must agree with the filtered list, or a caller
-            # reading `chosen` gets an answer the policy just refused.
-            result["chosen"] = kept[0]["target_id"] if kept else None
-            if not kept:
+            if not result["targets"]:
                 result["reason"] = (
                     f"no {kind} target in {'/'.join(wanted)}: "
                     + "; ".join(f"{r['target_id']} ({r['why']})" for r in rejected[:4])
@@ -1084,6 +1249,8 @@ def build_app(broker: HostBroker):
             while True:
                 time.sleep(interval)
                 try:
+                    if hasattr(broker, "reconcile_exclusive"):
+                        broker.reconcile_exclusive()
                     # Reclaim BEFORE planning. A node that has evicted everything
                     # and still holds its allocator pool is memory no unit claims,
                     # so the planner has nothing to evict and would shed innocent
@@ -1260,6 +1427,7 @@ def _node_control_token_from_env(env=None) -> Optional[str]:
 
 
 def main():
+    meshlink_runtime.startup_check(lambda m: print(m, flush=True))
     # Nodes report for duty (POST /peers), so these localhost guesses are no
     # longer how membership is *meant* to work — but they stay, as seeds.
     #
@@ -1302,6 +1470,11 @@ def main():
         # card and leaves it for align/diarize/chipgen. A positive bias makes it
         # overflow-only. Hosted rows carry no vram and are never discovered.
         for did, c in json.loads(dev_env).items():
+            if c.get("hold"):
+                # {"gpu0": {"hold": "histo training"}} — reserved for a human:
+                # the planner never places, evicts from or warms onto it.
+                device_config[did] = {"hold": str(c["hold"])}
+                continue
             if c.get("hosted"):
                 device_config[did] = {k: c[k] for k in
                                       ("hosted", "concurrency", "cost_bias", "labels", "host_id")
@@ -1440,9 +1613,17 @@ def main():
         extra_units=extra_units,
         dispatch=dispatch, ledger=ledger, emitter_id=emitter_id,
         node_control_token=node_control_token,
+        device_meters=json.loads(os.environ.get("LIVESTACK_DEVICE_METERS", "{}")),
     )
     broker.node_control_token = node_control_token
     broker.host_id = host_id
+    # The shared host-RAM ledger (host_ledger.py), on the broker that DISPATCHES
+    # on this Linux machine — the one master of its RAM, as of its cards. A
+    # fleet broker observes other machines and has no local ledger to keep.
+    if dispatch and sys.platform.startswith("linux"):
+        from .host_ledger import HostLedger
+        broker.host_ledger = HostLedger()
+        print(f"[harmony] host-RAM ledger: {broker.host_ledger.path}", flush=True)
     broker.link_peers = link_peers
     broker.snapshot_store = snapshot_store
     broker.fleet_policy = fleet_policy
@@ -1543,9 +1724,18 @@ def main():
               + (f", {ledger.max_age_s / 86400:.0f}d" if ledger.max_age_s
                  else ", age window disabled") + ")", flush=True)
     # Native stream producers (services-own-their-streams). A no-op unless HARMONY_STREAMS=1.
-    from .hostd_streams import start_for_hostd
-    start_for_hostd(broker, host_id, not dispatch, lambda m: print(m, flush=True))
-    uvicorn.run(build_app(broker), host="0.0.0.0", port=port)
+    from .hostd_streams import start_for_hostd, stop_streams_runtime
+    from .identity_facts import IdentitySnapshotPublisher, valid_identity
+    authority_id = os.environ.get("LIVESTACK_IDENTITY_AUTHORITY_ID", "").strip()
+    identity_publisher = (IdentitySnapshotPublisher("livestack", authority_id)
+                          if valid_identity(authority_id, max_bytes=220) else None)
+    runtime = start_for_hostd(broker, host_id, not dispatch,
+                              lambda m: print(m, flush=True),
+                              identity_publisher=identity_publisher)
+    try:
+        uvicorn.run(build_app(broker), host="0.0.0.0", port=port)
+    finally:
+        stop_streams_runtime(runtime)
 
 
 def _hostname() -> str:
