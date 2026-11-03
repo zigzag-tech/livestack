@@ -30,6 +30,9 @@ METRICS = {
     "llm.context_len": "max",
     "llm.decode_tok_s": "max",
     "llm.first_token_ms": "min",
+    # Seconds from engine start to serving, MEASURED per load (demand_log.
+    # LoadTimes). fleet_rank reads it to price a cold unit against a warm one.
+    "llm.load_s": "min",
 }
 MAX_PREFERENCES = 8
 MAX_WIRE_BYTES = 4096

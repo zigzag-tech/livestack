@@ -52,38 +52,8 @@ def validate_cpu_signal(value):
 
 
 def _limit_breach(result, need):
-    """The job's own resource limit, when the run ended by breaching it.
-
-    Returns None, or a typed cause (`resource_limit`, never retried) whose `detail` is
-    the operator-facing sentence. Kinds: memory (oom_kill), tasks (pids_max_events),
-    disk (the workspace filesystem grew by at least the declared need.disk_bytes).
-    """
-    resources = (result or {}).get("resources") or {}
-    try:
-        need = json.loads(need) if isinstance(need, str) else (need or {})
-    except ValueError:
-        need = {}
-    def cause(kind, observed, declared, detail):
-        return {"cause": "resource_limit", "kind": kind, "observed": observed, "declared": declared,
-                "retryable": False, "source": resources.get("source"), "detail": detail}
-    if resources.get("oom_kill", 0) > 0:
-        declared = need.get("memory_bytes", need.get("ram"))
-        observed = resources.get("memory_peak_bytes")
-        return cause("memory", observed, declared,
-                     "resource limit: memory peak %s bytes reached the job's declared need.memory_bytes %s; "
-                     "raise the job's need, a retry would hit the same cap"
-                     % (observed if observed is not None else "unknown", declared if declared is not None else "unknown"))
-    if resources.get("pids_max_events", 0) > 0:
-        observed = resources.get("tasks_peak")
-        return cause("tasks", observed, None,
-                     "resource limit: the attempt reached its task limit (peak %s); raise the handler's max_tasks, "
-                     "a retry would hit the same cap" % (observed if observed is not None else "unknown"))
-    declared, grown = need.get("disk_bytes"), resources.get("disk_delta_bytes")
-    if isinstance(declared, int) and isinstance(grown, int) and not isinstance(grown, bool) and grown >= declared:
-        return cause("disk", grown, declared,
-                     "resource limit: the workspace filesystem grew by %s bytes, reaching the job's declared "
-                     "need.disk_bytes %s; raise the job's need, a retry would hit the same cap" % (grown, declared))
-    return None
+    """Shared resource-limit classifier used by storage and worker completion."""
+    return causes.limit_breach(result, need)
 
 
 class WorkloadStore:
@@ -478,7 +448,7 @@ class WorkloadStore:
             db.execute("UPDATE workers SET ready=0")
             self._expire(db, self.clock())
 
-    def _job(self, db, job_id, owner=None):
+    def _job(self, db, job_id, owner=None, *, project_success=True):
         row = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         if row is None or (owner is not None and row["owner"] != owner):
             raise WorkloadError("job not found", 404)
@@ -513,8 +483,20 @@ class WorkloadStore:
             result["progress_verdict"] = self._progress_verdict(db, result, result["spec"], self.clock())
             if result["progress_verdict"] is None:
                 del result["progress_verdict"]
+            if result["state"] == "running":
+                bound, source = self.attempt_wall_clock(result["spec"])
+                elapsed = self.clock() - result["attempt"]["started_at"]
+                result["wall_clock"] = dict(limit_seconds=bound, source=source, elapsed_seconds=round(elapsed, 1),
+                                            remaining_seconds=round(max(0.0, bound - elapsed), 1))
         result["result"] = json.loads(result["result"]) if result["result"] else None
         result["cause"] = json.loads(result["cause"]) if result.get("cause") else None
+        if project_success and result["state"] == "succeeded":
+            completion = result["result"] if isinstance(result["result"], dict) else {}
+            terminal = causes.completion_success_metadata(completion, need=result["spec"].get("need"))
+            completion.update(terminal)
+            result["result"] = completion
+            result["reason"] = terminal["reason"]
+            result["cause"] = terminal["cause"]
         if result["cause"] is None and result["state"] in TERMINAL:
             # A row ended before causes existed says so; it is not `unknown`.
             result["cause_reason"] = "predates_causes"
@@ -566,7 +548,12 @@ class WorkloadStore:
         forbidden = sorted(handler for handler, policy in environment_handlers.items()
                            if handler in allowed and policy['purpose'] in ('full_e2e', 'publishing', 'release'))
         result = dict(versions=[1, 2, 3, 4], causes=dict(version=1, kinds=sorted(causes.KINDS)),
-            deadlines=dict(version=1, max_queue_seconds=[30, 86400], progress_deadline_seconds=[30, 86400]),
+            deadlines=dict(version=1, max_queue_seconds=[30, 86400], progress_deadline_seconds=[30, 86400],
+                           max_attempt_seconds=[30, self.limits.attempt_ceiling(None)[0]]),
+            wall_clock=dict(version=1, max_attempt_seconds=self.limits.max_attempt_seconds,
+                            max_queue_age_seconds=self.limits.max_queue_age_seconds,
+                            exceptions={h: e['max_attempt_seconds'] for h, e in
+                                        sorted(self.limits.wall_clock_exceptions.items())}),
             scopes=dict(
             version=1, lease_default_seconds=self.limits.scope_lease_default_seconds,
             lease_min_seconds=self.limits.scope_lease_min_seconds,
@@ -1232,6 +1219,12 @@ class WorkloadStore:
             if not attempt:
                 raise WorkloadError("execution lease is no longer valid", 409)
             self._compilation_live(db, attempt, now)
+            # A valid lease heartbeat is proof of life. The worker's main thread sends no worker/report while it
+            # prepares an attempt (input transfer, source unpack, task-environment build: minutes), so without this a
+            # worker that just claimed a job reads as offline after `fresh_seconds` and a rollout soak, the roster and
+            # claim freshness all take busy for silent. Only `seen` moves: the report (capacity, handlers) stays as
+            # the worker last sent it.
+            db.execute("UPDATE workers SET seen=? WHERE id=? AND boot=? AND seen<?", (now, worker, boot, now))
             expires = now + self.limits.lease_seconds
             # A heartbeat without progress leaves the last reported value in
             # place; progress is an overwrite, never an append.
@@ -1282,7 +1275,9 @@ class WorkloadStore:
                            (attempt_id, worker, boot, fence)).fetchone()
             if not a:
                 raise WorkloadError("unknown attempt", 409)
-            job = self._job(db, a["job"])
+            # Read raw persisted result fields here: replay reconciliation below
+            # must distinguish metadata actually committed from a read projection.
+            job = self._job(db, a["job"], project_success=False)
             if job["spec"]["input_digest"] != input_digest:
                 raise WorkloadError("result input digest differs from assignment", 409)
             expected_release = job['spec'].get('handler_release')
@@ -1317,9 +1312,36 @@ class WorkloadStore:
                 completion['environment_receipt'] = receipt
             elif environment_receipt is not None:
                 raise WorkloadError('unexpected_environment_receipt', 400)
+            # The worker receipt is the only evidence that can support a positive
+            # terminal classification. Missing counters are unknown, never zero.
+            success_terminal = None
+            if outcome == "succeeded":
+                success_terminal = causes.success_metadata(result, need=job["spec"]["need"])
+                if success_terminal is None:
+                    raise WorkloadError("successful_completion_receipt_invalid", 409)
+                completion.update(success_terminal)
+            breach = _limit_breach(result, job["spec"]["need"])
+            if outcome == "succeeded" and breach is not None:
+                raise WorkloadError("successful_completion_receipt_invalid", 409)
             raw = encode(completion, self.limits.record_bytes)
             if a["state"] == "ended" and a["result"] == raw:
                 return job  # Idempotent acknowledgement, including infrastructure retry.
+            if (outcome == "succeeded" and a["state"] == "ended" and job["state"] == "succeeded" and
+                    a["result"] == encode({key: value for key, value in completion.items()
+                                           if key not in ("attribution", "reason", "cause")},
+                                          self.limits.record_bytes)):
+                # A pre-metadata server may have committed this same receipt before
+                # its response was lost. Upgrade the canonical job projection from
+                # the receipt on replay, while preserving the original attempt bytes.
+                old_job_result = job.get("result") if isinstance(job.get("result"), dict) else {}
+                if (old_job_result.get("attribution") != success_terminal["attribution"] or
+                        old_job_result.get("reason") != success_terminal["reason"] or
+                        job.get("cause") != success_terminal["cause"]):
+                    db.execute("UPDATE jobs SET result=?,reason=?,cause=?,updated=? WHERE id=?",
+                               (raw, success_terminal["reason"], encode(success_terminal["cause"], causes.CAUSE_BYTES),
+                                now, job["id"]))
+                    job = self._job(db, job["id"])
+                return job
             if a["state"] != "running" or job["fence"] != fence or job["state"] != "running":
                 raise WorkloadError("attempt has been fenced", 409)
             if env is not None and (env['writer_job'] != job['id'] or env['writer_attempt'] != attempt_id or
@@ -1351,9 +1373,9 @@ class WorkloadStore:
                     db.execute("UPDATE task_environment_replicas SET state='rebuild_required',compatibility=NULL,seen=? "
                                'WHERE handle=? AND host=?', (now, env_handle, a['host']))
             state = "succeeded" if outcome == "succeeded" else "failed"
-            reason, job_raw, cause = None, raw, None
+            reason = success_terminal["reason"] if success_terminal is not None else None
+            job_raw, cause = raw, None
             # a["need"] is the ADMIT vector (placement charge); the enforced caps are the job's own need.
-            breach = _limit_breach(result, job["spec"]["need"])
             resource_history.record(db, job["spec"]["handler"], attempt_id, result,
                                     "resource_limit" if outcome == "infrastructure" and breach else outcome,
                                     job["spec"]["need"], now, max_age=self.resource_history_max_age, admit=a["need"])
@@ -1368,7 +1390,8 @@ class WorkloadStore:
             elif outcome == "infrastructure" and fence < self.limits.attempts:
                 state, reason = "queued", "infrastructure retry"
             if state != "queued":
-                derived = causes.derive(outcome, result, breach=breach, fence=fence, attempts=self.limits.attempts)
+                derived = (success_terminal["cause"] if success_terminal is not None else
+                           causes.derive(outcome, result, breach=breach, fence=fence, attempts=self.limits.attempts))
                 # A handler that failed on its own code says what broke instead of leaving `reason` empty.
                 reason = reason or causes.reason_of(derived)
                 cause = encode(derived, causes.CAUSE_BYTES)
@@ -1643,6 +1666,52 @@ class WorkloadStore:
             verdict["activity_quiet_seconds"] = round(now - attempt["activity_at"], 1)
         return verdict
 
+    def attempt_wall_clock(self, spec):
+        """(seconds, source) of the wall-clock bound on one attempt of this job: the authority's bound for its
+        handler (global or a named exception), lowered by the submitter's own `max_attempt_seconds`."""
+        seconds, source = self.limits.attempt_ceiling(spec.get("handler"))
+        asked = spec.get("max_attempt_seconds")
+        if asked is not None and asked < seconds:
+            return asked, "submitter"
+        return seconds, source
+
+    def _wall_clock_verdict(self, db, job, spec, now):
+        """The authority-wide wall-clock bounds (Limits.max_attempt_seconds, max_queue_age_seconds).
+
+        They exist because shared capacity is not the owner's to hold indefinitely: a job that outlives them
+        is too large or stuck, and the fix is the owner's (split it), so both fail with a cause that says
+        `after_change`, never a silent retry. Unlike the opt-in `max_queue_seconds`, the queue bound
+        counts a job that already had attempts: a job requeued after infrastructure failures ages too."""
+        if job["state"] == "running":
+            attempt = db.execute("SELECT created FROM attempts WHERE job=? AND state='running' "
+                                 "ORDER BY fence DESC LIMIT 1", (job["id"],)).fetchone()
+            if attempt is None:
+                return None
+            limit, source = self.attempt_wall_clock(spec)
+            elapsed = now - attempt["created"]
+            if elapsed <= limit:
+                return None
+            return "failed", (f"attempt ran {elapsed:.0f}s, over the {source} wall-clock bound of {limit:g}s "
+                              "(max_attempt_seconds): split the work into smaller jobs"), causes.make(
+                "attempt_wall_clock_exceeded", {"limit_seconds": limit, "elapsed_seconds": round(elapsed),
+                                                "source": source, "handler": spec.get("handler"),
+                                                "guidance": "split the job; capacity is shared"})
+        if job["state"] == "queued":
+            limit = self.limits.max_queue_age_seconds
+            waited = now - job["created"]
+            if waited <= limit:
+                return None
+            attempts = db.execute("SELECT count(*) FROM attempts WHERE job=?", (job["id"],)).fetchone()[0]
+            placement = json.loads(job["placement"]) if job["placement"] else None
+            return "expired", (f"queued {waited:.0f}s, over the {limit:g}s authority queue bound "
+                               "(max_queue_age_seconds)"), causes.make(
+                "queue_age_exceeded", {"limit_seconds": limit, "waited_seconds": round(waited),
+                                       "attempts": attempts, "handler": spec.get("handler"),
+                                       "last_placement": placement and {
+                                           "blockers": placement.get("blockers", [])[:4],
+                                           "since": placement.get("since")}})
+        return None
+
     def _job_verdict(self, db, job, spec, now):
         """(terminal state, reason, cause) when a queued or running job's own clock has run out, else None.
 
@@ -1658,6 +1727,9 @@ class WorkloadStore:
                 return "expired", ("estimated execution cannot fit remaining deadline "
                                    f"({max(0, deadline-now):.0f}s < {estimate:.0f}s)"), \
                     causes.make("deadline_expired", {"deadline": deadline, "estimate_seconds": estimate})
+        wall = self._wall_clock_verdict(db, job, spec, now)
+        if wall is not None:
+            return wall
         queue_limit = spec.get("max_queue_seconds")
         if (queue_limit is not None and job["state"] == "queued" and now - job["created"] > queue_limit and
                 not db.execute("SELECT 1 FROM attempts WHERE job=? LIMIT 1", (job["id"],)).fetchone()):

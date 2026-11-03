@@ -177,6 +177,14 @@ def test_roster_names_owner_and_expiry(authority):
     assert entry['drain']['expires_in_s'] == 300 and not entry['eligible']
 
 
+def test_roster_drain_says_how_long_ago_it_was_set(authority):
+    authority.client(W1).request('worker/report', REPORT)
+    drain(authority, owner='agent-1', reason='roll image handler', ttl_seconds=300)
+    authority.now[0] += 100
+    entry = next(w for w in authority.call(ADMIN, 'workers')['workers'] if w['id'] == 'w1')
+    assert entry['drain']['set_age_s'] == 100 and entry['drain']['expires_in_s'] == 200
+
+
 def test_unknown_worker_and_caller_cannot_write(authority):
     assert authority.refused(ADMIN, 'claims/nope/drain', {'ttl_seconds': 60}).status == 404
     assert authority.refused(A, 'claims/w1/drain', {'ttl_seconds': 60}).status == 403
