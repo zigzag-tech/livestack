@@ -336,7 +336,7 @@ def test_http_waiting_admission_outranks_a_later_exclusive_arrival(tmp_path, mon
     speech, later = asyncio.run(exercise())
     # The request that waited longest is served first...
     assert speech["granted"] is True and speech["device_id"] == "gpu0"
-    assert later["granted"] is True and later["request_id"] == "flux-2"
+    assert later["granted"] is True and later["request_id"] == "flux-2", later
     assert done["tts"] < done["flux-2"]
     # ...and the later exclusive arrival does not drain what it was granted
     # until the caller has had the grant hold to start using it.
@@ -375,3 +375,44 @@ def test_http_waiting_admission_queues_behind_an_earlier_exclusive_arrival(
     assert later["granted"] is True
     assert speech["granted"] is False
     assert ("warm", "tts") not in tts.calls
+
+
+def test_http_lease_holders_own_admission_never_yields_to_exclusive_waiters(
+        tmp_path, monkeypatch):
+    # xc-tower-ubuntu, 2026-11-03: a FLUX request held both GPUs' leases; a
+    # later request queued for them. The holder's own unit load (an admission
+    # carrying its device_lease_ids and the caller's wait_s) yielded to that
+    # older exclusive arrival, which was waiting for the holder: neither moved
+    # for 37 min, until the waiter's 3600 s window ran out.
+    import time
+
+    from livestack_node import hostd
+
+    monkeypatch.setenv("LIVESTACK_LEDGER_DIR", str(tmp_path))
+    monkeypatch.setenv("LIVESTACK_REPLAN_INTERVAL", "0")
+    monkeypatch.setattr(hostd, "ADMIT_WAIT_POLL_S", 0.02)
+    alpha = _Peer("http://alpha", "alpha", resident=False)
+    broker = _broker([alpha], time.monotonic)
+    broker.grant_hold_s = 0.2
+    app = build_app(broker)
+
+    async def exercise():
+        async with _client(app) as client:
+            first = (await client.post("/admit", json=_exclusive_body("flux-1"))).json()
+            later = asyncio.create_task(client.post(
+                "/admit", json={**_exclusive_body("flux-2", owner="bob"), "wait_s": 8}))
+            await asyncio.sleep(0.3)
+            started = time.monotonic()
+            work = (await client.post("/admit", json={
+                "id": "flux-1-load", "kind": "alpha", "owner": "alice",
+                "device_lease_ids": [first["lease_id"]], "wait_s": 3})).json()
+            waited = time.monotonic() - started
+            await client.post(f"/lease/{first['lease_id']}/release")
+            return work, waited, (await later).json()
+
+    work, waited, later = asyncio.run(exercise())
+    assert work["granted"] is True and work["device_id"] == "gpu0"
+    assert waited < 1.0
+    assert ("warm", "alpha") in alpha.calls
+    # The waiter still gets the device once the holder is done.
+    assert later["granted"] is True and later["request_id"] == "flux-2", later

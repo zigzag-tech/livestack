@@ -493,6 +493,14 @@ def build_app(broker: HostBroker):
         # HostBroker.admission_waiting). Brokers without it plan as before.
         from contextlib import nullcontext
         holding = getattr(broker, "admission_waiting", None)
+        if device_lease_id is not None:
+            # A request that holds the device's lease is the work that lease
+            # was taken for, and every exclusive waiter there is waiting for
+            # it to finish: yielding to them is a deadlock. Observed
+            # 2026-11-03 on xc-tower-ubuntu: a FLUX request held both GPUs and
+            # its own unit load waited 37 min behind a later inpaint request
+            # queued for those GPUs, until that request's 3600 s window ran out.
+            holding = None
         arrived = broker._now() if holding else 0.0
         with admit_queue.waiting(wait_key, req.id), (holding(req, arrived) if holding else nullcontext()):
             while True:
