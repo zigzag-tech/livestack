@@ -78,3 +78,14 @@ Not a hostd change: the fix is in the process-node facade, `process_node.py`. Fa
   that reports nothing in flight; restarting that facade clears it.
 
 Roll back: restore the backup drop-in, `daemon-reload`, restart `polyasr`.
+
+## Deployed: a busy tenant waits within the caller's window (commit 6190c349), 2026-11-03
+
+hostd on xc-tower-ubuntu runs release `busy-wait-6190c349-on-admit-fifo-e9edbd61` = the previous
+`admit-fifo-e9edbd61-on-exclusive-queue-426851de` plus 6190c349's `hostbroker.py` and `device_leases.py`
+(applied as a patch; its exclusive tests and `test_device_leases.py` pass against the release, apart from the
+boot-id and device-hold tests whose features that release predates). Drop-in `zzz-exclusive-device-leases.conf`;
+backup `/etc/systemd/system/zzz-exclusive-device-leases.conf.hostd.before-busy-wait-*`. Deploy/rollback script:
+`~/.local/share/livestack-releases/deploy-busy-wait.sh [--rollback]` (waits for no active lease and no open
+:8211/:8227 request). Only hostd restarted; the image gateway already passed `harmony_wait_s` as `queue_wait_s`.
+The boot-id lease change (agent/lease-boot-expiry, above) is still NOT in this release.
