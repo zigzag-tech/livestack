@@ -57,3 +57,24 @@ releases every active lease from another boot with `reason = previous_boot`. Row
 no boot id and are released at the first start, so deploy while `GET /status` shows no `device_leases` held.
 **Not yet deployed: xc-tower-ubuntu needs a hostd deploy** (only `device_leases.py` changed; cherry-pick onto the
 pinned release as above and run `tests/test_device_leases.py`).
+
+## Deployed: process-node holds cannot leak (commit 91b49f4b), 2026-11-03
+
+Not a hostd change: the fix is in the process-node facade, `process_node.py`. Facade releases live in
+`~/.local/share/harmony-process-node/releases/<first 16 hex of the file's sha256>/` (the file plus
+`mesh_outbound_py/`, copied unchanged from the previous release), selected by `ExecStart` in each unit's
+`<unit>.service.d/zz-harmony-process-node.conf`.
+
+- **polyasr** (`mesh://livestack/tower-asr-1`, 8766/8767): release `b1c2dbe83851f6ef` = `cfb288cc9d14c9ea`
+  (identical to main's file at f5cd4793) + 91b49f4b. Drop-in backup
+  `/etc/systemd/system/zz-harmony-process-node.conf.polyasr.before-hold-leak-20261103`. Restarting the facade
+  stops its worker (it lives in the facade's cgroup); it was idle (`active_requests 0`), and starts again on the
+  next admission. After the switch `GET :8799/status` shows asr/align/diarize `busy: false`, facade
+  `load.in_flight 0`, and the image gateway's queued exclusive lease on `4bac2869` was granted.
+- **Still on releases with the leak** (`async def finish` taking `self.lock`): every other facade on this host
+  (`polytts`, `harmony-image`, the OCR/perception units, `harmony-sensenova-0`, the depth units). Their releases
+  predate main's facade in other ways, so moving one is a behaviour change, not a cherry-pick: roll each while
+  it is idle. A leaked hold shows as `load.in_flight > 0` on `GET <facade>/livestack/capability` over a worker
+  that reports nothing in flight; restarting that facade clears it.
+
+Roll back: restore the backup drop-in, `daemon-reload`, restart `polyasr`.
