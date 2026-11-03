@@ -65,7 +65,7 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Callable, List, Mapping, Optional, Sequence, Tuple
 
-from . import relay_control, transport
+from . import meshlink_runtime, relay_control, transport
 from .hostbroker import RestPeer
 
 mesh_route_py = None
@@ -89,17 +89,21 @@ def _import_meshlink() -> None:
     global mesh_route_py, ls_h1, websockets, FRAME_LIMIT, _MESHLINK_IMPORT_ERROR
     if mesh_route_py is not None and websockets is not None:
         return
+    # LIVESTACK_MESHLINK_DIR is applied and validated here (meshlink_runtime):
+    # the checkout is an explicit setting, not an accident of sys.path.
     try:
+        meshlink_runtime.require()
         import mesh_route_py as _mrp
         from mesh_outbound_py import mux as _mux
         from mesh_outbound_py.connectors import ls_h1 as _ls_h1
         import websockets as _ws
-    except ImportError as e:
+    except (ImportError, meshlink_runtime.MeshlinkUnavailable) as e:
         _MESHLINK_IMPORT_ERROR = e
-        raise RuntimeError(
-            "meshlink packages are not importable (mesh_route_py, "
-            "mesh_outbound_py) — the meshlink checkout must be on sys.path; "
-            f"original error: {e}")
+        if isinstance(e, meshlink_runtime.MeshlinkUnavailable):
+            raise
+        raise meshlink_runtime.MeshlinkUnavailable(
+            f"meshlink packages are not importable (mesh_route_py, "
+            f"mesh_outbound_py): {e}", []) from e
     mesh_route_py, ls_h1, websockets = _mrp, _ls_h1, _ws
     FRAME_LIMIT = _mux.FRAME_LIMIT
     _MESHLINK_IMPORT_ERROR = None
