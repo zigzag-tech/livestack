@@ -34,7 +34,7 @@ import time
 
 import httpx
 from unit_queue import wait_budget
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -336,6 +336,199 @@ async def _route(path: str, request: Request, raw: bytes, ctx: dict):
         relay(), status_code=resp.status_code,
         headers={k: v for k, v in resp.headers.items()
                  if k.lower() not in {"content-length", "transfer-encoding"}})
+
+
+# --- streaming ASR: /ws/transcribe ---------------------------------------------
+# One declarative request (the socket's `start`), placed by Harmony. The router
+# opens the upstream socket on the best ranked polyasr node and relays frames.
+# A node answers `started` at once and admits (or refuses: error frame + close
+# 1013) AFTER that, so "refused" is only knowable for a short while: the session
+# is UNCOMMITTED until the first message that is not started/resumed/warming
+# arrives (a partial or final). While uncommitted every client frame is also kept
+# (bounded: WS_REPLAY_MAX_BYTES), and a refusal (error frame, close 1013, connect
+# failure) re-places the session on the next provider and REPLAYS them; the new
+# node's `started` is swallowed because the client already has one. After commit
+# a drop belongs to the client's own resume protocol (recognizedThroughSeq), not
+# to placement: the router closes the client with the upstream's code.
+WS_PATH = "/ws/transcribe"
+WS_REPLAY_MAX_BYTES = int(os.environ.get("HARMONY_ROUTER_WS_REPLAY_MAX_BYTES", str(4 * 1024 * 1024)))
+# Native streaming is a PREFERENCE (owner decision 2026-11-04): a synthetic-stream
+# engine (the Mac) stays eligible and wins on distance when it is the only/nearest.
+WS_DEFAULT_PREFER = [{"attribute": "asr.streaming", "value": "native"}]
+_CONTROL = ("started", "resumed", "warming")
+
+
+def _msg_type(text):
+    try:
+        return json.loads(text).get("type")
+    except Exception:
+        return None
+
+
+@app.websocket(WS_PATH)
+async def ws_transcribe(ws: WebSocket):
+    import asyncio
+    import websockets
+    await ws.accept()
+    t0 = time.time()
+    ctx = {"t0": t0, "request_id": (ws.headers.get("x-request-id") or "").strip() or fr.new_request_id(),
+           "owner_ns": owner_namespace(ws.headers.get("x-harmony-owner"))}
+    inbox: asyncio.Queue = asyncio.Queue()
+
+    async def client_reader():
+        try:
+            while True:
+                m = await ws.receive()
+                if m["type"] == "websocket.disconnect":
+                    break
+                inbox.put_nowait(m)
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        inbox.put_nowait(None)
+
+    reader = asyncio.create_task(client_reader())
+    sent: list = []          # replayable client messages, in order (uncommitted only)
+    replayable = True
+    sent_bytes = 0
+    committed = acked = False
+    attempts: list = []
+    tried: list = []
+    t_first = t_partial = None
+    pid = None
+    reason = "no speech target"
+    retry_after = 30
+    up = None
+
+    async def refuse(why):
+        try:
+            await ws.send_json({"type": "error", "error": why, "attempts": attempts,
+                                "retryAfterS": retry_after})
+            await ws.close(code=1013, reason=why[:100])
+        except Exception:
+            pass
+
+    try:
+        # The first client message must be start/resume: it is the request.
+        first = await inbox.get()
+        if first is None:
+            return
+        sent.append(first)
+        regions, _src = _regions(ws, None)
+        view = _view()
+        max_attempts = SPEECH_ATTEMPTS if SPEECH_ATTEMPTS > 0 else None
+        n = 0
+        while True:
+            target, rec = fr.choose(view, None, WS_DEFAULT_PREFER, SELF_BASE, kind="polyasr",
+                                    regions=regions, exclude=tried)
+            if pid is None:
+                pid = rec["placement"]["problem_id"]
+                max_attempts = max_attempts or rec["placement"]["attempt_policy"]["max_attempts"]
+                ctx["fleet_route"] = rec
+                rec["attempts"] = attempts
+            if not target:
+                reason = (attempts[-1]["result"] if attempts else f"no polyasr target: {rec.get('reason')}")
+                break
+            n += 1
+            tried.append(target)
+            url = target.replace("http://", "ws://", 1).replace("https://", "wss://", 1) + WS_PATH
+            q = ws.url.query
+            refused = None
+            try:
+                up = await asyncio.wait_for(websockets.connect(url + (f"?{q}" if q else ""), max_size=None), 5)
+                for m in sent:
+                    await (up.send(m["bytes"]) if m.get("bytes") is not None else up.send(m["text"]))
+                t_client = asyncio.create_task(inbox.get())
+                t_up = asyncio.create_task(up.recv())
+                while refused is None:
+                    done, _ = await asyncio.wait({t_client, t_up}, return_when=asyncio.FIRST_COMPLETED)
+                    if t_client in done:
+                        m = t_client.result()
+                        if m is None:
+                            t_up.cancel()
+                            return
+                        if not committed:
+                            size = len(m.get("bytes") or b"") + len(m.get("text") or "")
+                            sent_bytes += size
+                            if sent_bytes > WS_REPLAY_MAX_BYTES:
+                                replayable = False      # cannot replay: from here the session is final
+                                committed = True
+                                sent.clear()
+                            else:
+                                sent.append(m)
+                        await (up.send(m["bytes"]) if m.get("bytes") is not None else up.send(m["text"]))
+                        t_client = asyncio.create_task(inbox.get())
+                    if t_up in done:
+                        try:
+                            msg = t_up.result()
+                        except websockets.ConnectionClosed as e:
+                            if committed:
+                                try:
+                                    await ws.close(code=e.rcvd.code if e.rcvd else 1011,
+                                                   reason=(e.rcvd.reason if e.rcvd else "")[:100])
+                                except Exception:
+                                    pass
+                                placement.record_outcome(pid, target=target, success=False, cause="upstream_closed_after_commit",
+                                                         first_byte_ms=t_first, first_partial_ms=t_partial, attempts=attempts)
+                                t_client.cancel()
+                                return
+                            refused = f"closed {e.rcvd.code if e.rcvd else '?'}: {(e.rcvd.reason if e.rcvd else '') or 'before admission'}"
+                            break
+                        if t_first is None:
+                            t_first = round((time.time() - t0) * 1000, 1)
+                        typ = None if isinstance(msg, bytes) else _msg_type(msg)
+                        if not committed and typ == "error":
+                            try:
+                                refused = json.loads(msg).get("error") or "error"
+                            except Exception:
+                                refused = "error"
+                            break
+                        if not committed and typ in _CONTROL:
+                            if typ == "warming" or not acked:
+                                await ws.send_text(msg)
+                            acked = acked or typ in ("started", "resumed")
+                        else:
+                            if not committed:
+                                committed = True
+                                sent.clear()
+                                t_partial = round((time.time() - t0) * 1000, 1)
+                            await (ws.send_bytes(msg) if isinstance(msg, bytes) else ws.send_text(msg))
+                        t_up = asyncio.create_task(up.recv())
+                t_client.cancel()
+                t_up.cancel()
+            except WebSocketDisconnect:
+                return
+            except Exception as e:  # noqa: BLE001 - connect failure etc: a refusal, not a crash
+                refused = f"{type(e).__name__}: {e or '(no message)'}"
+            if up is not None:
+                try:
+                    await up.close()
+                except Exception:
+                    pass
+                up = None
+            attempts.append({"target": target, "expect": "cold", "result": f"refused: {str(refused)[:160]}"})
+            reason = str(refused)
+            if any(w in reason.lower() for w in ("did not grant", "busy", "held")):
+                fr.mark_busy(FLEET_URL, target)
+            if committed and not replayable:
+                break
+            if n >= max_attempts:
+                break
+        await refuse(reason)
+        placement.record_outcome(pid, target=None, success=False, cause=reason[:200], attempts=attempts,
+                                 final_ms=round((time.time() - t0) * 1000, 1))
+    except HTTPException as e:
+        await refuse(str(e.detail))
+    finally:
+        reader.cancel()
+        if up is not None:
+            try:
+                await up.close()
+            except Exception:
+                pass
+        if committed and pid and attempts is not None and not any(a["result"] == "ok" for a in attempts):
+            placement.record_outcome(pid, target=tried[-1] if tried else None, success=True,
+                                     first_byte_ms=t_first, first_partial_ms=t_partial,
+                                     final_ms=round((time.time() - t0) * 1000, 1), attempts=attempts)
 
 
 if __name__ == "__main__":

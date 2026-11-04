@@ -16,7 +16,7 @@
 
 ## 3. Slice 3 — streaming ASR and TTS mounts
 
-- [ ] 3.1 Router websocket `/ws/transcribe`: rank, upstream open, re-rank on `1013`/`error` before `started`, frame relay, bounded pre-ack buffer. Verify: fake nodes, one refusing at open.
+- [x] 3.1 Router websocket `/ws/transcribe`: rank, upstream open, re-rank on `1013`/`error` before `started`, frame relay, bounded pre-ack buffer. Verify: fake nodes, one refusing at open.
 - [ ] 3.2 Router `/tts/{path}` mount to kind `polytts`, `voice_id` -> `require=voice:`. Verify: voice on one node only.
 
 ## 4. Slice 4 — measured path
