@@ -1276,6 +1276,20 @@ class HostBroker:
             if (lease is not None and lease["state"] == "exclusive"
                     and lease["expires_at"] > now):
                 device_leases.pop(lease["device_id"], None)
+        # A drain waits for a busy tenant to finish its work, so that tenant's
+        # own admission must not be fenced by the drain: a worker that counts a
+        # job as in flight from the moment it accepts it, and only then asks to
+        # run it, would otherwise hold the drain while the drain refuses it.
+        # Observed 2026-11-04 on xc-tower-ubuntu: a drama3 TTS job was refused
+        # 118 times (59 min) while a FLUX drain of a46c4c2e waited on drama3's
+        # `busy`, until the FLUX caller's 3600 s window ran out. Only a DRAINING
+        # device opens, and only to a unit already resident and busy there.
+        busy_kinds = {(p.kind, p.device_id) for p in placements if p.busy}
+        for request in requests or ():
+            for device_id, record in list(device_leases.items()):
+                if (record.get("state") == "draining"
+                        and self._serves_on(request, device_id, busy_kinds, units)):
+                    device_leases.pop(device_id)
         return WorldState(devices=tuple(resolved),
                           units=units,
                           placements=tuple(placements), requests=tuple(requests or ()),
@@ -1703,6 +1717,18 @@ class HostBroker:
                     self._exclusive_condition.wait(timeout=min(1.0, max(remaining / 2, 0.01)))
         finally:
             self._exclusive_windows.pop(record["request_id"], None)
+
+    @staticmethod
+    def _serves_on(request: Request, device_id: str, busy_kinds, units) -> bool:
+        """``request`` names (or its requirements match) a unit busy on ``device_id``."""
+        from .planner import _unit_satisfies
+        for kind, busy_device in busy_kinds:
+            if busy_device != device_id:
+                continue
+            if request.kind == kind or (not request.kind and request.requires
+                                        and kind in units and _unit_satisfies(units[kind], request.requires)):
+                return True
+        return False
 
     def _devices_serving(self, kind: str, requires: Mapping) -> set:
         """Devices with a peer that declares ``kind`` (or a unit satisfying
