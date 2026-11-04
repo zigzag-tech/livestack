@@ -134,3 +134,40 @@ restarted once, at 03:01:48 (up 03:01:50), with no lease or image connection ope
 is the new release, `GET /status` carries `meshlink`, and a mesh:// announce now logs one
 `[hostd] POST /peers refused … mesh_relay_unconfigured` line, not a 500 and a traceback.
 `LIVESTACK_RELAY_CAP_KEYS` is still unset on this host, so mesh:// peers stay unregistered by design.
+
+## Deployed: a lease holder's work never waits for its own waiters; a gone caller holds no GPU (8deb82f6, dca9910d), 2026-11-03
+
+The incident and the rules are in HARMONY.md, under "A lease holder's work never waits for its own waiters". Two steps:
+
+- **Hotfix, 13:10:17 (tower time):** hostd release `holder-first-8deb82f6-on-busy-wait-meshlink-503`. It is the
+  busy-wait + meshlink-503 release plus 8deb82f6's one `hostd.py` hunk. Deployed by
+  `~/.local/share/livestack-releases/deploy-holder-first.sh [--rollback]`; the drop-in backup is
+  `zzz-exclusive-device-leases.conf.hostd.before-holder-first-*`. This was done mid-deadlock, while an
+  abandoned request held both leases, because no quiet moment would come. The stop took 90 s: uvicorn waited
+  for open long-polls, then systemd SIGKILLed hostd. Both waiting requests got a 503 and retried. The
+  holder's leases survived the restart, and it released them when its job ended (13:21:47). Until the next
+  deploy, 19 FLUX jobs from the chain and the zz-tower2 geo flythrough ran back to back, about 22 min each,
+  with no gap. The two 503s in that time were callers whose own windows ran out in the line.
+- **Full deploy, 21:53:35:** `~/.local/share/livestack-releases/deploy-hangup.sh [--rollback]`. It waited
+  for no active lease and no open :8211/:8227/:8766/:8767 connection, with `~/histo-scroll/PAUSE` set from
+  20:53 to 21:54. hostd release `caller-gone-on-holder-first` is the holder-first release plus dca9910d's
+  `hostd.py`/`hostbroker.py` hunks. Image gateway release `imagegen-hangup-20261103` is
+  `imagegen-20261102-426851de` plus dca9910d's `gateway.py`/`client.py`/`transport.py` hunks; one
+  `client.py` hunk was applied by hand because that release's docstring differs. Backups:
+  `zzz-exclusive-device-leases.conf.hostd.before-hangup-*` and `50-depth-units.conf.gateway.before-hangup-*`.
+  polyasr restarted with hostd while idle. Before the switch, the new tests ran against both releases with
+  the tower's venvs: gateway 86 passed; hostd all passed except the three boot-id tests, whose feature this
+  release predates, and the end-to-end cancel test, whose client half is in the gateway release.
+- **Seen live before the full deploy:** the geo flythrough's 4 h `timeout` killed it at 21:06 while its
+  request queued. The old gateway still served that request (rows 258/259, 21:09–21:31), a FLUX job for
+  nobody.
+- **Verified after it:**
+  - A FLUX request whose client hung up 40 s into its wait (21:55:53) left no open connection from the
+    gateway to hostd, and it never got a lease row, though it was ahead of the next request in line.
+  - A second two-device request sent at 21:56:44 overlapped the chain's. It queued, ran after the chain's
+    job (rows 264/265, 22:18–22:40) and returned 200 with lease evidence in profile order. The chain's next
+    request took over at 22:40:04.
+  - Every request now takes `4bac2869` first (sorted order).
+
+Roll back: run `deploy-hangup.sh --rollback` (back to the holder-first hostd and the old gateway), then
+`deploy-holder-first.sh --rollback`.
