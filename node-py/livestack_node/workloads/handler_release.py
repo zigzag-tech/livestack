@@ -24,7 +24,10 @@ _MANIFEST_KEYS = {
     'infrastructure_exit_codes', 'files',
 }
 # Optional: absent from every manifest published before metric definitions, so their digests hold.
-_OPTIONAL_KEYS = {'metrics', 'progress_contract'}
+# `capabilities`, `locality` and `route_profile` are likewise optional and enter the release digest only
+# when present (the digest covers the canonical manifest), so releases that omit them keep their digests.
+_OPTIONAL_KEYS = {'metrics', 'progress_contract', 'capabilities', 'locality', 'route_profile'}
+MAX_CAPABILITIES = 32
 
 
 def _fail(reason):
@@ -122,6 +125,14 @@ def validate_manifest(manifest, expected_digest=None):
             progress_contract(manifest['progress_contract'])
         except WorkloadError:
             _fail('handler_manifest_invalid_progress_contract')
+
+    if 'capabilities' in manifest:
+        _sorted_unique(manifest['capabilities'], 'capabilities', maximum=MAX_CAPABILITIES,
+                       validate=lambda item: _string(item, 'capability', _IDENTIFIER))
+    if 'locality' in manifest:
+        _string(manifest['locality'], 'locality', _IDENTIFIER)
+    if 'route_profile' in manifest:
+        _string(manifest['route_profile'], 'route_profile', _IDENTIFIER)
 
     files = manifest['files']
     if not isinstance(files, list) or not 1 <= len(files) <= MAX_PACKAGE_FILES:

@@ -162,3 +162,33 @@ def test_command_line_builds_a_bundle_and_refuses_with_a_named_reason(source, tm
     assert main(['--root', str(source), '--out', str(tmp_path/'cli2'), '--spec', str(spec),
                  '--runtime-id', 'python3']) == 2
     assert 'handler_runtime_not_operator_installed' in capsys.readouterr().err
+
+
+def test_optional_capability_locality_and_route_profile_enter_the_digest_only_when_present(source, tmp_path):
+    plain = build(source, tmp_path)
+    assert plain['release_digest'] == FIXTURE_DIGEST
+    assert not {'capabilities', 'locality', 'route_profile'} & set(plain['manifest'])
+    declared = build_release_package(source, tmp_path/'declared', **FIELDS, capabilities=['media.render', 'cpu'],
+                                     locality='mesh-worker', route_profile='unchain.slide-bundle.v1')
+    assert declared['manifest']['capabilities'] == ['cpu', 'media.render']
+    assert declared['release_digest'] != FIXTURE_DIGEST
+    assert validate_manifest(declared['manifest'], declared['release_digest'])
+    for field, value in (('locality', 'other'), ('route_profile', 'other'), ('capabilities', ['cpu'])):
+        changed = {**declared['manifest'], field: value}
+        assert validate_manifest(changed)['release_digest'] != declared['release_digest']
+
+
+@pytest.mark.parametrize('field,value,reason', [
+    ('capabilities', [], 'handler_manifest_invalid_capabilities'),
+    ('capabilities', ['b', 'a'], 'handler_manifest_noncanonical_capabilities'),
+    ('capabilities', ['a', 'a'], 'handler_manifest_noncanonical_capabilities'),
+    ('capabilities', ['Bad Cap'], 'handler_manifest_invalid_capability'),
+    ('capabilities', 'cpu', 'handler_manifest_invalid_capabilities'),
+    ('locality', '', 'handler_manifest_invalid_locality'),
+    ('locality', 'Not Valid', 'handler_manifest_invalid_locality'),
+    ('route_profile', 7, 'handler_manifest_invalid_route_profile'),
+])
+def test_invalid_capability_locality_or_route_profile_is_refused_by_name(source, tmp_path, field, value, reason):
+    manifest = {**build(source, tmp_path)['manifest'], field: value}
+    with pytest.raises(WorkloadError, match=reason):
+        validate_manifest(manifest)
