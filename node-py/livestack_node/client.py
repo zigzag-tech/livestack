@@ -253,15 +253,25 @@ def exclusive_lease(kind: str, *, device_id: str, min_free_bytes: int,
 
     def _beat() -> None:
         path = f"/lease/{urllib.parse.quote(str(lease_id), safe='')}/heartbeat"
+        accepted_at = time.monotonic()
         while not stop.wait(heartbeat_interval):
             try:
                 beat = _post(f"{base}{path}", {"ttl_seconds": ttl_seconds}, token=token)
-                if beat.get("ok") is not True:
-                    heartbeat_failure.append(LeaseLost(f"heartbeat rejected: {beat}"))
-                    return
             except (urllib.error.URLError, OSError, ValueError) as e:
-                heartbeat_failure.append(LeaseLost(f"heartbeat failed: {e}"))
+                # A beat that does not arrive is not a lost lease: the broker
+                # keeps it until ttl_seconds after the last accepted beat, so
+                # keep trying until the next try could land after that.
+                # Observed 2026-11-04 on xc-tower-ubuntu: one beat timed out in
+                # a 6 s hostd stall, and a 30 min FLUX job that finished with
+                # its 1800 s lease intact was answered 503 "heartbeat failed".
+                if time.monotonic() + heartbeat_interval - accepted_at >= ttl_seconds:
+                    heartbeat_failure.append(LeaseLost(f"heartbeat failed: {e}"))
+                    return
+                continue
+            if beat.get("ok") is not True:
+                heartbeat_failure.append(LeaseLost(f"heartbeat rejected: {beat}"))
                 return
+            accepted_at = time.monotonic()
 
     beater = threading.Thread(target=_beat, name="exclusive-lease-heartbeat", daemon=True)
     beater.start()
