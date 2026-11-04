@@ -50,6 +50,10 @@ def problem_from_fleet(view: dict, kind: str, *, vantage: str, require: Optional
             nodes[_target_id(n)] = (hid, n)
     cands = []
     for c in result["candidates"]:
+        # A node that does not host the kind is not a candidate for it; carrying
+        # every such node made a speech problem ~55 KB and the log's retention short.
+        if c.reason.startswith("filtered: does not host"):
+            continue
         hid, node = nodes.get(c.target_id, (c.host_id, {}))
         eligible = c.outcome != "filtered"
         cands.append({
