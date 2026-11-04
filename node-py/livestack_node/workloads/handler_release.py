@@ -126,7 +126,7 @@ def validate_manifest(manifest, expected_digest=None):
         except WorkloadError:
             _fail('handler_manifest_invalid_progress_contract')
 
-    if 'capabilities' in manifest:
+    if 'capabilities' in manifest and manifest['capabilities'] != []:  # [] = declared, requires nothing
         _sorted_unique(manifest['capabilities'], 'capabilities', maximum=MAX_CAPABILITIES,
                        validate=lambda item: _string(item, 'capability', _IDENTIFIER))
     if 'locality' in manifest:
