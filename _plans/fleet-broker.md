@@ -663,13 +663,16 @@ out to be wrong, say so in the PR and let the owner re-decide.
 
 1. **Hub ↔ fleet path: the fleet broker PUSHES rankings to the hub over the
    daemon's authenticated outbound channel** — the road speech-capacity
-   announces already travel. The hub stays off the tailnet. Concretely: the
-   xc-tower-ubuntu daemon gains a `fleet_rank` message (same shape as the
-   `/fleet/rank` response, one per `(kind, region)`, on the rank TTL cadence)
-   that the hub stores in memory with `generated_at`/`ttl_s` and the manifest
-   builder reads. A daemon that stops sending leaves the hub with an expired
-   ranking, which it discards. Putting the hub on the tailnet is NOT part of
-   this work.
+   announces already travel. The hub stays off the tailnet. The observe-mode
+   fleet broker registers `harmony.fleet-rank/1` through authenticated daemon
+   ingress and publishes one complete snapshot per `(kind, region, vantage)`.
+   Its strict bounded body is derived from `/fleet/rank` output, with explicit
+   present/removal state and a content-derived `decision_id`; it is not the
+   endpoint's response shape. The hub stores accepted rows with
+   `generated_at`/`ttl_s` and the manifest builder reads them. A daemon that
+   stops sending leaves the hub with an expired ranking, which it discards.
+   Authority refusal remains named; there is no HTTP polling fallback.
+   Putting the hub on the tailnet is NOT part of this work.
 2. **Fleet broker host: xc-tower-ubuntu.** Outside the GFW, reaches every
    node directly. Phase 2's links matrix removes the single-vantage bias.
 3. **Ranking TTL: 60 s.** A starting number, not a principle. A stale ranking

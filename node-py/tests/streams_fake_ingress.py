@@ -20,10 +20,12 @@ def frame(value):
 
 
 class FakeIngress:
-    def __init__(self, path, realm_epoch=7, shadow=()):
+    def __init__(self, path, realm_epoch=7, shadow=(), refused=None):
         self.path, self.realm_epoch, self.shadow = path, realm_epoch, set(shadow)
+        self.refused = dict(refused or {})
         self.server = None
         self.publishes, self.registers, self.serves = [], [], []
+        self.register_epochs = []
         self.writers, self.serving = [], {}
         self._pending, self._n = {}, 0
 
@@ -35,6 +37,13 @@ class FakeIngress:
         for writer in self.writers:
             writer.close()
         await self.server.wait_closed()
+
+    async def disconnect_clients(self):
+        """Drop live SDK sessions while keeping the fake daemon ingress available."""
+        writers, self.writers = self.writers, []
+        for writer in writers:
+            writer.close()
+        await asyncio.gather(*(writer.wait_closed() for writer in writers), return_exceptions=True)
 
     async def handle(self, reader, writer):
         self.writers.append(writer)
@@ -51,6 +60,11 @@ class FakeIngress:
                                         **({"shadowed": True} if row["contract"] in self.shadow else {})}))
                 elif kind == "register":
                     self.registers.append(row["contract"])
+                    self.register_epochs.append((row["contract"], self.realm_epoch))
+                    if row["contract"] in self.refused:
+                        code, detail = self.refused[row["contract"]]
+                        writer.write(frame({"type": "error", "code": code, "detail": detail}))
+                        continue
                     mode = "shadow" if row["contract"] in self.shadow else "active"
                     writer.write(frame({"type": "registered", "contract": row["contract"], "mode": mode, "epoch": self.realm_epoch}))
                 elif kind == "serve":
