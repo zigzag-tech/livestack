@@ -61,6 +61,15 @@ SELF_BASE = f"router://{ROUTER_ID}"
 ROUTES = demand_log_from_env(f"{ROUTER_ID}-routes", log=lambda m: print(m, flush=True))
 
 app = FastAPI(title="harmony-router", version="1.0.0")
+# Optional: refresh the fleet view off the request path (see fleet_route.start_refresher).
+VIEW_REFRESH_S = float(os.environ.get("HARMONY_ROUTER_VIEW_REFRESH_S", "0") or 0)
+
+
+@app.on_event("startup")
+async def _start_view_refresher():
+    if VIEW_REFRESH_S > 0 and FLEET_URL:
+        fr.start_refresher(FLEET_URL, VIEW_REFRESH_S,
+                           float(os.environ.get("HARMONY_ROUTER_VIEW_TIMEOUT_S", "10")))
 
 
 def _revision() -> str:
