@@ -488,8 +488,9 @@ async def ws_transcribe(ws: WebSocket):
                             acked = acked or typ in ("started", "resumed")
                         else:
                             if not committed:
-                                committed = True
+                                committed = True        # an ack / partial means the node admitted and is working
                                 sent.clear()
+                            if t_partial is None and typ in ("partial", "final"):
                                 t_partial = round((time.time() - t0) * 1000, 1)
                             await (ws.send_bytes(msg) if isinstance(msg, bytes) else ws.send_text(msg))
                         t_up = asyncio.create_task(up.recv())
