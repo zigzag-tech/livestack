@@ -69,6 +69,14 @@ A process-node facade reports every unit of its worker `busy` while it holds an 
 
 This is exclusivity over **participating managed tenants and valid leaseholders**, not a license to kill unmanaged GPU processes. Direct warm/ensure calls outside admission are outside that contract. External memory is measured and can block acquisition. Production activation of an exclusive drain is a separate operational action.
 
+### Speech behind an image job: say so, do not hide it (2026-11-04)
+
+Measured on xc-tower-ubuntu (journal, 24 h): 496 `speech session refused: Harmony did not grant this device` against 12 ASR loads. The cause is the exclusive lease above: the image gateway leases BOTH GPUs for one FLUX job (about 15-30 min each, back to back; `~/.cache/livestack/device-exclusivity.sqlite3`), and a lease is an active job, so the planner never evicts for speech. Until now the facade hid all of this: `/health` stayed 200, the roster said `ready: true`, the refusal carried no reason, and clients (hub ranking, app picker) kept choosing the node and burned ~45 s of retries (`failover_exhausted` in `asr_outcomes`) before reaching a free provider.
+
+- **Facade (`process_node.py`)**: while the node's device holds an active exclusive lease and its worker is not resident, `/livestack/capability` reports `ready: false` with `detail: "device held exclusively by <owner>"` and `/health` answers 503 `device_busy`, so probers rank it down. The check is a read-only `GET /fleet` (3 s cache); an unreachable broker is "unknown", never "busy". A refused admission now carries the planner's `defer_reason` in the 503 detail and the journal, plus `Retry-After: 30`.
+- **`admit_wait_s`** (node config, default 0): hold an admission at the broker for room instead of refusing on the first pass (a residency floor of 60 s after a model load is the other common refusal). Waiters queue per the arrival-order rule above. Leave it small for speech: a lease can outlast any sensible wait; fail over rather than wait out a FLUX job.
+- **Not changed, by design**: speech does not evict a unit with an active job. Capacity for dictation while FLUX runs needs a placement that leaves a GPU (or ~8 GB plus headroom) outside image leases, or an ASR provider on another host; that is a fleet decision, not a planner one.
+
 ## Holding a device for a human
 
 An exclusive lease is held by a live process. To reserve a card for work Harmony should simply stay off (a multi-day training run), **hold** it: the planner drops the device from its world, so it is never a placement, eviction or warm target. No need to stop hostd or the model servers.

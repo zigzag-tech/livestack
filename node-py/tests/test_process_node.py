@@ -89,6 +89,31 @@ class ProcessNodeTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.status_code, 503)
             self.assertIsNone(self.node.process)
 
+    async def test_refusal_carries_the_planner_reason_and_busy_device_reports_not_ready(self):
+        async def admit(_unit): return {'granted':False,'defer_reason':'device held by an image job'}
+        self.node.admit = admit
+        app = create_app(self.node)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://private') as c:
+            response = await c.post('/v1/audio/transcriptions',content=b'audio')
+            self.assertEqual(response.status_code, 503)
+            self.assertIn('device held by an image job', response.json()['detail'])
+            self.assertEqual(response.headers['retry-after'], '30')
+            # Positive control: with no lease the same node is ready and healthy.
+            self.assertEqual((await c.get('/health')).status_code, 200)
+            lease = {'device_id':self.cfg['device_id'],'state':'exclusive','owner':'harmony-image'}
+            class R:
+                def raise_for_status(self): pass
+                def json(self): return {'device_leases':[lease]}
+            async def get(*_a, **_k): return R()
+            self.node.http.get = get
+            self.node._busy = (-10.0, None)
+            cap = await self.node.capability()
+            self.assertFalse(cap['ready'])
+            self.assertIn('harmony-image', cap['detail'])
+            health = await c.get('/health')
+            self.assertEqual(health.status_code, 503)
+            self.assertEqual(health.json()['status'], 'device_busy')
+
     async def test_two_callers_use_a_grant_and_busy_work_blocks_eviction(self):
         grants = []
         async def admit(unit):

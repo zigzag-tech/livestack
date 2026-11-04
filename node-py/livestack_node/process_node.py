@@ -59,6 +59,7 @@ class ProcessNode:
         self.last_error = None
         self.last_child_report = {}
         self._memory = (0, None)
+        self._busy = (-10.0, None)
         self._closed = False
         self.sessions = {}
 
@@ -294,14 +295,52 @@ class ProcessNode:
             return floor
         return max(floor, min(after_use, self.config.get('keep_warm_max_s', 900)))
 
-    async def admit(self, unit):
-        broker = self.config.get('broker_url', 'http://127.0.0.1:8799')
+    def _broker_headers(self):
         headers = {}
         if self.config.get('broker_token_file'):
             headers['Authorization'] = 'Bearer ' + Path(self.config['broker_token_file']).read_text().strip()
+        return headers
+
+    async def device_busy(self):
+        """Why this node's device cannot take a request right now, or None.
+
+        An exclusive device lease (an image job that owns both GPUs for tens of
+        minutes) makes every admission here fail. Without saying so the node
+        stayed `ready: true` and `/health` stayed 200, so clients kept choosing
+        it, opened a session, and were refused (observed 2026-11-04: every
+        dictation probe on xc-tower-ubuntu refused for a day while the roster
+        called it ready). A read-only look at the broker's lease ledger lets the
+        node say so before a session is spent on it. Unknown (broker
+        unreachable) is None: never claim a fault we did not observe."""
+        if self.config.get('device_busy_check', True) is False or self._alive():
+            return None
+        now = time.monotonic()
+        if now - self._busy[0] >= 3:
+            value = None
+            try:
+                broker = self.config.get('broker_url', 'http://127.0.0.1:8799')
+                r = await self.http.get(broker.rstrip('/').split(',')[0]+'/fleet',
+                                        headers=self._broker_headers(), timeout=3)
+                r.raise_for_status()
+                for lease in r.json().get('device_leases', []):
+                    if (lease.get('device_id') == self.config['device_id'] and
+                            lease.get('state') in ('draining', 'exclusive', 'expired_draining')):
+                        value = f"device held exclusively by {lease.get('owner','another workload')}"
+                        break
+            except Exception: value = None
+            self._busy = (now, value)
+        return self._busy[1]
+
+    async def admit(self, unit):
+        broker = self.config.get('broker_url', 'http://127.0.0.1:8799')
+        headers = self._broker_headers()
+        # `admit_wait_s`: hold the request at the broker for room instead of
+        # refusing on the first pass (a residency floor lapses in seconds).
+        wait_s = float(self.config.get('admit_wait_s', 0) or 0)
         response = await self.http.post(broker.rstrip('/')+'/admit',
             json={'kind':unit,'owner':'inference:'+self.config['node_id'],
-                  'id':uuid.uuid4().hex},headers=headers,timeout=self.config.get('warm_timeout',600))
+                  'id':uuid.uuid4().hex, **({'wait_s':wait_s} if wait_s > 0 else {})},
+            headers=headers,timeout=self.config.get('warm_timeout',600)+wait_s)
         response.raise_for_status()
         return response.json()
 
@@ -320,10 +359,14 @@ class ProcessNode:
             raise HTTPException(503,'Harmony admission unavailable') from None
         if (decision.get('granted') is not True or decision.get('degraded') or
                 decision.get('device_id') != self.config['device_id']):
-            log.warning('admission refused: granted=%r degraded=%r device_match=%r',
+            why = decision.get('defer_reason') or decision.get('reason')
+            log.warning('admission refused: granted=%r degraded=%r device_match=%r reason=%r',
                         decision.get('granted'), decision.get('degraded'),
-                        decision.get('device_id') == self.config['device_id'])
-            raise HTTPException(503,'Harmony did not grant this device')
+                        decision.get('device_id') == self.config['device_id'], why)
+            # The planner's own words, so a client (and the journal) can tell
+            # "image job holds the GPU" from "model failed to load".
+            raise HTTPException(503,'Harmony did not grant this device'+(f': {why}' if why else ''),
+                                headers={'Retry-After':'30'})
         async with self.lock:
             if not self._alive() or unit not in self.resident:
                 log.warning('admission granted but the provider is not resident')
@@ -404,11 +447,13 @@ class ProcessNode:
 
     async def capability(self):
         report=await self.residence()
+        busy=await self.device_busy()
         return dict(kind=self.config['kind'],host_id=self.config['host_id'],node_id=self.config['node_id'],
                     device_id=self.config['device_id'],device_candidates=[self.config['device_id']],
                     region=self.config.get('region'),units=list(self.rows),resident=sorted(self.resident),
-                    identity={'state':'present'},ready=not bool(self.config.get('admission_hold')),
-                    detail=self.config.get('admission_hold') or 'Harmony process-managed provider',
+                    identity={'state':'present'},
+                    ready=not bool(self.config.get('admission_hold')) and not busy,
+                    detail=self.config.get('admission_hold') or busy or 'Harmony process-managed provider',
                     inventory={'voice':sorted(self.voices())} if self.config['kind']=='polytts' else self.config.get('inventory',{}),
                     load={'in_flight':self.active,'in_flight_source':'server',
                           'resident_units':len(self.resident)},worker=report['worker'])
@@ -473,9 +518,15 @@ def create_app(node):
     @app.get('/health')
     async def health():
         c=await node.capability()
-        return {'status':'ok' if not node.last_error else 'degraded','managed':True,
-                'manager':{'resident':c['resident'],'idle_seconds':node.config.get('idle_seconds',60)},
-                'worker':c['worker']}
+        body={'status':'ok' if not node.last_error else 'degraded','managed':True,
+              'manager':{'resident':c['resident'],'idle_seconds':node.config.get('idle_seconds',60)},
+              'worker':c['worker']}
+        if not c['ready'] and not node.config.get('admission_hold'):
+            # Not 200: a prober that reads /health must not rank a node that
+            # would refuse every session ahead of one that would serve it.
+            from fastapi.responses import JSONResponse
+            return JSONResponse({**body,'status':'device_busy','detail':c['detail']},status_code=503)
+        return body
 
     @app.get('/voices')
     async def voices():return {'voices':sorted(node.voices())}
