@@ -454,6 +454,10 @@ class ProcessNode:
                     identity={'state':'present'},
                     ready=not bool(self.config.get('admission_hold')) and not busy,
                     detail=self.config.get('admission_hold') or busy or 'Harmony process-managed provider',
+                    # Explicit, so a ranker never has to parse `detail`: a node
+                    # whose device an exclusive lease holds cannot LOAD either,
+                    # so it is not a "cold" candidate.
+                    **({'device_busy':busy} if busy else {}),
                     inventory={'voice':sorted(self.voices())} if self.config['kind']=='polytts' else self.config.get('inventory',{}),
                     load={'in_flight':self.active,'in_flight_source':'server',
                           'resident_units':len(self.resident)},worker=report['worker'])

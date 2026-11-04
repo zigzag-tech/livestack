@@ -2057,6 +2057,8 @@ class HostBroker:
             if cap:
                 node["ready"] = cap.get("ready")
                 node["detail"] = cap.get("detail")
+                if isinstance(cap.get("device_busy"), str) and cap["device_busy"]:
+                    node["device_busy"] = cap["device_busy"]
                 if isinstance(cap.get("identity_id"), str):
                     node["identity_id"] = cap["identity_id"]
                 if isinstance(cap.get("identity"), dict):

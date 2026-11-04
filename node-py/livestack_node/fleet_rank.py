@@ -464,6 +464,15 @@ def rank(view: dict, kind: str, vantage: str = "direct",
                            + (f" ({node['last_error'][:80]})" if node.get("last_error") else ""),
                     **common))
                 continue
+            if node.get("device_busy"):
+                # An exclusive lease holds the device: the node cannot serve and
+                # cannot load either, so unlike "no unit resident" it is never
+                # the cold fallback, even as the only candidate.
+                rows.append(RankedTarget(
+                    outcome="filtered",
+                    reason=f"filtered: device busy ({str(node['device_busy'])[:120]})",
+                    **common))
+                continue
             if not node.get("ready"):
                 # HELD BACK, NOT DISCARDED. For a node whose model loads on
                 # demand, "no unit resident" means cold, not broken — it will

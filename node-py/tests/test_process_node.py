@@ -110,6 +110,7 @@ class ProcessNodeTest(unittest.IsolatedAsyncioTestCase):
             cap = await self.node.capability()
             self.assertFalse(cap['ready'])
             self.assertIn('harmony-image', cap['detail'])
+            self.assertIn('harmony-image', cap['device_busy'])
             health = await c.get('/health')
             self.assertEqual(health.status_code, 503)
             self.assertEqual(health.json()['status'], 'device_busy')
