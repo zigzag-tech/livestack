@@ -58,7 +58,7 @@ class FakeNode:
                         await ws.close(code=1013, reason="busy")
                         return
                 elif isinstance(m, bytes) and self.mode == "ok":
-                    await ws.send(json.dumps({"type": "partial", "text": "hi", "from": self.port}))
+                    await ws.send(json.dumps({"type": "partial", "text": "SECRET-TRANSCRIPT", "from": self.port}))
 
         self.srv = lp.run(self._start(handler))
         self.port = self.srv.sockets[0].getsockname()[1]
@@ -111,10 +111,10 @@ async def _serve(srv, started):
 START = json.dumps({"type": "start", "protocol": 1, "sessionId": "s"})
 
 
-async def _dictate(url, audio=b"\x00" * 64, wait=3.0):
+async def _dictate(url, audio=b"\x00" * 64, wait=3.0, start=None):
     out = []
     async with connect(url) as ws:
-        await ws.send(START)
+        await ws.send(start or START)
         out.append(json.loads(await asyncio.wait_for(ws.recv(), wait)))      # the client's ack
         await ws.send(audio)
         try:
@@ -154,3 +154,36 @@ def test_native_streaming_is_a_preference_not_a_requirement(world):
     # ... and a synthetic-only fleet still serves
     url, (only,) = world(("ok", {"streaming": "synthetic"}))
     assert [f for f in Loop().run(_dictate(url)) if f["type"] == "partial"][0]["from"] == only.port
+
+
+def test_the_decision_log_holds_features_and_outcomes_never_audio_transcript_or_context(world, router, monkeypatch, tmp_path):
+    """Privacy: what the router logs about a dictation is which node, why, how long.
+    Audio, the transcript the node returned and the `context` string (pane names,
+    recent turns) must appear in NO log row, with a failover so attempts/causes
+    are exercised too. Checked on the real bounded log file, not a fake."""
+    from livestack_node import placement
+    from livestack_node.demand_log import demand_log_from_env
+    monkeypatch.setenv("HARMONY_DEMAND_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("HARMONY_DEMAND_LOG_AGE_DAYS", "1")
+    log = demand_log_from_env("placement")
+    placement.set_decision_log(log)
+    routes = demand_log_from_env("routes")
+    monkeypatch.setattr(router, "ROUTES", routes)
+    try:
+        url, (busy, ok) = world(("busy", {"in_flight": 0}), ("ok", {"in_flight": 1}))
+        start = json.dumps({"type": "start", "protocol": 1, "sessionId": "s",
+                            "context": "SECRET-CONTEXT /home/me/private-pane"})
+        frames = Loop().run(_dictate(url, audio=b"SECRET-AUDIO" * 8, start=start))
+        assert any(f["type"] == "partial" for f in frames)       # the dictation really flowed
+        placement.record_outcome("x", target="t", success=True, first_byte_ms=1.0)
+        log.flush()
+        routes.flush()
+        text = b"".join(p.read_bytes() for p in tmp_path.glob("*.jsonl*"))
+        assert b"placement" in text or text                       # the instrument wrote something
+        assert b'"event": "decision"' in text or b'"event":"decision"' in text
+        for secret in (b"SECRET-AUDIO", b"SECRET-TRANSCRIPT", b"SECRET-CONTEXT", b"private-pane"):
+            assert secret not in text, secret
+        # positive control: the sentinels did reach the nodes, so absence is meaningful
+        assert any(b"SECRET-AUDIO" in m for m in ok.got if isinstance(m, bytes))
+    finally:
+        placement.set_decision_log(None)

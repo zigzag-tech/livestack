@@ -410,3 +410,29 @@ def test_llm_503_is_not_retried_by_the_speech_rule(wired):
     r = client.post("/v1/chat/completions", json={"model": "require:class=llm,params_b>=20",
                                                   "messages": [{"role": "user", "content": "x"}]})
     assert r.status_code == 200 and len(node.got) == 1
+
+
+def test_batch_asr_logs_never_hold_the_audio_or_the_form_fields(speech, router, monkeypatch, tmp_path):
+    """Privacy: the placement and route logs record features and outcomes only."""
+    from livestack_node import placement
+    from livestack_node.demand_log import demand_log_from_env
+    monkeypatch.setenv("HARMONY_DEMAND_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("HARMONY_DEMAND_LOG_AGE_DAYS", "1")
+    log = demand_log_from_env("placement")
+    placement.set_decision_log(log)
+    routes = demand_log_from_env("routes")
+    client, (busy, ok), _ = speech(({"busy": True}, {"in_flight": 0}), ({}, {"in_flight": 1}))
+    monkeypatch.setattr(router, "ROUTES", routes)
+    try:
+        r = client.post("/v1/audio/transcriptions", files={"file": ("a.wav", b"RIFFSECRET-AUDIO", "audio/wav")},
+                        data={"context": "SECRET-CONTEXT /home/me/private-pane"})
+        assert r.status_code == 200
+        log.flush()
+        routes.flush()
+        text = b"".join(p.read_bytes() for p in tmp_path.glob("*.jsonl*"))
+        assert b"decision" in text and b"outcome" in text
+        for secret in (b"SECRET-AUDIO", b"SECRET-CONTEXT", b"private-pane"):
+            assert secret not in text, secret
+        assert b"SECRET-AUDIO" in ok.got[0]["raw"]          # positive control: it did reach the node
+    finally:
+        placement.set_decision_log(None)
