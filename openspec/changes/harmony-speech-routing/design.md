@@ -67,3 +67,7 @@ answered by a pure `Ranker`, selected per kind by config, with `default-v1` (the
    policy (no per-account preference); native streaming is a PREFERENCE (`asr.streaming=native`
    in `harmony_prefer`, existing attribute), never a requirement; 3 attempts, busy window = node
    `Retry-After` clamped 1..300 s.
+
+## Streaming ASR as built (slice 3)
+
+`router.py` `/ws/transcribe`. A node acks `started` immediately and admits afterwards (refusal = error frame + close 1013), so a session is UNCOMMITTED until the first message that is not `started`/`resumed`/`warming` (an `ack`, `partial` or `final` proves the node admitted and is working). While uncommitted the router keeps every client frame (cap `HARMONY_ROUTER_WS_REPLAY_MAX_BYTES`, 4 MiB; past it the session is final) and a refusal or connect failure re-places on the next provider, swallows its `started` and replays the frames. After commit a drop is the client's own `resume`. `asr.streaming=native` is a default PREFERENCE. Measured 2026-11-04 (router-trial on xc-tower-ubuntu against the live na fleet, tower refusing `no device can fit even with preemption`): tower ranked first and refused, zz-joe served; client ack 20-40 ms, failover cost under 300 ms, warm first partial 0.74 s of audio-time, final text correct; cold zz-joe model load 13.5 s (announced by `warming` frames).
