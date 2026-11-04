@@ -77,7 +77,7 @@ def _guided_call(body, calls, result=None, error=None, controlnet_quantization="
     attributes.update(_generation_settings())
     attributes["controlnet_quantization"] = controlnet_quantization
 
-    def call(base, method, path, request=None, token=None, timeout=None):
+    def call(base, method, path, request=None, token=None, timeout=None, cancel=None):
         calls.append((base, method, path, request, token))
         if path == "/admit":
             assert request["requires"] == body["harmony_requires"]
@@ -107,7 +107,7 @@ def setup(tmp_path):
     config = {"worker_token_file": str(worker), "fleet_token_file": str(fleet), "fleet": "http://fleet"}
     calls = []
 
-    def call(base, method, path, body=None, token=None, timeout=None):
+    def call(base, method, path, body=None, token=None, timeout=None, cancel=None):
         calls.append((base, method, path, body, token, timeout))
         if path == "/admit":
             assert token == "fleet-secret"
@@ -324,7 +324,7 @@ def test_exclusive_unit_leases_cover_the_worker_call(setup, monkeypatch, device_
         events.append(("acquire", kwargs))
         return Lease(kwargs["device_id"])
 
-    def call(base, method, path, request=None, token=None, timeout=None, lease_id=None):
+    def call(base, method, path, request=None, token=None, timeout=None, lease_id=None, cancel=None):
         events.append(path)
         if path == "/admit":
             # Observe-only fleet admission picks the unit before any lease exists.
@@ -343,16 +343,19 @@ def test_exclusive_unit_leases_cover_the_worker_call(setup, monkeypatch, device_
         headers={"Authorization": "Bearer worker-secret"})
     assert response.status_code == 200, response.text
     acquisitions = [event[1] for event in events if isinstance(event, tuple)]
-    assert [event["device_id"] for event in acquisitions] == device_ids
+    # Acquired in one global order (sorted), so no two requests hold-and-wait
+    # in a cycle; the evidence below stays in the profile's order.
+    assert [event["device_id"] for event in acquisitions] == sorted(device_ids)
     assert [event["min_free_bytes"] for event in acquisitions] == [
-        profile["min_free_bytes"][device] for device in device_ids]
+        profile["min_free_bytes"][device] for device in sorted(device_ids)]
     assert all(event["brokers"] == ["http://host-broker"] and event["owner_id"] == "harmony-image"
                for event in acquisitions)
     # The caller's harmony_wait_s carries over: a busy device queues, not refuses.
     assert all(0 < event["queue_wait_s"] <= body["harmony_wait_s"] for event in acquisitions)
     order = [event if isinstance(event, str) else "acquire" for event in events]
     assert order.index("/fleet") < order.index("acquire")
-    assert order.index("/v1/images/generations") < order.index("exit:" + device_ids[0])
+    assert all(order.index("/v1/images/generations") < order.index("exit:" + device)
+               for device in device_ids)
     assert forwarded == [json.dumps([
         "device-lease-" + device.rsplit("/", 1)[-1] for device in device_ids], separators=(",", ":"))]
     harmony = response.json()["harmony"]
@@ -400,7 +403,7 @@ def test_a_request_that_can_wait_says_so_to_harmony_and_is_asked_once(setup):
 
 def test_a_request_that_runs_out_of_patience_gets_the_planners_reason(setup):
     config, _, real = setup
-    def call(base, method, path, body=None, token=None, timeout=None):
+    def call(base, method, path, body=None, token=None, timeout=None, cancel=None):
         if path == "/admit":
             return {"granted": False, "reason": "the planner could not place it on any device", "defer_reason": "no unit satisfies"}
         return real(base, method, path, body, token)

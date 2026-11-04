@@ -1,6 +1,7 @@
 """Image ingress resolving semantic requirements through the fleet planner."""
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import secrets
@@ -9,7 +10,8 @@ import urllib.error
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Body, Header, HTTPException
+from fastapi import FastAPI, Body, Header, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from livestack_node import transport
 from livestack_node.client import exclusive_lease
 
@@ -22,7 +24,8 @@ _GENERATION_SETTINGS = (
 )
 
 
-def json_call(base: str, method: str, path: str, body=None, token=None, timeout=1200, lease_id=None):
+def json_call(base: str, method: str, path: str, body=None, token=None, timeout=1200, lease_id=None,
+              cancel=None):
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -30,7 +33,8 @@ def json_call(base: str, method: str, path: str, body=None, token=None, timeout=
         headers["X-Harmony-Device-Lease"] = lease_id
     try:
         status, _, raw = transport.dial(base, method, path, headers=headers,
-                                      body=json.dumps(body).encode() if body is not None else None, timeout=timeout)
+                                      body=json.dumps(body).encode() if body is not None else None, timeout=timeout,
+                                      cancel=cancel)
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"Harmony HTTP {e.code}: {e.read().decode()[:500]}") from e
     if status >= 400:
@@ -110,24 +114,34 @@ def _exclusive_units(config):
 
 
 @contextmanager
-def _device_leases(profile, token, wait_deadline):
-    """Whole-device leases for ``profile``. While another request holds a
-    device, this one queues on the host broker until ``wait_deadline`` (the
-    caller's ``harmony_wait_s``, monotonic) rather than being refused."""
+def _device_leases(profile, token, wait_deadline, cancel=None):
+    """Whole-device leases for ``profile``, in the profile's order. While
+    another request holds a device, this one queues on the host broker until
+    ``wait_deadline`` (the caller's ``harmony_wait_s``, monotonic) rather than
+    being refused, keeping the devices it already holds.
+
+    Holding while waiting is safe only because every request takes its devices
+    in ONE global order (sorted device id), whatever order its profile lists
+    them in: two requests can then never each hold a device the other waits
+    for. The profile order still decides the evidence (its first device is the
+    one the unit is placed on)."""
     if profile is None:
         yield []
         return
     with ExitStack() as stack:
         minimum = profile["min_free_bytes"]
-        yield [stack.enter_context(exclusive_lease(
-            "imagegen", owner_id=profile["owner"], token=token, brokers=[profile["broker"]],
-            device_id=device_id,
-            min_free_bytes=minimum[device_id] if isinstance(minimum, dict) else minimum,
-            wait_timeout_s=profile.get("wait_timeout_s", 240),
-            ttl_seconds=profile.get("ttl_seconds", 120),
-            request_id=f"image-gateway-{secrets.token_hex(16)}",
-            queue_wait_s=max(0.0, wait_deadline - time.monotonic())))
-            for device_id in profile["device_ids"]]
+        grants = {}
+        for device_id in sorted(profile["device_ids"]):
+            grants[device_id] = stack.enter_context(exclusive_lease(
+                "imagegen", owner_id=profile["owner"], token=token, brokers=[profile["broker"]],
+                device_id=device_id,
+                min_free_bytes=minimum[device_id] if isinstance(minimum, dict) else minimum,
+                wait_timeout_s=profile.get("wait_timeout_s", 240),
+                ttl_seconds=profile.get("ttl_seconds", 120),
+                request_id=f"image-gateway-{secrets.token_hex(16)}",
+                queue_wait_s=max(0.0, wait_deadline - time.monotonic()),
+                cancel=cancel))
+        yield [grants[device_id] for device_id in profile["device_ids"]]
 
 
 def create_app(config=None, call=json_call):
@@ -145,7 +159,27 @@ def create_app(config=None, call=json_call):
         return {"ok": True, "fleet": config["fleet"]}
 
     @app.post("/v1/images/generations")
-    def generate(body: dict = Body(...), authorization: str | None = Header(None)):
+    async def generate(http_request: Request, body: dict = Body(...),
+                       authorization: str | None = Header(None)):
+        # A caller that hangs up must not keep GPUs: its leases are released and
+        # its work is not started (or is cut, which the worker's facade sees).
+        # Observed 2026-11-03 on xc-tower-ubuntu: histo's chain was killed while
+        # its request queued; the gateway kept it, took both GPUs at 12:22 and
+        # ran a ~35 min FLUX job for nobody while the chain's retry waited.
+        cancel = transport.Cancel()
+
+        async def watch():
+            while not await http_request.is_disconnected():
+                await asyncio.sleep(1.0)
+            cancel.cancel()
+
+        watcher = asyncio.ensure_future(watch())
+        try:
+            return await run_in_threadpool(serve, body, authorization, cancel)
+        finally:
+            watcher.cancel()
+
+    def serve(body, authorization, cancel):
         if not secrets.compare_digest(authorization or "", f"Bearer {worker_token}"):
             raise HTTPException(401, "image ingress credential required")
         try:
@@ -167,22 +201,24 @@ def create_app(config=None, call=json_call):
                 "owner": config.get("owner", "acct_harmony-image"),
             }
             grant = call(config["fleet"], "POST", "/admit", admission, token=fleet_token,
-                         timeout=wait_s + 60)
-            view = call(config["fleet"], "GET", "/fleet")
+                         timeout=wait_s + 60, cancel=cancel)
+            view = call(config["fleet"], "GET", "/fleet", cancel=cancel)
             target = resolve_worker(view, grant, request["harmony_requires"])
             endpoint = target["peer"].removesuffix("/livestack")
             profile = exclusive_units.get(grant["kind"])
             # A unit declared exclusive runs only while its host broker holds
             # whole-device leases for it: Harmony drains the other tenants itself
             # (never an external stop), and other admissions wait for the release.
-            with _device_leases(profile, fleet_token, wait_deadline) as device_grants:
+            with _device_leases(profile, fleet_token, wait_deadline, cancel) as device_grants:
                 lease_ids = [lease["lease_id"] for lease in device_grants]
                 lease_evidence = json.dumps(lease_ids, separators=(",", ":")) if lease_ids else None
+                if cancel.cancelled:
+                    raise transport.Cancelled("the caller hung up before its work started")
                 result = call(endpoint, "POST", "/v1/images/generations", request,
                               token=worker_token, timeout=request_timeout,
-                              lease_id=lease_evidence) if lease_evidence else call(
+                              lease_id=lease_evidence, cancel=cancel) if lease_evidence else call(
                                   endpoint, "POST", "/v1/images/generations", request,
-                                  token=worker_token, timeout=request_timeout)
+                                  token=worker_token, timeout=request_timeout, cancel=cancel)
                 actual = result.get("harmony", {})
                 if actual.get("unit") != grant["kind"] or actual.get("device_id") != grant["device_id"]:
                     raise RuntimeError("worker result does not match the fleet grant")

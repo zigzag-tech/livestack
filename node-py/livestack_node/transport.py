@@ -94,15 +94,96 @@ def dial_stream(target: str, method: str, path: str,
     return urllib.request.urlopen(req, timeout=timeout)
 
 
+class Cancelled(URLError):
+    """A dial cut by its `Cancel` (a URLError, so existing handlers still catch it)."""
+
+
+class Cancel:
+    """A caller's way to abandon its dials: `cancel()` cuts every dial in
+    flight that was made with this object, and later ones fail at once.
+
+    For a process that relays its own caller's request through a long call
+    (a lease that queues for minutes, a generation that runs for twenty) and
+    must stop when that caller hangs up. Cutting the socket is what tells the
+    far end: a dial left running in an abandoned thread keeps its connection
+    open, and the far end keeps working (or queueing) for nobody."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._socks = set()
+        self.cancelled = False
+
+    def cancel(self) -> None:
+        with self._lock:
+            self.cancelled = True
+            socks = list(self._socks)
+        for sock in socks:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def _hold(self, sock) -> None:
+        with self._lock:
+            if self.cancelled:
+                raise Cancelled("cancelled")
+            self._socks.add(sock)
+
+    def _release(self, sock) -> None:
+        with self._lock:
+            self._socks.discard(sock)
+
+
+def _dial_cancellable(target, method, path, headers, body, timeout, cancel: Cancel):
+    """`dial` on a socket `cancel` can cut. Plain http.client, like
+    `KeptConnection`: no redirects or proxies, so for direct control dials."""
+    _refuse_mesh_scheme(target)
+    parts = urllib.parse.urlsplit(target)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError(f"cancellable dial needs an http(s) target: {target!r}")
+    cls = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
+    if not path.startswith("/"):
+        path = "/" + path
+    url = target.rstrip("/") + path
+    conn = cls(parts.netloc, timeout=timeout)
+    try:
+        try:
+            conn.connect()
+            sock = conn.sock
+            cancel._hold(sock)
+            try:
+                conn.request(method, parts.path.rstrip("/") + path,
+                             body=body, headers=dict(headers or {}))
+                response = conn.getresponse()
+                data = response.read()
+            finally:
+                cancel._release(sock)
+        except Cancelled:
+            raise
+        except (OSError, http.client.HTTPException) as error:
+            if cancel.cancelled:
+                raise Cancelled("cancelled") from error
+            raise URLError(error) from error
+    finally:
+        conn.close()
+    if response.status >= 400:
+        raise HTTPError(url, response.status, response.reason, response.headers, io.BytesIO(data))
+    return response.status, response.headers, data
+
+
 def dial(target: str, method: str, path: str,
          headers: Optional[Mapping[str, str]] = None,
          body: Body = None,
-         timeout: float = 30.0) -> Tuple[int, Headers, bytes]:
+         timeout: float = 30.0,
+         cancel: Optional[Cancel] = None) -> Tuple[int, Headers, bytes]:
     """One HTTP request, response buffered. Returns `(status, headers, body)`.
 
     Same error surface as `dial_stream`: HTTP >= 400 raises `HTTPError`,
     connection failure raises `URLError`/`TimeoutError` — the (status, ...)
-    tuple is the SUCCESS-path shape."""
+    tuple is the SUCCESS-path shape. With `cancel`, the dial can be cut
+    (raising `Cancelled`) and goes direct, without urllib's proxy handling."""
+    if cancel is not None:
+        return _dial_cancellable(target, method, path, headers, body, timeout, cancel)
     with dial_stream(target, method, path, headers=headers, body=body,
                      timeout=timeout) as resp:
         return resp.status, resp.headers, resp.read()

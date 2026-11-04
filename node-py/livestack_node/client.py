@@ -151,7 +151,8 @@ def _admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "
            device_lease_ids: Optional[list] = None,
            min_free_bytes: Optional[int] = None, wait_timeout_s: Optional[float] = None,
            request_id: Optional[str] = None, device_id: Optional[str] = None,
-           queue_wait_s: Optional[float] = None) -> tuple:
+           queue_wait_s: Optional[float] = None,
+           cancel: Optional[transport.Cancel] = None) -> tuple:
     from .announce import broker_urls
     if device_lease_ids is not None:
         if device_lease_id is not None:
@@ -197,7 +198,7 @@ def _admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "
             data = json.dumps(body).encode("utf-8")
             _status, _headers, raw = transport.dial(
                 base, "POST", "/admit", headers=headers, body=data,
-                timeout=timeout)
+                timeout=timeout, **({"cancel": cancel} if cancel is not None else {}))
             res = json.loads(raw.decode("utf-8")) if raw else {}
             if exclusive_device or device_lease_id is not None:
                 degraded = res.get("degraded") is not None
@@ -209,7 +210,7 @@ def _admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "
                     if not res.get("lease_id"):
                         raise LeaseLost("exclusive admission returned no lease_id")
             return res, base
-        except LeaseLost:
+        except (LeaseLost, transport.Cancelled):
             raise
         except (urllib.error.URLError, OSError, ValueError) as e:
             last = e
@@ -227,20 +228,23 @@ def exclusive_lease(kind: str, *, device_id: str, min_free_bytes: int,
                     brokers: Optional[list] = None, ttl_seconds: int = 120,
                     wait_timeout_s: float = 240, heartbeat_interval: float = 30,
                     request_id: Optional[str] = None,
-                    queue_wait_s: float = 0) -> Iterator[dict]:
+                    queue_wait_s: float = 0,
+                    cancel: Optional[transport.Cancel] = None) -> Iterator[dict]:
     """Hold an authoritative whole-device lease, renewing it until context exit.
 
     ``queue_wait_s`` is how long to wait in the device's FIFO line behind
     another request's lease before being refused; ``wait_timeout_s`` then
     bounds a stuck drain once this request is at the head (a tenant that is
-    only busy finishing its work is waited for within ``queue_wait_s``)."""
+    only busy finishing its work is waited for within ``queue_wait_s``).
+    ``cancel`` cuts the wait (raising ``transport.Cancelled``); the broker sees
+    the hang-up and gives up this request's place. The release is never cut."""
     if heartbeat_interval <= 0:
         raise ValueError("heartbeat_interval must be positive")
     res, base = _admit(
         kind, owner_id=owner_id, token=token, brokers=brokers,
         timeout=queue_wait_s + wait_timeout_s + 30, exclusive_device=True, device_id=device_id,
         min_free_bytes=min_free_bytes, wait_timeout_s=wait_timeout_s,
-        request_id=request_id, queue_wait_s=queue_wait_s)
+        request_id=request_id, queue_wait_s=queue_wait_s, cancel=cancel)
     if res.get("granted") is not True:
         raise LeaseLost(f"exclusive admission refused: {res.get('reason') or res}")
     lease_id = res["lease_id"]

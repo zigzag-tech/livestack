@@ -115,6 +115,12 @@ from typing import Any, Dict, List, Optional
 
 from .hostbroker import HostBroker, LocalDeviceMeterPeer, RestPeer
 from .device_leases import DeviceLeaseStore
+try:
+    # Module level, because endpoint annotations resolve against module globals
+    # (`from __future__ import annotations`); FastAPI itself stays a lazy import.
+    from starlette.requests import Request as HTTPRequest
+except ImportError:
+    HTTPRequest = None
 from .mesh_peer import MeshPeer, RelayRoute, facade_id
 from . import meshlink_runtime, relay_control
 from .membership import MembershipPolicy, RosterFull, policy_from_env
@@ -303,7 +309,14 @@ def build_app(broker: HostBroker):
     admit_queue = AdmitQueue()
 
     @app.post("/admit")
-    def admit(payload: dict = Body(...), authorization: str = Header(None)):
+    def admit(http_request: HTTPRequest, payload: dict = Body(...), authorization: str = Header(None)):
+        def caller_gone() -> bool:
+            # A waiting caller that hung up (killed, or its own caller left)
+            # must not keep a place in line or be granted a device for nobody.
+            # Sync endpoints run in anyio's worker threads, so ask the loop.
+            import anyio.from_thread
+            return anyio.from_thread.run(http_request.is_disconnected)
+
         kind = payload.get("kind") or ""
         requires = payload.get("requires") or {}
         if not kind and not requires:
@@ -392,7 +405,7 @@ def build_app(broker: HostBroker):
                 return broker.acquire_exclusive(
                     req, req.selector.get("device_id"), min_free_bytes,
                     payload.get("wait_timeout_s", 240.0), payload.get("ttl_seconds", 120.0),
-                    queue_wait_s=wait_s)
+                    queue_wait_s=wait_s, caller_gone=caller_gone)
             except Exception as e:
                 return {"granted": False, "exclusive_device": True,
                         "reason": str(e), "device_id": req.selector.get("device_id")}
@@ -493,6 +506,14 @@ def build_app(broker: HostBroker):
         # HostBroker.admission_waiting). Brokers without it plan as before.
         from contextlib import nullcontext
         holding = getattr(broker, "admission_waiting", None)
+        if device_lease_id is not None:
+            # A request that holds the device's lease is the work that lease
+            # was taken for, and every exclusive waiter there is waiting for
+            # it to finish: yielding to them is a deadlock. Observed
+            # 2026-11-03 on xc-tower-ubuntu: a FLUX request held both GPUs and
+            # its own unit load waited 37 min behind a later inpaint request
+            # queued for those GPUs, until that request's 3600 s window ran out.
+            holding = None
         arrived = broker._now() if holding else 0.0
         with admit_queue.waiting(wait_key, req.id), (holding(req, arrived) if holding else nullcontext()):
             while True:
@@ -509,6 +530,9 @@ def build_app(broker: HostBroker):
                             "reason": ("still waiting behind earlier requests for the same requirement"
                                        " or for the device"),
                             "defer_reason": None}
+                if caller_gone():
+                    return {"granted": False, "device_id": None, "plan": {},
+                            "reason": "caller_gone", "defer_reason": None}
                 time.sleep(min(ADMIT_WAIT_POLL_S, max(0.0, deadline - time.monotonic())))
 
     # `:path`, because a fleet lease id names its device and a hosted device
