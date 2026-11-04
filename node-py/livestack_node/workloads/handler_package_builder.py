@@ -142,7 +142,8 @@ def build_release_package(root, out_dir, *, handler_id, release_version, runtime
                           payload_schema, result_schema, platform, architecture,
                           arguments=(), outputs=(), infrastructure_outputs=(),
                           infrastructure_exit_codes=(), backend='native', include_paths=None,
-                          allowed_runtime_ids=DEFAULT_RUNTIME_IDS):
+                          allowed_runtime_ids=DEFAULT_RUNTIME_IDS, capabilities=None, locality=None,
+                          route_profile=None):
     """Build one immutable release and return its descriptor.
 
     ``root`` is the package content; ``out_dir`` receives ``handler-packages/``
@@ -172,6 +173,13 @@ def build_release_package(root, out_dir, *, handler_id, release_version, runtime
         infrastructure_outputs=sorted(set(infrastructure_outputs), key=_utf8_key),
         infrastructure_exit_codes=sorted(set(infrastructure_exit_codes)),
         files=[{key: item[key] for key in ('path', 'mode', 'size', 'sha256')} for item in files])
+    # Optional identities: set only when given, so a release without them keeps its digest.
+    if capabilities is not None:
+        manifest['capabilities'] = sorted(set(capabilities), key=_utf8_key)
+    if locality is not None:
+        manifest['locality'] = locality
+    if route_profile is not None:
+        manifest['route_profile'] = route_profile
     checked = validate_manifest(manifest)
     directory = out_dir/'handler-packages'
     directory.mkdir(parents=True, exist_ok=True)
