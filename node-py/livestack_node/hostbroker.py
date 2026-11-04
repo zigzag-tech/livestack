@@ -1544,7 +1544,8 @@ class HostBroker:
         return record
 
     def acquire_exclusive(self, request: Request, device_id: str, min_free_bytes: int,
-                          wait_timeout_s=240.0, ttl_s=120.0, queue_wait_s=0.0) -> dict:
+                          wait_timeout_s=240.0, ttl_s=120.0, queue_wait_s=0.0,
+                          caller_gone: Optional[Callable[[], bool]] = None) -> dict:
         """Take a whole-device lease on ``device_id`` for ``request``.
 
         ``queue_wait_s`` is how long the caller will wait for ANOTHER request's
@@ -1569,6 +1570,12 @@ class HostBroker:
         back to back; the second carried ``harmony_wait_s: 1800`` and was
         refused immediately with ``other_owner`` because this path never
         queued. Callers describe the job; they must not sequence GPU work.
+
+        ``caller_gone`` (checked about once a second) says the caller hung up.
+        Its place in line is given up, a drain it began is failed with
+        ``caller_gone``, and a lease granted as it left is released: nobody
+        would heartbeat it, and a lease with a long TTL would hold the device
+        for nobody (the FLUX profile's is 1800 s).
         """
         if not self.dispatch:
             raise ValueError("exclusive acquisition requires a dispatching host broker")
@@ -1628,6 +1635,12 @@ class HostBroker:
                     active = self.exclusive_store.active(device_id)
                     blocker = active[0] if active else None
                 now = self._now()
+                if caller_gone is not None and caller_gone():
+                    return {"granted": False, "exclusive_device": True,
+                            "device_id": device_id, "lease_id": None,
+                            "request_id": request.id, "state": "cancelled",
+                            "free_bytes": None, "min_free_bytes": min_free_bytes,
+                            "blockers": [], "reason": "caller_gone"}
                 if now >= queue_deadline:
                     if blocker is None:
                         # Free device, earlier arrivals still ahead in line.
@@ -1665,6 +1678,17 @@ class HostBroker:
         try:
             while True:
                 record = self._drive_exclusive(record)
+                if (caller_gone is not None and record["state"] in ("draining", "exclusive")
+                        and caller_gone()):
+                    if record["state"] == "exclusive":
+                        self.exclusive_release(record["lease_id"])
+                        record = self.exclusive_store.get(record["request_id"])
+                    else:
+                        record = self.exclusive_store.fail(
+                            record["request_id"], "caller_gone", self._now())
+                        with self._exclusive_condition:
+                            self._exclusive_condition.notify_all()
+                    return self._exclusive_result(record)
                 if record["state"] in {"exclusive", "released", "failed", "timeout"}:
                     return self._exclusive_result(record)
                 # The record's deadline, which _drive_exclusive extends while
