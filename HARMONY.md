@@ -1374,6 +1374,46 @@ Tests: `node-py/tests/test_placement.py` (default-v1 == fleet_rank order; unknow
 context ignored and logged; each misbehaviour -> default-v1 with a logged reason;
 shadow never acts; replay).
 
+## Speech router on the China relay host (zz-tower2) — runbook (2026-11-04)
+
+openspec `harmony-speech-routing`. The router places speech for relayed phones: phone
+-> zz-tower2-cn relay -> router (loopback) -> best engine. The hub is control plane
+only (tokens + route hints); no audio or transcript is stored by it or by the router.
+
+- **Unit** `harmony-speech-router.service` (systemd USER unit, `ubuntu`, linger on),
+  `NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=strict`, writes only its log dir.
+  Listens **127.0.0.1:8189** (8188 is the existing LLM router, unchanged). Release dirs
+  `~/.local/share/harmony-speech-router/releases/<sha>` (a `git archive` of
+  `node-py/livestack_node` + `examples/harmony-llm`), `current` symlink, own venv (adds
+  `websockets`). Env `~/.config/harmony-speech-router/env`; holds no credential.
+- **Fleet view** from `http://100.64.0.18:8801` (the tower's fleetd), because the
+  zz-tower2 fleetd lists only 3 peers and no polyasr node. A refresher thread
+  (`HARMONY_ROUTER_VIEW_REFRESH_S=5`) keeps it fresh off the request path (the fetch
+  takes 1-6 s over the mesh); a dead broker keeps the last view for `STALE_MAX_S` (300 s).
+- **Relay target** `harmony-asr=http://127.0.0.1:8189` appended to `speechRelayAsrTargets`
+  in `/etc/benchday/relay/regional-relay-zz-tower2-cn.json` (additive: no other target
+  changed). The relay reads it at start only, so applying restarts
+  `benchday-regional-relay` once. `/health` is speech-aware
+  (`HARMONY_ROUTER_HEALTH_KIND=polyasr`: 503 + reason when no engine can serve), so the
+  relay's probe does not advertise a dead door.
+- **Apply / rollback** (both tested 2026-11-04: apply, rollback, re-apply):
+  `~/.local/share/harmony-speech-router/apply.sh` and `rollback.sh [--unit]`. Each waits
+  up to 8 min for `relay-quiet.sh` (no outbound connection from the relay process = no
+  relayed speech/terminal session in flight), then backs the config up to
+  `<cfg>.bak.<UTC timestamp>`, edits ONLY that target (`relay_target.py add|remove`, which
+  never prints a setting), restarts the relay once. If the relay never goes quiet it
+  changes nothing and exits 2. `--unit` also stops and disables the router.
+- **Decision log** `~/.cache/livestack/demand-speech/placement.jsonl` (+ `router-...-routes`):
+  bounded by size x files (32 MB x 4) and a 14-day age window, enforced by
+  `livestack_node.ledger.JsonlLedger` via `DemandLog` (benchday rule 10). It holds the
+  decision (candidates' readiness/load/region, ranking, fallback) and the outcome
+  (success, cause, first-byte/partial/final ms), never audio, transcript or the `start`
+  context (tests: `test_the_decision_log_holds_features_and_outcomes_never_...`,
+  `test_batch_asr_logs_never_hold_...`; checked on the live host with a grep).
+- **Not done yet:** the hub does not emit a `harmony-asr` route (a hub change, release
+  train), so no phone reaches the target yet; TTS has no router mount; histo-one (NA)
+  has no router; tailnet phones still dial engines directly.
+
 ## Regional routing — a view that expires, a target that validates (2026-10-18)
 
 openspec `harmony-regional-llm-routing`. Requests used to take one of two paths:
