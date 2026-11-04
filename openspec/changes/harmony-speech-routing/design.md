@@ -13,7 +13,7 @@ So the answer to "can Harmony route speech cross-host with configuration or a sm
 
 ## Decisions
 
-1. **The router is the placement point; the client is a transport.** A client sends one request to its region's router (`127.0.0.1:8188` on machines that have one; the hub's router for phones) and does nothing about readiness, busy windows or alternates. A phone cannot run a router: it talks to the hub, and the hub's router places (the hub already holds the tailnet reach). The manifest then carries one stable entry (the hub/relay door), not an ordered list of engines.
+1. **The router is the placement point; the client is a transport.** A client sends one request to its region's router (`127.0.0.1:8188` on machines that have one; the hub's router for phones) and does nothing about readiness, busy windows or alternates. A phone cannot run a router, and **the hub is never in the audio path** (see "Where the router sits"): the router runs beside the EXISTING relay the phone already reaches.
 2. **Failover only before the first byte reaches the caller.** Batch ASR: the whole upload is held by the router (bounded by `max_request_bytes`), so a retry replays the same body. Streaming ASR: retry only while the session is still unopened (`start` not yet acknowledged, no audio consumed by a node); after that a drop is the client's `resume` path, which carries `recognizedThroughSeq` and is not placement.
 3. **Busy is not an outage.** A `503` with busy advice marks the target busy in the cached view for the advertised window (clamped 1..300 s, as the client clamps today) and is not counted as a failure of the model; a bare `503` is retried the same way but never labelled busy. Neither is retried against the same target in one request.
 4. **Budget is attempts, not time.** Default 3 attempts, `HARMONY_ROUTER_SPEECH_ATTEMPTS`. Each try is one HTTP round trip to a node that already answers `/health` in milliseconds when busy (the node refuses before loading), so 3 attempts is bounded by 3 RTTs, not by a model load. A node that must load (cold) is expected to say `warming`; the router does not retry across a warm-up.
@@ -27,18 +27,48 @@ So the answer to "can Harmony route speech cross-host with configuration or a sm
 - **Streaming ASR** is `ws://host:port/ws/transcribe`. A router WebSocket mount accepts the client socket, ranks, opens an upstream socket and relays frames; a `1013`/`error` frame before `started` (process_node `refuse()` uses close 1013 + `{"type":"error"}`) triggers re-rank excluding that node. Audio the client sent before the ack is buffered in the router (bounded: the client already spools). The `start`/`resume` messages and sequence numbers are forwarded untouched, so the existing resume protocol keeps working across a router.
 - **TTS** is `/tts/stream` and siblings on polytts, not under `/v1`. Add a `/tts/{path}` router mount mapped to kind `polytts`, with `voice` taken from the JSON body (`voice_id`) and passed as `require=voice:<id>` to the existing inventory match (hostd.py:824); a node that does not advertise the voice is never a candidate.
 
-## Migration: what the benchday client/hub delete once the router places speech
+## Where the router sits: on the relay path, never in the hub (owner correction 2026-11-04)
 
-Prerequisite: the speech traffic of a client flows through a router (own or hub's) and `route_failed` bodies are in production. Then:
+Facts, checked in benchday `origin/dev`:
 
-- `packages/asr_client/lib/src/endpoint_busy.dart` (whole file: `BusyAdvice`, `EndpointBusyBook`, `busyAdviceFromResponse`, `probeBusyAdvice`, `userFacingBusyMessage` moves to rendering `route_failed.attempts[*].result`) and `packages/asr_client/test/endpoint_busy_test.dart`.
-- `packages/asr_client/lib/src/endpoint_health.dart` busy parts: `_noteBusyFromHealth` (:58), `_noteBusy` (:68), `_noteBusyFromConnectError` (:84), `_skipBusy` (:93), and their callers in `asr_client.dart`: field `_busy` + `capacityBusyMessage` (:325-331), `_skipBusy(...)` (:639), `_busy.hasActive` (:647), `_busy.isBusy` deprioritize (:1738), `_noteBusy(ep, busy, 'http_batch')` (:1901), `_noteBusyFromConnectError` (:2106), the `import`/`export` of `endpoint_busy.dart` (:14, :24-25), and `ws_failover.dart:100`.
-- `packages/asr_client/lib/src/batch_post.dart`: the `busy` result field (:36-44) and `busyAdviceFromResponse` call (:150).
-- `lib/providers/asr_provider.dart:1501-1509,1606`: `capacityBusyMessage` and the `cause: capacity_busy` event are derived from the `route_failed` body instead. The hub `asr_outcomes.cause` column (`hub/src/asr-outcomes.ts:34-37,97,144`) **stays**: it is a telemetry cause, now set from the router's reason rather than the client's book.
-- The picker's quarantine/RTT ranking (`asr_client.dart` `_maxFailoverAttempts`, `orderForReachability`, health probes) shrinks to "reach the door" once the manifest carries one entry; delete only after streaming ASR routing lands, because it still serves the WebSocket path.
-- Hub `speech_relay.buildSpeechRouteManifest` + `fleet_rank.ts` ordering + the pushed `fleet_rank` stream become unnecessary once the router is the placement point; remove after the client no longer reads engine order.
+- **Phone ON the tailnet.** The hub manifest gives owners a `direct` route: `ws://<mesh host>:<port>/ws/transcribe` and `http://<host>:<port>/v1/audio/transcriptions` (hub/src/speech_relay.ts:580-600). Audio: phone -> engine, no relay, no hub. The client picks among routes itself (packages/asr_client/lib/asr_client.dart `_ranked`/`pickBest` ~:633-650).
+- **Phone OFF the tailnet (China cellular).** The manifest gives `regional_relay` routes (speech_relay.ts:603-641): `<relay base>/speech/asr/<target>/ws/transcribe?cap=<bdsr1 token>`. Audio: phone -> nearest relay (zz-tower2-cn, `https://tower2.zztech.cc:3389/benchday-relay`, region asia-cn; or hto-histo-na on histo-one for NA: scripts/deploy-regional-relays.sh:55-73) -> engine over the mesh at the relay's configured upstream (`ASR_TARGETS`, hub/src/regional_relay.ts:270, route table :366-370). The relay is a separate process on the edge host; it runs hub code but is not the hub. The hub only mints the token and orders the list.
+- **The hub does hold audio in one place today**: fire-and-forget intents (hub/src/intent-queue/recognize.ts) spool a WAV and POST it to a relay batch route with a hub-minted `speech.asr.batch` cap. That is an existing, separate feature; this change adds no new audio at the hub and the router does not change it. (It does mean "the hub never sees audio" is not true today, and the owner should know.)
+- **Vendor targets** (relay_qwen_asr.ts) send audio from the relay to the vendor; unrelated to this change, listed for completeness.
 
-Order matters: do not delete the client busy book while any speech path (streaming, TTS) is still client-placed.
+Where the router goes:
+
+| Case | Today | After |
+|---|---|---|
+| China phone | phone -> zz-tower2 relay -> one named engine | phone -> zz-tower2 relay -> **router on zz-tower2 (loopback)** -> best engine |
+| NA phone | phone -> histo relay -> one named engine | phone -> histo relay -> **router on histo-one (loopback)** -> best engine |
+| Phone on tailnet | phone -> engine direct | unchanged (client keeps its own failover) until it is given a relay/router route; see below |
+| Hub intent WAV | hub -> relay -> engine | hub -> relay -> router -> engine |
+
+The relay's upstream map gets ONE logical target per region (`harmony-asr`, upstream `http://127.0.0.1:8188`) instead of one entry per engine. The router lives on the same host as the relay, so it adds a loopback hop (about 1 ms) and no round trip to another continent; ranking uses the router's cached fleet view (10 s TTL, bounded stale), not a per-request network call. A hub in Tokyo or LA would add a wrong-continent round trip for a China phone: the hub is not used.
+
+Capability tokens map one to one and need no change: the relay (not the router) is the auth boundary. `speech.asr.stream` -> relay `asr_ws` -> router `/ws/transcribe`; `speech.asr.batch` -> `asr_batch` -> router `/v1/audio/transcriptions`; `speech.asr.health` -> `asr_health` -> router `/health`. The cap names a `targetId` that the relay resolves in its map; with one logical target the hub mints caps for `harmony-asr` per relay. The router binds loopback and holds no credential (existing router rule). `speech.tts.fetch` has no router mount yet (TTS slice).
+
+Gaps to close before any cutover (none implemented here):
+1. **Router health must mean "can serve".** The relay's health probe and `asr_health` call upstream `/health`; today the router answers `ok` regardless of engines. Needed: a speech-aware readiness (`HARMONY_ROUTER_HEALTH_KIND=polyasr` -> 503 + reason when no eligible node).
+2. **Relay WebSocket bridge to the router** must forward `?query` and the `start` frame untouched (the router already does); verify with the relay's e2e lane.
+3. **Routers on the relay hosts**: zz-tower2 already runs one (docs/livestack-harmony.md "Where to point base_url"); histo-one has none. Rolling a router onto histo-one is a deploy decision for the owner; zz-tower2's hostd is not touched.
+4. **Tailnet phones** keep direct routes; the client busy logic therefore stays for them. Either accept that, or give them the relay route (adds a hop for a phone that could go direct).
+
+## Migration (revised): the client's skip/retry logic is deleted only after its traffic goes through a router
+
+Order, each step shippable alone:
+
+1. Land router health (gap 1) and add the `harmony-asr` logical target to the relay maps (hub settings / deploy script), router already on zz-tower2.
+2. Hub manifest: for off-tailnet accounts emit the `harmony-asr` relay route FIRST and keep engine-named routes after it as fallback. Hub change is control-plane only (token + route hint).
+3. Observe: placement log outcomes (success, cause, first_byte/first_partial/final) for the relay path vs the old path.
+4. Only then delete, for the relay path: `endpoint_busy.dart`, `_skipBusy` and the busy book wiring listed below. For a client that still has direct routes (tailnet) the busy book stays; so the deletion is `relay-route-only` code, i.e. effectively nothing can be deleted until tailnet phones also use a router route or the owner accepts their failover being client-side. Deleting is therefore NOT part of this change's first cut.
+
+Files/lines that become deletable once no client route is engine-direct (from `origin/dev` ecbf16cf24): `packages/asr_client/lib/src/endpoint_busy.dart` (whole) and `test/endpoint_busy_test.dart`; `endpoint_health.dart` `_noteBusyFromHealth` (:58), `_noteBusy` (:68), `_noteBusyFromConnectError` (:84), `_skipBusy` (:93); in `asr_client.dart` the `_busy` book and `capacityBusyMessage` (:325-331), `_skipBusy(...)` (:639), `_busy.hasActive` (:647), deprioritize guard (:1738), `_noteBusy` (:1901), `_noteBusyFromConnectError` (:2106), import/export (:14, :24-25); `ws_failover.dart:100`; `batch_post.dart` busy field (:36-44, :150); `lib/providers/asr_provider.dart:1501-1509,1606`. The hub `asr_outcomes.cause` column stays. The hub manifest ordering (`buildSpeechRouteManifest` `orderByRanking`, `fleet_rank.ts`, the pushed rank stream) stays as the fallback ordering for engine-named routes.
+
+## Privacy: what the placement log may hold
+
+The router never parses audio and never puts the WS `start` frame (which carries the `context` string: pane names, recent turns) or any request body into a placement problem. A speech problem's `request` is `{}`; candidates carry fleet node rows (readiness, load, region, inventory such as model names and voice ids); outcomes carry target, success, a short cause, latencies, attempt results. The audio replay buffer (uncommitted WS sessions, <= 4 MiB) lives in router memory only and is dropped at commit or close. Asserted by `test_the_decision_log_holds_features_and_outcomes_never_audio_transcript_or_context` (WS, with failover) and `test_batch_asr_logs_never_hold_the_audio_or_the_form_fields` (HTTP): sentinel audio, context and transcript strings reach the nodes (positive control) and appear in no byte of the real placement or route log files. Residual risk: an engine's own error text is logged as `cause` (truncated to 200 chars); engines do not put content there today, and the cause is for the operator.
 
 ## Open questions for the owner
 
