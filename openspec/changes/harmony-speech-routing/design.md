@@ -45,3 +45,25 @@ Order matters: do not delete the client busy book while any speech path (streami
 1. China-network phone default: Mac Studio via the zz-tower2 relay (Qwen3-ASR on MLX, `streaming: synthetic`, 0.9 s local on a 5 s clip, path from the phone unmeasured) or the tower (Confucius4-R2T2, `streaming: native`, first partial 0.5-1.2 s, but 3.1 s probe and image jobs hold both GPUs for 15-30 min)? Rank by measured distance and let region policy express the preference, or pin a preference per account?
 2. Does "streaming" mean native partials (a hard requirement, which excludes the Mac) or an acceptable synthetic stream (a preference)? Slice 1 states neither.
 3. Is 3 attempts / 30 s default busy window the right budget for dictation, where a second of dead air is felt?
+
+## Placement is a problem, not a function of speech (owner requirement, 2026-11-04)
+
+Everything above is expressed through `placement/v1` (livestack `HARMONY.md`,
+"Placement as a problem"): a versioned `problem {kind, request, candidates[{id, facts, eligible}], context}`
+answered by a pure `Ranker`, selected per kind by config, with `default-v1` (the existing
+`fleet_rank` ordering, unchanged) as the only ranker built. Decisions:
+
+1. **Eligibility is separate from ranking.** `problem_from_fleet` stamps `eligible` +
+   `ineligible_reason` from the hard rules (kind, voice/model clause, region policy,
+   fresh, not leased via `device_busy`). Rankers see only eligible candidates and can
+   only reorder them; illegal output is replaced by the default.
+2. **Never silent.** Exception, timeout (0.25 s), unaccepted schema, unregistered name,
+   garbage -> `default-v1` plus `fallback{from,why}` on the decision and in the log.
+3. **Forward compatible.** Unknown fields ignored by rankers, preserved in the log;
+   namespaced context keys (`net.rtt_ms`, `acct.prefs`); rankers declare accepted schemas.
+4. **Instrumented for learning, nothing learned.** Decision and outcome records in a
+   bounded `DemandLog`; shadow ranker support; `placement.replay` interface with a trivial harness.
+5. **Owner decisions (2026-11-04):** China-phone default = rank by MEASURED distance plus region
+   policy (no per-account preference); native streaming is a PREFERENCE (`asr.streaming=native`
+   in `harmony_prefer`, existing attribute), never a requirement; 3 attempts, busy window = node
+   `Retry-After` clamped 1..300 s.

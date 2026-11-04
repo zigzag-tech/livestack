@@ -42,6 +42,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 import fleet_route as fr  # noqa: E402
+from livestack_node import placement  # noqa: E402
 from fleet_embed import AmbiguousEmbedder, embed_nodes, pick as pick_embed  # noqa: E402
 from request_language import derived_requirements, requirement_from  # noqa: E402
 from livestack_node import request_log as _request_log  # noqa: E402
@@ -207,7 +208,9 @@ async def proxy(path: str, request: Request):
 # TTS are not under /v1 and need a websocket / non-/v1 mount (design: openspec
 # change harmony-speech-routing).
 SPEECH_PATHS = {"audio/transcriptions": "polyasr"}
-SPEECH_ATTEMPTS = int(os.environ.get("HARMONY_ROUTER_SPEECH_ATTEMPTS", "3"))
+# Optional operator override of the placement attempt policy for speech (the
+# policy itself comes from the ranker, clamped: placement.clamp_attempt_policy).
+SPEECH_ATTEMPTS = int(os.environ.get("HARMONY_ROUTER_SPEECH_ATTEMPTS", "0"))
 ROUTABLE = {"chat/completions", "completions", "embeddings", "classifier", *SPEECH_PATHS}
 
 
@@ -300,13 +303,24 @@ async def _route(path: str, request: Request, raw: bytes, ctx: dict):
             timeout=timeout, attempts=attempts,
             on_stale=lambda t: fr.mark_cold(FLEET_URL, t),
             on_busy=lambda t: fr.mark_busy(FLEET_URL, t),
-            max_attempts=SPEECH_ATTEMPTS if speech else 2, retry_unavailable=speech)
+            max_attempts=((SPEECH_ATTEMPTS if speech and SPEECH_ATTEMPTS > 0 else None)
+                          or rec["placement"]["attempt_policy"]["max_attempts"]),
+            retry_unavailable=speech)
     except fr.RouteFailed as e:
+        placement.record_outcome(rec["placement"]["problem_id"], target=None, success=False,
+                                 cause=(e.attempts[-1]["result"] if e.attempts else "no attempt")[:200],
+                                 attempts=e.attempts,
+                                 final_ms=round((time.time() - ctx["t0"]) * 1000, 1))
         # Exhaustion names every try and, when a node advertised a busy window,
         # when to come back: the reason a caller shows, never a bare 503.
         raise HTTPException(
             status_code=e.status, detail={"error": "route_failed", "attempts": e.attempts},
             headers={"Retry-After": str(int(e.retry_after_s))} if e.retry_after_s else None)
+
+    placement.record_outcome(
+        rec["placement"]["problem_id"], target=(attempts[-1]["target"] if attempts else None),
+        success=resp.status_code < 400, cause=None if resp.status_code < 400 else str(resp.status_code),
+        first_byte_ms=round((time.time() - ctx["t0"]) * 1000, 1), attempts=attempts)
 
     async def relay():
         try:

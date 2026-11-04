@@ -4,9 +4,14 @@
 - [x] 1.2 `fleet_route.choose`: the default `class=<kind>` clause applies to `llm`/`embed` only. Verify: same test (a speech node has no `class` attribute and is chosen).
 - [x] 1.3 `fleet_route.send_routed`: `max_attempts`, `retry_unavailable`, `on_busy`; `busy_advice()`; `RouteFailed.retry_after_s`; router sets `Retry-After` on exhaustion. Verify: tests for busy failover, plain 503 failover, exhaustion body + `Retry-After` = shortest window, budget of 3 over 5 busy nodes, no-node message, LLM path unchanged.
 
+## 1b. Placement as a problem (owner requirement)
+
+- [x] 1b.1 `placement.py` (schema, registry, budgeted `run`, fallback, shadow, bounded log, outcomes, replay) and `placement_default.py` (`problem_from_fleet`, `default-v1` over `fleet_rank`); `fleet_route.choose` goes through it; router logs outcomes. Verify: `tests/test_placement.py`, router and rank suites unchanged.
+- [x] 1b.2 HARMONY.md section with two worked examples.
+
 ## 2. Slice 2 — readiness says why (small)
 
-- [ ] 2.1 `process_node.capability()` adds `device_busy`; `hostbroker` view row copies it; `fleet_rank` filters on it with its reason (never the cold fallback). Verify: rank test "only node, leased -> filtered with reason, not chosen".
+- [x] 2.1 `process_node.capability()` adds `device_busy`; `hostbroker` view row copies it; `fleet_rank` filters on it with its reason (never the cold fallback). Verify: rank test "only node, leased -> filtered with reason, not chosen".
 - [ ] 2.2 Optional `X-Harmony-Requires` header on speech requests parsed with `request_language`; `streaming=native|synthetic` as a unit/inventory attribute. Verify: router test narrowing by `streaming`.
 
 ## 3. Slice 3 — streaming ASR and TTS mounts
