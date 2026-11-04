@@ -286,3 +286,127 @@ def test_two_accounts_sharing_a_router_never_see_each_other(wired, monkeypatch):
     assert ra["request_id"] != rb["request_id"]
     dump = json.dumps(routes.rows)
     assert tok_a not in dump and tok_b not in dump           # a credential is never logged
+
+
+# --- speech: one declarative request, the router places and fails over -------
+# (openspec change harmony-speech-routing). A speech node's units declare no
+# `class` attribute, so these also pin that the llm default clause is not applied.
+
+class _SpeechNode:
+    """A polyasr node: answers batch transcription, or 503 device_busy."""
+
+    def __init__(self, busy=False, retry_after="30", bare_503=False):
+        self.got, outer = [], self
+
+        class H(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                n = int(self.headers.get("content-length") or 0)
+                outer.got.append({"raw": self.rfile.read(n), "path": self.path,
+                                  "h": {k.lower(): v for k, v in self.headers.items()}})
+                if busy or bare_503:
+                    out = (b'{"status":"device_busy","detail":"device held exclusively by harmony-image"}'
+                           if busy else b'{"detail":"boom"}')
+                    self.send_response(503)
+                    if busy:
+                        self.send_header("retry-after", retry_after)
+                else:
+                    out = b'{"text":"hello"}'
+                    self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
+
+    def row(self, region="na", in_flight=0):
+        return {"peer": f"{self.base}/livestack", "state": "fresh", "ready": True,
+                "kinds": ["polyasr"], "region": region, "detail": "Harmony process-managed provider",
+                "load": {"in_flight": in_flight},
+                "units": [{"kind": "asr", "resident": True}, {"kind": "align", "resident": False}]}
+
+    def close(self):
+        self.srv.shutdown()
+
+
+@pytest.fixture
+def speech(router, monkeypatch):
+    nodes = []
+
+    def build(*specs):
+        # specs: (SpeechNode kwargs, row kwargs); earlier = lower load = ranked first
+        view = {"generated_at": time.time(), "hosts": {}}
+        for i, (nk, rk) in enumerate(specs):
+            n = _SpeechNode(**nk)
+            nodes.append(n)
+            view["hosts"][f"h{i}"] = {"nodes": [n.row(**rk)]}
+        monkeypatch.setattr(router, "FLEET_URL", "http://fleet.invalid:8801")
+        monkeypatch.setattr(fleet_route, "fleet_view", lambda url, *a, **k: view)
+        monkeypatch.setattr(fleet_route, "mark_busy", lambda *a: None)
+        routes = _Rows()
+        monkeypatch.setattr(router, "ROUTES", routes)
+        monkeypatch.setattr(router, "_PRINCIPALS", None)
+        from fastapi.testclient import TestClient
+        return TestClient(router.app), nodes, routes
+
+    yield build
+    for n in nodes:
+        n.close()
+
+
+_WAV = {"file": ("a.wav", b"RIFFxxxxWAVE", "audio/wav")}
+
+
+def test_a_busy_speech_node_is_failed_over_to_the_next_provider(speech):
+    client, (busy, ok), routes = speech(({"busy": True}, {"in_flight": 0}), ({}, {"in_flight": 1}))
+    r = client.post("/v1/audio/transcriptions", files=_WAV)
+    assert r.status_code == 200 and r.json() == {"text": "hello"}
+    assert len(busy.got) == 1 and len(ok.got) == 1
+    # the audio the second node got is the audio the caller sent
+    assert ok.got[0]["raw"] == busy.got[0]["raw"] and ok.got[0]["path"] == "/v1/audio/transcriptions"
+    attempts = routes.rows[-1]["fleet_route"]["attempts"]
+    assert [a["result"].split(":")[0] for a in attempts] == ["busy", "ok"]
+
+
+def test_a_plain_503_is_also_failed_over_but_not_called_busy(speech):
+    client, (dead, ok), routes = speech(({"bare_503": True}, {"in_flight": 0}), ({}, {"in_flight": 1}))
+    assert client.post("/v1/audio/transcriptions", files=_WAV).status_code == 200
+    assert routes.rows[-1]["fleet_route"]["attempts"][0]["result"].startswith("unavailable")
+
+
+def test_when_no_speech_provider_can_serve_the_reason_and_retry_after_come_back(speech):
+    client, nodes, routes = speech(({"busy": True, "retry_after": "45"}, {"in_flight": 0}),
+                                   ({"busy": True, "retry_after": "20"}, {"in_flight": 1}))
+    r = client.post("/v1/audio/transcriptions", files=_WAV)
+    assert r.status_code == 503 and r.headers["retry-after"] == "20"
+    detail = r.json()["detail"]
+    assert detail["error"] == "route_failed" and len(detail["attempts"]) == 2
+    assert "harmony-image" in detail["attempts"][0]["result"]
+    assert routes.rows[-1]["outcome"] == "refused"
+
+
+def test_the_attempt_budget_is_bounded(speech):
+    client, nodes, _ = speech(*[({"busy": True}, {"in_flight": i}) for i in range(5)])
+    r = client.post("/v1/audio/transcriptions", files=_WAV)
+    assert r.status_code == 503 and sum(len(n.got) for n in nodes) == 3   # HARMONY_ROUTER_SPEECH_ATTEMPTS
+
+
+def test_a_speech_request_with_no_node_says_so(speech):
+    client, _, _ = speech()
+    r = client.post("/v1/audio/transcriptions", files=_WAV)
+    assert r.status_code == 503 and "no polyasr target" in r.text
+
+
+def test_llm_503_is_not_retried_by_the_speech_rule(wired):
+    # the speech retry is opt-in: an llm 503 still reaches the caller untouched
+    client, node, _ = wired
+    r = client.post("/v1/chat/completions", json={"model": "require:class=llm,params_b>=20",
+                                                  "messages": [{"role": "user", "content": "x"}]})
+    assert r.status_code == 200 and len(node.got) == 1

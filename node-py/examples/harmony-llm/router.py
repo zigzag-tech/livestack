@@ -96,7 +96,13 @@ def _principal(request: Request):
 
 
 def _plan(path: str, body):
-    """(requirement, prefer, kind, regions, regions_source) for a request."""
+    """(requirement, prefer, kind) for a request."""
+    if path in SPEECH_PATHS:
+        # A speech request's body is audio (multipart), so the kind comes from
+        # the endpoint, exactly as `embeddings` derives `class=embed`. Nothing
+        # else is asked of the caller: the fleet view already knows readiness,
+        # busy windows, region distance and load.
+        return None, [], SPEECH_PATHS[path]
     requirement, prefer = None, []
     parsed = body if isinstance(body, dict) else {}
     if parsed:
@@ -196,7 +202,13 @@ async def proxy(path: str, request: Request):
 # be a coin toss, so it is refused and named. `/v1/classifier` is routable because
 # its `model` names the ADAPTER it scores with (`jemm`), which is a requirement
 # (`adapter.jemm`) the ranking can match against each node's units.
-ROUTABLE = {"chat/completions", "completions", "embeddings", "classifier"}
+# Speech endpoints the router places across hosts: path -> the fleet node KIND
+# that serves it. Batch ASR only for now; streaming ASR (`/ws/transcribe`) and
+# TTS are not under /v1 and need a websocket / non-/v1 mount (design: openspec
+# change harmony-speech-routing).
+SPEECH_PATHS = {"audio/transcriptions": "polyasr"}
+SPEECH_ATTEMPTS = int(os.environ.get("HARMONY_ROUTER_SPEECH_ATTEMPTS", "3"))
+ROUTABLE = {"chat/completions", "completions", "embeddings", "classifier", *SPEECH_PATHS}
 
 
 async def _route_embeddings(request: Request, raw: bytes, body, requirement, ctx: dict):
@@ -268,6 +280,7 @@ async def _route(path: str, request: Request, raw: bytes, ctx: dict):
                                    + f": {rec.get('reason')}")
     attempts: list = []
     rec["attempts"] = attempts
+    speech = path in SPEECH_PATHS
 
     def rechoose(tried):
         tgt, r = fr.choose(view, requirement, prefer, SELF_BASE, kind=kind,
@@ -285,10 +298,15 @@ async def _route(path: str, request: Request, raw: bytes, ctx: dict):
             router_id=ROUTER_ID, request_id=ctx["request_id"], method=request.method,
             path=path, body=raw, headers=headers, params=dict(request.query_params),
             timeout=timeout, attempts=attempts,
-            on_stale=lambda t: fr.mark_cold(FLEET_URL, t))
+            on_stale=lambda t: fr.mark_cold(FLEET_URL, t),
+            on_busy=lambda t: fr.mark_busy(FLEET_URL, t),
+            max_attempts=SPEECH_ATTEMPTS if speech else 2, retry_unavailable=speech)
     except fr.RouteFailed as e:
-        raise HTTPException(status_code=e.status,
-                            detail={"error": "route_failed", "attempts": e.attempts})
+        # Exhaustion names every try and, when a node advertised a busy window,
+        # when to come back: the reason a caller shows, never a bare 503.
+        raise HTTPException(
+            status_code=e.status, detail={"error": "route_failed", "attempts": e.attempts},
+            headers={"Retry-After": str(int(e.retry_after_s))} if e.retry_after_s else None)
 
     async def relay():
         try:
