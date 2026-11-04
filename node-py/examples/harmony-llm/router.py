@@ -79,13 +79,33 @@ REVISION = _revision()
 _PRINCIPALS = principals_from_env(log=lambda m: print(m, flush=True))
 
 
+# When set (e.g. `polyasr`), /health answers "can this router place that kind NOW":
+# 503 + the ranking's reason when no eligible node exists. A relay probes its
+# upstream's /health to decide whether the target is up; a router that said `ok`
+# with nothing behind it would advertise a dead door.
+HEALTH_KIND = os.environ.get("HARMONY_ROUTER_HEALTH_KIND", "").strip()
+
+
 @app.get("/health")
 def health():
     """Version, region and fleet URL: what a rollout checks. `units` is empty on
     purpose -- peers probing `/health` for a resident unit find nothing here."""
-    return {"status": "ok", "role": "router", "router_id": ROUTER_ID,
+    body = {"status": "ok", "role": "router", "router_id": ROUTER_ID,
             "revision": REVISION, "contract": fr.ROUTE_CONTRACT, "region": REGION or None,
             "fleet_url": FLEET_URL or None, "units": {}}
+    if not HEALTH_KIND:
+        return body
+    body["health_kind"] = HEALTH_KIND
+    view = fr.fleet_view(FLEET_URL) if FLEET_URL else None
+    if view is None:
+        return JSONResponse({**body, "status": "no_fleet_view",
+                             "detail": "no fleet view (unreachable or stale)"}, status_code=503)
+    target, rec = fr.choose(view, None, [], SELF_BASE, kind=HEALTH_KIND)
+    if not target:
+        return JSONResponse({**body, "status": "no_provider", "detail": str(rec.get("reason"))[:300]},
+                            status_code=503)
+    body["providers"] = len(rec.get("targets") or [])
+    return body
 
 
 def _principal(request: Request):

@@ -436,3 +436,17 @@ def test_batch_asr_logs_never_hold_the_audio_or_the_form_fields(speech, router, 
         assert b"SECRET-AUDIO" in ok.got[0]["raw"]          # positive control: it did reach the node
     finally:
         placement.set_decision_log(None)
+
+
+def test_health_is_speech_aware_when_asked(speech, router, monkeypatch):
+    # default: unchanged, ok with no fleet opinion
+    client, nodes, _ = speech(({"busy": True}, {}))
+    assert client.get("/health").status_code == 200
+    monkeypatch.setattr(router, "HEALTH_KIND", "polyasr")
+    r = client.get("/health")                       # a ready node exists: ok, counted
+    assert r.status_code == 200 and r.json()["providers"] == 1
+    client2, _, _ = speech()                        # an empty fleet: not ok, and says why
+    r = client2.get("/health")
+    assert r.status_code == 503 and r.json()["status"] == "no_provider" and "polyasr" in r.json()["detail"]
+    monkeypatch.setattr(fleet_route, "fleet_view", lambda *a, **k: None)
+    assert client2.get("/health").json()["status"] == "no_fleet_view"
