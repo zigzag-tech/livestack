@@ -171,3 +171,14 @@ The incident and the rules are in HARMONY.md, under "A lease holder's work never
 
 Roll back: run `deploy-hangup.sh --rollback` (back to the holder-first hostd and the old gateway), then
 `deploy-holder-first.sh --rollback`.
+
+## Deployed: busy tenant through a drain, boot-id store, heartbeat that rides out a stall (41f7cb4d, 96d0943e, 5f977882), 2026-11-04
+
+These fix the morning's four 503s; see HARMONY.md, "Four 503s in one morning".
+
+- hostd release `busy-tenant-bootid-on-caller-gone`: `caller-gone-on-holder-first` plus 41f7cb4d's `hostbroker.py` hunk and 96d0943e's `device_leases.py` (the boot-id store, previously recorded above as pending). Image gateway release `imagegen-heartbeat-20261104`: `imagegen-hangup-20261103` plus 5f977882's `client.py` hunk.
+- Deployed by `~/.local/share/livestack-releases/deploy-busy-tenant.sh [--rollback]` at 10:57:08 (tower time). The script waited for no active lease and no open :8211/:8227/:8766/:8767 connection; `~/histo-scroll/PAUSE` was set from 10:52 to 10:57. Drop-in backups: `*.before-busy-tenant-*`. polyasr restarted with hostd.
+- Before the switch, the tests ran on the tower with its venvs. hostd: 42 passed, including every boot-id test and the new busy-tenant test. The one failure was the end-to-end cancel test, whose client half is in the gateway release. Gateway: 87 passed, including the new heartbeat test.
+- After the switch, the chain's next take (10:58) holds both leases (rows 319/320), stamped with the tower's real boot id `7b2eab2d-…`. A same-boot open of the store by any main-code process is now harmless.
+
+Roll back: `deploy-busy-tenant.sh --rollback` (back to `caller-gone-on-holder-first` and `imagegen-hangup-20261103`).
