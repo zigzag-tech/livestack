@@ -62,6 +62,7 @@ class StreamsRuntime:
         self._identity_connect_task: Optional[asyncio.Task] = None
         self._job_last: Dict[str, Tuple[str, int]] = {}
         self.fleet_published = 0
+        self.fleet_rank_shadowed = False
         self._publish_lock = None
         self._last_publish_at: Optional[float] = None
 
@@ -321,18 +322,29 @@ class StreamsRuntime:
             try:
                 body = fleet_rank_stream.ranking_body(fleet, triple, now_s)
             except fleet_rank_stream.RankingFailure as error:
+                if error.code == "fleet_rank_empty":
+                    self.log(f"streams: {FLEET_RANK} {triple[0]}:{triple[1]}={triple[2]} removed ({error.code})")
+                    await self._publish_fleet_rank_state(
+                        subject, "ok", fleet_rank_stream.removal_body(triple, "no_targets"))
+                    continue
                 await self._publish_fleet_rank_failure(triple, error)
                 continue
-            ack = await self.publish_state(FLEET_RANK, subject, "ok", body)
-            if ack.get("shadowed"):
-                raise RuntimeError("harmony.fleet-rank/1 source is shadowed")
+            await self._publish_fleet_rank_state(subject, "ok", body)
+
+    async def _publish_fleet_rank_state(self, subject: dict, status: str, body: Optional[dict],
+                                        error: Optional[dict] = None) -> dict:
+        ack = await self.publish_state(FLEET_RANK, subject, status, body, error)
+        shadowed = ack.get("shadowed") is True
+        if shadowed and not self.fleet_rank_shadowed:
+            self.log(f"streams: {FLEET_RANK} is in shadow (compared with the adapter, not served)")
+        self.fleet_rank_shadowed = shadowed
+        return ack
 
     async def _publish_fleet_rank_failure(self, triple: Tuple[str, str, str],
                                           failure: fleet_rank_stream.RankingFailure) -> None:
         self.log(f"streams: {FLEET_RANK} {triple[0]}:{triple[1]}={triple[2]} failed "
                  f"({failure.code}: {failure.detail})")
-        await self.publish_state(
-            FLEET_RANK,
+        await self._publish_fleet_rank_state(
             {"kind": triple[0], "region": triple[1], "vantage": triple[2]},
             "failed", None, {"code": failure.code, "detail": failure.detail},
         )
