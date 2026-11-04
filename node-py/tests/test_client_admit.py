@@ -5,6 +5,7 @@ never in the body, which is logged, proxied and pasted into bug reports.
 """
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -262,8 +263,33 @@ def test_heartbeat_transport_failure_surfaces(monkeypatch):
     calls = _fake_dial(monkeypatch, handler)
     with pytest.raises(LeaseLost, match="heartbeat failed"):
         with exclusive_lease("llm", device_id="host/gpu0", min_free_bytes=0,
-                             brokers=["http://broker"], heartbeat_interval=0.01):
+                             brokers=["http://broker"], heartbeat_interval=0.01,
+                             ttl_seconds=0.05):
             assert heartbeat_seen.wait(1)
+            time.sleep(0.2)                     # past the TTL with no beat accepted
+    assert calls[-1]["path"].endswith("/release")
+
+
+def test_a_missed_heartbeat_within_the_ttl_is_not_a_lost_lease(monkeypatch):
+    # xc-tower-ubuntu, 2026-11-04: one beat timed out in a hostd stall and a
+    # finished 30 min job was answered 503 although its lease never lapsed.
+    beats = []
+
+    def handler(call):
+        if call["path"] == "/admit":
+            return _exclusive_grant(call)
+        if call["path"].endswith("/heartbeat"):
+            beats.append(call)
+            return TimeoutError("timed out") if len(beats) == 1 else {"ok": True}
+        return {"ok": True}
+
+    calls = _fake_dial(monkeypatch, handler)
+    with exclusive_lease("llm", device_id="host/gpu0", min_free_bytes=0,
+                         brokers=["http://broker"], heartbeat_interval=0.01, ttl_seconds=60):
+        deadline = time.monotonic() + 2
+        while len(beats) < 3 and time.monotonic() < deadline:
+            time.sleep(0.01)
+    assert len(beats) >= 3
     assert calls[-1]["path"].endswith("/release")
 
 
