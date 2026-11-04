@@ -1295,6 +1295,77 @@ hardware for a unit with no samples yet; the scheduler (`choose_target`)
 weighing throughput. (The host-RAM ledger the first version of this list named
 is the next section.)
 
+## Placement as a problem — a pluggable ranker behind `placement/v1` (2026-11-04)
+
+openspec `harmony-speech-routing`. "Which candidate serves this request" is stated
+as DATA and answered by a pure function, so a smarter ranker (learned, neural,
+LLM-based, a world model) can be registered and selected by config later. None is
+built: one deterministic ranker, `default-v1`, answers every kind today.
+
+```
+problem  = {schema:"placement/v1", problem_id, ts, kind, request{}, context{},
+            candidates:[{id, facts{}, eligible, ineligible_reason?}]}
+ranking  = {ranking:[{id, score, explain{}}], attempt_policy?{max_attempts,
+            per_attempt_timeout_s, retry_after{min_s,max_s}}}
+decision = {problem_id, ranker, ranking, chosen, attempt_policy, fallback, shadow}
+Ranker   = Callable[[problem], ranking]            # pure; register("name@ver", fn, accepts=("placement/v1",))
+```
+
+Code: `livestack_node/placement.py` (types, registry, `run`, log, replay),
+`placement_default.py` (the fleet problem builder and `default-v1`, an adapter over
+`fleet_rank.rank`, which is unchanged and is the regression baseline), wired in
+`examples/harmony-llm/fleet_route.choose` so the router, and every caller of
+`choose`, goes through it. `kind` selects which facts apply (`polyasr`, `polytts`,
+`llm`, `embed`; a workload-to-worker placement is just another `kind`).
+
+- **Hard constraints are not the ranker's.** Eligibility (serves the kind/voice/model,
+  region policy, ready, not leased: `device_busy`, fresh, not held back) is stamped on
+  each candidate BEFORE ranking with the rule that decided it. A ranker orders and
+  scores only the eligible; a ranking naming an ineligible, unknown or repeated id is
+  illegal and is replaced by `default-v1`.
+- **A ranker has a hard budget** (`HARMONY_PLACEMENT_BUDGET_S`, default 0.25 s).
+  Exception, timeout, schema it does not accept, unregistered name, malformed or
+  illegal output -> `default-v1`, with `decision.fallback = {from, why}` and the same
+  in the log. A ranker may propose an `attempt_policy`; bounds are ours
+  (1..5 attempts, `Retry-After` clamped 1..300 s).
+- **Forward compatible.** Rankers ignore unknown fields/facts/context; the log keeps
+  them. Add context under a namespaced key (`net.rtt_ms`, `acct.prefs`); a ranker
+  states the schemas it accepts, and a problem of another version goes to the default.
+- **Config, not code.** `HARMONY_PLACEMENT_RANKERS='{"polyasr":"my-ranker@1","*":"default-v1"}'`
+  selects per kind; `HARMONY_PLACEMENT_SHADOW='{"polyasr":"candidate@2"}'` runs a
+  second ranker on the same problem, logs both rankings, and never acts on it.
+- **Learning-ready log, no learning.** Every decision (`event:"decision"`: the
+  problem as the ranker saw it, ranker@version, ranking, shadow, chosen, fallback)
+  and its outcome (`event:"outcome"`: success, cause, first_byte/first_partial/final
+  ms, attempts; unknown is null) go to the placement log, a `demand_log.DemandLog`.
+  **Bound and enforcer:** size x files rotation + an age window
+  (`HARMONY_DEMAND_LOG_MAX_MB`, `_FILES`, `_AGE_DAYS`; unset age disables the log, it
+  never means keep forever), enforced by `JsonlLedger`; each record is capped at 64 KiB
+  (`problem_truncated`); writes are off the request path and drops are counted.
+  `placement.replay(records, ranker)` is the offline interface: it feeds logged
+  problems to a ranker and reports whether it put the target that actually succeeded
+  first. Counterfactual evaluation is deliberately not built.
+
+**Worked example 1 — a new context feature.** Measured RTT per client region:
+the problem builder adds `context["net.rtt_ms"] = {target_id: ms}`. `default-v1`
+ignores it (and the log keeps it); a ranker that wants it reads
+`problem["context"].get("net.rtt_ms")`. Nothing else changes.
+
+**Worked example 2 — a new ranker.**
+
+```python
+from livestack_node import placement
+def by_rtt(problem):
+    rtt = problem["context"].get("net.rtt_ms") or {}
+    order = sorted(placement.eligible_ids(problem), key=lambda i: rtt.get(i, 1e9))
+    return {"ranking": [{"id": i, "score": -rtt.get(i, 1e9), "explain": {"net.rtt_ms": rtt.get(i)}} for i in order]}
+placement.register("rtt@1", by_rtt)      # then HARMONY_PLACEMENT_SHADOW first, RANKERS once replay agrees
+```
+
+Tests: `node-py/tests/test_placement.py` (default-v1 == fleet_rank order; unknown
+context ignored and logged; each misbehaviour -> default-v1 with a logged reason;
+shadow never acts; replay).
+
 ## Regional routing — a view that expires, a target that validates (2026-10-18)
 
 openspec `harmony-regional-llm-routing`. Requests used to take one of two paths:

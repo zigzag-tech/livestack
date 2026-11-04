@@ -37,7 +37,8 @@ from typing import Callable, NamedTuple, Optional
 
 import httpx
 
-from livestack_node.fleet_rank import rank
+from livestack_node import placement
+from livestack_node.placement_default import problem_from_fleet
 
 # Kinds whose units declare a `class` attribute, so "class=<kind>" is a real
 # default requirement. Anything else (speech: polyasr, polytts) ranks on kind alone.
@@ -222,22 +223,20 @@ def choose(view: dict, require: "dict | None", prefer: list, self_base: str,
     `exclude` drops targets a first attempt already failed against."""
     tokens = expected_tokens or DEFAULT_EXPECTED_TOKENS
     vantage = vantage or node_vantage()
-    if exclude:
-        drop = {e.rstrip("/") for e in exclude}
-        view = {**view, "hosts": {
-            hid: {**h, "nodes": [n for n in h.get("nodes") or []
-                                 if str(n.get("peer") or "").rsplit("/livestack", 1)[0].rstrip("/")
-                                 not in drop]}
-            for hid, h in (view.get("hosts") or {}).items()}}
     # `class` is an LLM/embed unit attribute. A speech node's units (`asr`,
     # `align`) declare none, so defaulting the clause there would filter every
     # speech node as "no unit satisfies class=polyasr".
-    result = rank(view, kind, vantage=vantage,
-                  require=require or ({"class": kind} if kind in CLASS_KINDS else None),
-                  prefer=prefer, now=now, expected_tokens=tokens,
-                  allow_regions=regions)
-    chosen = result.get("chosen")
-    targets = result.get("targets") or []
+    require = require or ({"class": kind} if kind in CLASS_KINDS else None)
+    # Eligibility (hard) is stamped by the problem builder; ordering (soft) is the
+    # configured ranker's, falling back to default-v1 (livestack_node.placement).
+    problem, result = problem_from_fleet(view, kind, vantage=vantage, require=require,
+                                         prefer=prefer, regions=regions, expected_tokens=tokens,
+                                         exclude=exclude, now=now)
+    decision = placement.run(problem)
+    by_id = {t["target_id"]: t for t in result.get("targets") or []}
+    targets = [{**by_id[r["id"]], "rank": i + 1} if r["id"] in by_id else {"target_id": r["id"], "rank": i + 1}
+               for i, r in enumerate(decision["ranking"])]
+    chosen = decision["chosen"]
     top = targets[0] if targets else {}
     record = {
         "chosen": chosen,
@@ -259,6 +258,9 @@ def choose(view: dict, require: "dict | None", prefer: list, self_base: str,
                      for c in result.get("candidates") or []
                      if getattr(c, "outcome", "") == "filtered"
                      and not c.reason.startswith("filtered: does not host")],
+        "placement": {"problem_id": decision["problem_id"], "ranker": decision["ranker"],
+                      "fallback": decision["fallback"], "shadow": decision["shadow"],
+                      "attempt_policy": decision["attempt_policy"]},
     }
     if not chosen or _same(chosen, self_base):
         return None, record

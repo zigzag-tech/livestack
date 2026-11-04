@@ -27,3 +27,23 @@ When no provider can serve a speech request the router SHALL answer `503 {"error
 #### Scenario: Every provider is busy
 - **WHEN** two nodes answer busy with `Retry-After` 45 and 20
 - **THEN** the response is `503`, `Retry-After: 20`, and both attempts carry the planner's reason
+
+### Requirement: Placement is a versioned problem answered by a pluggable ranker
+
+Placement SHALL be expressed as a `placement/v1` problem (kind, request, candidates with open-ended `facts` and an `eligible` stamp, open-ended `context`) and answered by a pure ranker selected per kind by configuration. Eligibility SHALL be decided before ranking and a ranker SHALL NOT make an ineligible candidate eligible. The deterministic default `default-v1` SHALL be the existing `fleet_rank` ordering. A ranker that raises, exceeds its time budget, does not accept the schema, is unregistered, or returns an illegal ranking SHALL be replaced by `default-v1` and the reason SHALL be recorded on the decision and in the log. Unknown fields SHALL be ignored by rankers and preserved in the log.
+
+#### Scenario: A ranker resurrects an ineligible candidate
+- **WHEN** a configured ranker returns a leased node
+- **THEN** the decision uses `default-v1`, `fallback.why` says the id is ineligible, and the log row carries it
+
+#### Scenario: Shadow ranker
+- **WHEN** a shadow ranker is configured for a kind
+- **THEN** both rankings and the observed outcome are logged and only the live ranker's choice is acted on
+
+### Requirement: Every placement decision and its outcome is recorded in a bounded store
+
+Each decision (problem as given, ranker name@version, ranking, shadow, chosen, fallback) and its outcome (success, cause, first-byte/first-partial/final latency, attempts; unknown is null) SHALL be written to a size-, file-count- and age-bounded log that is disabled when no age window is set and never blocks the request path.
+
+#### Scenario: Offline replay
+- **WHEN** logged problems are fed to a candidate ranker
+- **THEN** the harness reports whether it ranked the target that actually succeeded first, counting illegal output separately
