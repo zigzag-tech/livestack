@@ -179,7 +179,6 @@ def test_optional_capability_locality_and_route_profile_enter_the_digest_only_wh
 
 
 @pytest.mark.parametrize('field,value,reason', [
-    ('capabilities', [], 'handler_manifest_invalid_capabilities'),
     ('capabilities', ['b', 'a'], 'handler_manifest_noncanonical_capabilities'),
     ('capabilities', ['a', 'a'], 'handler_manifest_noncanonical_capabilities'),
     ('capabilities', ['Bad Cap'], 'handler_manifest_invalid_capability'),
@@ -192,3 +191,9 @@ def test_invalid_capability_locality_or_route_profile_is_refused_by_name(source,
     manifest = {**build(source, tmp_path)['manifest'], field: value}
     with pytest.raises(WorkloadError, match=reason):
         validate_manifest(manifest)
+
+
+def test_an_empty_capability_declaration_is_distinct_from_an_absent_one(source, tmp_path):
+    none_declared = build_release_package(source, tmp_path/'none', **FIELDS, capabilities=[])
+    assert none_declared['manifest']['capabilities'] == []
+    assert none_declared['release_digest'] != FIXTURE_DIGEST
