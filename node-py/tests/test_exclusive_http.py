@@ -416,3 +416,50 @@ def test_http_lease_holders_own_admission_never_yields_to_exclusive_waiters(
     assert ("warm", "alpha") in alpha.calls
     # The waiter still gets the device once the holder is done.
     assert later["granted"] is True and later["request_id"] == "flux-2", later
+
+
+def test_http_a_busy_tenants_own_admission_passes_the_drain_waiting_for_it(
+        tmp_path, monkeypatch):
+    # xc-tower-ubuntu, 2026-11-04: drama3 counted a TTS job as in flight from
+    # the moment it accepted it, then asked hostd to run it. A FLUX drain of
+    # the card waited on that `busy` while fencing the card against the very
+    # admission that would end it: 118 refusals in 59 min, both GPUs idle.
+    import time
+
+    from livestack_node import hostd
+
+    monkeypatch.setenv("LIVESTACK_LEDGER_DIR", str(tmp_path))
+    monkeypatch.setenv("LIVESTACK_REPLAN_INTERVAL", "0")
+    monkeypatch.setattr(hostd, "ADMIT_WAIT_POLL_S", 0.02)
+
+    class _Tenant(_Peer):
+        busy = True
+
+        def placements(self):
+            return ([Placement(self.unit.kind, self.device_id, loaded_at=0.0, busy=self.busy)]
+                    if self._resident else [])
+
+    tts = _Tenant("http://tts", "tts")
+    beta = _Peer("http://beta", "beta", resident=False)
+    broker = _broker([_Peer("http://alpha", "alpha", resident=False), tts, beta], time.monotonic)
+    broker.grant_hold_s = 0.2
+    app = build_app(broker)
+
+    async def exercise():
+        async with _client(app) as client:
+            flux = asyncio.create_task(client.post(
+                "/admit", json={**_exclusive_body("flux"), "wait_s": 8}))
+            await asyncio.sleep(0.3)
+            assert broker.exclusive_store.get("flux")["state"] == "draining"
+            speech = (await client.post("/admit", json={
+                "id": "tts-job", "kind": "tts", "owner": "voice"})).json()
+            other = (await client.post("/admit", json={
+                "id": "beta-job", "kind": "beta", "owner": "someone"})).json()
+            tts.busy = False                      # the job ran and finished
+            return speech, other, (await flux).json()
+
+    speech, other, flux = asyncio.run(exercise())
+    assert speech["granted"] is True and speech["device_id"] == "gpu0"
+    assert other["granted"] is False          # the fence still holds for everyone else
+    assert ("warm", "beta") not in beta.calls
+    assert flux["granted"] is True and ("evict", "tts") in tts.calls
