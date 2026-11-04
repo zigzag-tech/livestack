@@ -450,3 +450,32 @@ def test_health_is_speech_aware_when_asked(speech, router, monkeypatch):
     assert r.status_code == 503 and r.json()["status"] == "no_provider" and "polyasr" in r.json()["detail"]
     monkeypatch.setattr(fleet_route, "fleet_view", lambda *a, **k: None)
     assert client2.get("/health").json()["status"] == "no_fleet_view"
+
+
+def test_a_background_refresher_keeps_the_view_fresh_so_requests_never_fetch(router):
+    srv_view = {"generated_at": 1.0, "hosts": {"h": {"nodes": []}}}
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            out = json.dumps(srv_view).encode()
+            self.send_response(200)
+            self.send_header("content-length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}"
+    stop = fleet_route.start_refresher(url, every_s=0.05, timeout_s=2)
+    try:
+        deadline = time.time() + 3
+        while fleet_route.view_age_s(url) is None and time.time() < deadline:
+            time.sleep(0.02)
+        assert fleet_route.view_age_s(url) is not None
+        srv.shutdown()                          # broker gone: the last good view still serves
+        assert fleet_route.fleet_view(url) is not None
+    finally:
+        stop.set()

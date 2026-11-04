@@ -135,6 +135,31 @@ def fleet_view(url: str, timeout: float = 3.0, stale_max_s: "float | None" = Non
     return view
 
 
+def start_refresher(url: str, every_s: float = 5.0, timeout_s: float = 10.0):
+    """Keep the cached view for `url` fresh from a background thread, so a request
+    never waits on the fleet broker. A router far from its broker (zz-tower2 ->
+    the tower's fleetd: 1-6 s over the mesh) otherwise blocks its event loop on
+    `fleet_view`'s synchronous GET every `_VIEW_TTL_S`, stalling every relayed
+    audio stream. A failed refresh keeps the last good view (bounded by
+    STALE_MAX_S, exactly as `fleet_view` does)."""
+    stop = threading.Event()
+
+    def loop():
+        while not stop.is_set():
+            try:
+                view = httpx.get(f"{url.rstrip('/')}/fleet", timeout=timeout_s).json()
+                if isinstance(view, dict) and isinstance(view.get("hosts"), dict):
+                    with _lock:
+                        _cache[url] = (time.time(), view)
+            except Exception:
+                pass
+            stop.wait(every_s)
+
+    t = threading.Thread(target=loop, name="fleet-view-refresher", daemon=True)
+    t.start()
+    return stop
+
+
 def view_age_s(url: str) -> "float | None":
     """Seconds since the cached view for `url` was fetched."""
     with _lock:
