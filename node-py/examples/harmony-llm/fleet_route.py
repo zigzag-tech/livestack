@@ -39,6 +39,9 @@ import httpx
 
 from livestack_node.fleet_rank import rank
 
+# Kinds whose units declare a `class` attribute, so "class=<kind>" is a real
+# default requirement. Anything else (speech: polyasr, polytts) ranks on kind alone.
+CLASS_KINDS = frozenset({"llm", "embed"})
 SPEED_METRICS = frozenset({"llm.decode_tok_s", "llm.first_token_ms"})
 # Set on a request this routing already placed. The receiver must not route it
 # again: two nodes with different views could otherwise bounce it.
@@ -158,6 +161,42 @@ def mark_cold(url: str, target_id: str) -> None:
         _cache[url] = (hit[0], view)
 
 
+def mark_busy(url: str, target_id: str) -> None:
+    """A target refused because its device is held (503 + advice): drop it from
+    the cached view until the next refresh, so the next request does not go
+    straight back to it. Same mechanism as `mark_cold`; the view's own TTL (10 s)
+    bounds how long a wrong mark can last."""
+    mark_cold(url, target_id)
+
+
+def busy_advice(status: int, headers, raw: bytes) -> "tuple[bool, str, float | None]":
+    """(is_busy, reason, retry_after_s) for a refusal a speech node sent.
+
+    Only a 503 qualifies. `is_busy` when the body says `device_busy`, a
+    `Retry-After` is present, or the facade's refusal text ("did not grant this
+    device") says the planner declined; a bare 503 is still `(False, ..)` and is
+    retried as an outage, not a busy window. `retry_after_s` is clamped to 1..300
+    so a hostile node cannot park a route."""
+    if status != 503:
+        return False, "", None
+    status_word, detail = "", ""
+    try:
+        doc = json.loads(raw or b"{}")
+        if isinstance(doc, dict):
+            status_word = str(doc.get("status") or "")
+            detail = str(doc.get("detail") or "")
+    except Exception:
+        pass
+    ra = headers.get("retry-after") if headers is not None else None
+    try:
+        retry_after = max(1.0, min(300.0, float(str(ra).strip()))) if ra is not None else None
+    except ValueError:
+        retry_after = 30.0
+    busy = (status_word == "device_busy" or ra is not None
+            or "did not grant this device" in detail)
+    return busy, (detail or status_word or "device busy")[:200], retry_after
+
+
 def node_vantage() -> str:
     """The caller's position as the ranker names it: `region:<LIVESTACK_NODE_REGION>`
     on a regional node or router, else the broker's own ("direct"). The ranking
@@ -190,7 +229,11 @@ def choose(view: dict, require: "dict | None", prefer: list, self_base: str,
                                  if str(n.get("peer") or "").rsplit("/livestack", 1)[0].rstrip("/")
                                  not in drop]}
             for hid, h in (view.get("hosts") or {}).items()}}
-    result = rank(view, kind, vantage=vantage, require=require or {"class": kind},
+    # `class` is an LLM/embed unit attribute. A speech node's units (`asr`,
+    # `align`) declare none, so defaulting the clause there would filter every
+    # speech node as "no unit satisfies class=polyasr".
+    result = rank(view, kind, vantage=vantage,
+                  require=require or ({"class": kind} if kind in CLASS_KINDS else None),
                   prefer=prefer, now=now, expected_tokens=tokens,
                   allow_regions=regions)
     chosen = result.get("chosen")
@@ -226,15 +269,17 @@ class RouteFailed(Exception):
     """Both attempts (or the only one) were refused; `status` is what the caller
     gets and `attempts` is everything that was tried."""
 
-    def __init__(self, status: int, attempts: list):
-        self.status, self.attempts = status, attempts
+    def __init__(self, status: int, attempts: list, retry_after_s: "float | None" = None):
+        self.status, self.attempts, self.retry_after_s = status, attempts, retry_after_s
         super().__init__(json.dumps({"error": "route_failed", "attempts": attempts}))
 
 
 async def send_routed(*, first: "tuple[str, str]", rechoose: "Callable[[list], tuple[Optional[str], str]]",
                       router_id: str, request_id: str, method: str, path: str, body: bytes,
                       headers: dict, params: dict, timeout, attempts: list,
-                      on_stale: "Callable[[str], None] | None" = None):
+                      on_stale: "Callable[[str], None] | None" = None,
+                      max_attempts: int = 2, retry_unavailable: bool = False,
+                      on_busy: "Callable[[str], None] | None" = None):
     """Forward to `first = (target base, expect)`; on a refusal that costs no
     caller-visible byte -- `409 route_stale`, a connection failure before the
     response, or `429` -- ask `rechoose(excluded targets)` once and try the one
@@ -244,10 +289,17 @@ async def send_routed(*, first: "tuple[str, str]", rechoose: "Callable[[list], t
     byte reaches the caller (nothing here streams), so a retry cannot replay a
     half-delivered answer.
 
+    `max_attempts` bounds the tries (default 2). `retry_unavailable` (speech)
+    also treats a pre-byte `503` as a refusal to fail over from: `busy: <reason>`
+    when it carries busy advice (`busy_advice`), `unavailable` otherwise. A busy
+    target is dropped from the cached view via `on_busy`. `RouteFailed.retry_after_s`
+    is the shortest advertised busy window, for the caller's `Retry-After`.
+
     `attempts` is appended in place: `{target, expect, result}` per try."""
     tried: list = []
+    retry_after_s: "float | None" = None
     target, expect = first
-    for attempt in range(2):
+    for attempt in range(max_attempts):
         tried.append(target)
         hdrs = {**headers, ROUTED_HEADER: format_routed(router_id, expect),
                 "x-request-id": request_id}
@@ -274,6 +326,14 @@ async def send_routed(*, first: "tuple[str, str]", rechoose: "Callable[[list], t
                     # answer, not a stale view: hand it back untouched.
                     attempts.append({"target": target, "expect": expect, "result": "409"})
                     return _Replay(resp.status_code, resp.headers, raw), client
+            elif retry_unavailable and resp.status_code == 503:
+                raw = await resp.aread()
+                busy, why, ra = busy_advice(503, resp.headers, raw)
+                refused, status = (f"busy: {why}" if busy else f"unavailable: {why}"), 503
+                if busy and on_busy:
+                    on_busy(target)
+                if ra is not None:
+                    retry_after_s = ra if retry_after_s is None else min(retry_after_s, ra)
             if refused is None:
                 attempts.append({"target": target, "expect": expect, "result": "ok"})
                 return resp, client
@@ -282,7 +342,7 @@ async def send_routed(*, first: "tuple[str, str]", rechoose: "Callable[[list], t
             refused, status = f"{type(e).__name__}: {e or '(no message)'}", 502
         await client.aclose()
         attempts.append({"target": target, "expect": expect, "result": refused})
-        if attempt == 1:
+        if attempt == max_attempts - 1:
             break
         nxt, nxt_expect = rechoose(list(tried))
         if not nxt:
@@ -312,7 +372,7 @@ async def send_routed(*, first: "tuple[str, str]", rechoose: "Callable[[list], t
             attempts.append({"target": first_target, "expect": "cold",
                              "result": f"{type(e).__name__}: {e or '(no message)'}"})
             status = 502
-    raise RouteFailed(status, attempts)
+    raise RouteFailed(status, attempts, retry_after_s)
 
 
 class _Replay:
