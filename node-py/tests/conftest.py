@@ -25,6 +25,17 @@ os.environ.setdefault("LIVESTACK_HOST_LEDGER_DIR",
 os.environ.setdefault("HARMONY_UNIT_LOADS_FILE", os.path.join(
     _tempfile.mkdtemp(prefix="livestack-test-unit-loads-"), "unit-loads.jsonl"))
 
+# And for hostd's ledger dir (decision ledgers and the exclusive-device lease
+# store, device-exclusivity.sqlite3): seven test files build the hostd app
+# without setting it, so on a production host they opened the LIVE lease store.
+# With the boot-id store (96d0943e) that open releases every active lease as
+# `previous_boot`, and a test broker's reconcile can drive the live rows too.
+# Observed 2026-11-04 on xc-tower-ubuntu: an agent's `pytest tests` killed the
+# history-scroll chain's FLUX leases at 10:27 and 10:31. Tests that need a
+# specific dir still monkeypatch it.
+os.environ.setdefault("LIVESTACK_LEDGER_DIR",
+                      _tempfile.mkdtemp(prefix="livestack-test-ledger-"))
+
 # The harmony-llm ENGINE package lives beside the server it drives
 # (examples/harmony-llm/engines/). Engine-adapter tests import it directly, and
 # the server itself bootstraps the same path when it is exec'd by file location.
