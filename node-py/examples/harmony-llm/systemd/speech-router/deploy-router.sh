@@ -16,7 +16,7 @@ DRY=${DRY_RUN:-0}
 rev=$(git -C "$SRC" rev-parse --verify --short=8 "$rev_in^{commit}")
 R=$B/releases/$rev
 if [ -d "$R" ]; then echo "release $rev already present"; else
-  tmp=$(mktemp -d "$B/releases/.new.XXXXXX"); mkdir -p "$B/releases"
+  mkdir -p "$B/releases"; tmp=$(mktemp -d "$B/releases/.new.XXXXXX")
   git -C "$SRC" archive "$rev" node-py/livestack_node node-py/examples | tar -x -C "$tmp"
   mv "$tmp" "$R"; echo "release $rev extracted"
 fi
