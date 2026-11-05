@@ -1414,6 +1414,28 @@ only (tokens + route hints); no audio or transcript is stored by it or by the ro
   the env example (HARMONY_ROUTER_REV is the release sha), `apply.sh`, `rollback.sh`, `relay-quiet.sh` and
   `relay_target.py` exactly as installed on zz-tower2 (copy the scripts to
   `~/.local/share/harmony-speech-router/`).
+- **Client-facing errors (benchday-nodes A.6).** Speech answers (`/v1/audio/transcriptions`,
+  `/ws/transcribe`) and, with `HARMONY_ROUTER_PUBLIC_ERRORS=1` (set in the speech env), every
+  path speak a fixed vocabulary: `unauthorized` 401, `rate_limited` 429, `too_large` 413,
+  `bad_request` 400, `unavailable` 503, as `{"error": <code>, "request_id": <id>}` and an
+  `x-request-id` header. `unavailable` always carries `Retry-After` (the shortest advertised
+  busy window, clamped 1..300 s, else 30). An engine's own 4xx/5xx is mapped, never passed
+  through; success responses keep only `content-type`/`content-encoding`/`cache-control`.
+  uvicorn runs with `server_header=False`; no `X-Harmony-*` is ever set toward the client side.
+  WebSocket: error frame `{"type":"error","error":<code>,"requestId":…,"retryAfterS":30}` then
+  close `1013 unavailable` (post-admission upstream failure: `1011 unavailable`; `1000/1001`
+  pass). `/harmony/route` answers `bad_request` and `/health` drops `detail` on a public router.
+  **Diagnosis:** the cause (engine ids, device_busy reasons, hosts, attempt list) is logged as one
+  JSON line `{"event":"router_public_error","request_id",...,"detail"}` to the router's stdout
+  (journal) and stays in the route/decision records; find a failure by the id the client holds
+  (`journalctl --user -u harmony-speech-router | grep <request_id>`). A caller's `X-Request-Id`
+  is honoured only if it matches `[A-Za-z0-9._-]{1,64}`.
+  **Relay contract (meshlink):** the router is not the last hop. The relay must still answer the
+  phone from its own vocabulary and header allow-list (A.5) and must not forward the router's
+  `request_id` as anything but an opaque log correlator; WS frames other than `error` (`started`,
+  `partial`, `final`) are node protocol and pass through unmodified, so the relay owns scrubbing
+  any engine-identifying field there. Tests: `test_harmony_router.py` (leak test with seeded
+  engine/host/device strings and a positive control) and `test_harmony_router_ws.py`.
 - **A relay deploy drops the target.** benchday's `scripts/deploy-regional-relays.sh` regenerates
   `regional-relay-zz-tower2-cn.json` from its own node table, which does not list `harmony-asr`, and
   restarts the relay without a quiet check. After any relay deploy run `apply.sh` again
