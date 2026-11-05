@@ -57,6 +57,11 @@ class FakeNode:
                         await ws.send(json.dumps({"type": "error", "error": "Harmony did not grant this device: held by image"}))
                         await ws.close(code=1013, reason="busy")
                         return
+                elif isinstance(m, bytes) and self.mode == "errlate":
+                    await ws.send(json.dumps({"type": "partial", "text": "x"}))
+                    await ws.send(json.dumps({"type": "error", "error": "engine ENGINE-ID-7f3a on gpu-host-secret.internal OOM"}))
+                    await ws.close(code=1011, reason="gpu-host-secret.internal crashed")
+                    return
                 elif isinstance(m, bytes) and self.mode == "ok":
                     await ws.send(json.dumps({"type": "partial", "text": "SECRET-TRANSCRIPT", "from": self.port}))
 
@@ -138,12 +143,59 @@ def test_a_session_refused_after_its_ack_fails_over_and_the_audio_is_replayed(wo
     assert ok.got[1] == b"\x00" * 64                         # audio replayed to the node that served it
 
 
-def test_every_provider_refusing_ends_in_an_error_frame_naming_each_try(world):
+def test_every_provider_refusing_ends_in_a_generic_error_frame_and_the_log_names_each_try(world, capfd):
     url, nodes = world(("busy", {"in_flight": 0}), ("busy", {"in_flight": 1}))
+    start = json.dumps({"type": "start", "protocol": 1, "sessionId": "s"})
     frames = Loop().run(_dictate(url))
     err = [f for f in frames if f["type"] == "error"][-1]
-    assert "did not grant" in err["error"] and len(err["attempts"]) == 2 and err["retryAfterS"] == 30
+    assert err["error"] == "unavailable" and err["retryAfterS"] == 30 and err["requestId"]
+    assert "attempts" not in err and "did not grant" not in json.dumps(frames)
     assert [n.starts for n in nodes] == [1, 1]
+    logged = [json.loads(l) for l in capfd.readouterr().out.splitlines() if "router_public_error" in l]
+    assert logged[-1]["request_id"] == err["requestId"] and "did not grant" in logged[-1]["detail"]
+
+
+def test_the_close_carries_a_generic_code_and_reason_only(world):
+    url, nodes = world(("busy", {"in_flight": 0}))
+
+    async def go():
+        async with connect(url) as ws:
+            await ws.send(START)
+            try:
+                while True:
+                    await asyncio.wait_for(ws.recv(), 3)
+            except Exception as e:
+                return e
+
+    closed = Loop().run(go())
+    assert closed.rcvd.code == 1013 and closed.rcvd.reason == "unavailable"
+    for leak in ("did not grant", "busy", "127.0.0.1", str(nodes[0].port)):
+        assert leak not in closed.rcvd.reason
+
+
+def test_a_node_error_frame_and_close_after_admission_are_scrubbed(world):
+    url, (node,) = world(("errlate", {}))
+
+    async def go():
+        seen, closed = [], None
+        async with connect(url) as ws:
+            await ws.send(START)
+            await ws.send(b"\x00" * 8)
+            try:
+                while True:
+                    seen.append(await asyncio.wait_for(ws.recv(), 3))
+            except Exception as e:
+                closed = e
+        return seen, closed
+
+    seen, closed = Loop().run(go())
+    blob = json.dumps(seen) + str(getattr(closed, "rcvd", ""))
+    types = [json.loads(m).get("type") for m in seen]
+    assert "partial" in types and types[-1] == "error"               # committed, then failed
+    assert json.loads(seen[-1])["error"] == "unavailable"
+    for leak in ("ENGINE-ID-7f3a", "gpu-host-secret.internal", "OOM"):
+        assert leak not in blob, leak
+    assert closed.rcvd.code == 1011 and closed.rcvd.reason == "unavailable"
 
 
 def test_native_streaming_is_a_preference_not_a_requirement(world):

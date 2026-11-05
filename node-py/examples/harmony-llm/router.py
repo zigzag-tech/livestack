@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -36,6 +37,8 @@ import httpx
 from unit_queue import wait_budget
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exceptions import RequestValidationError
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
@@ -63,6 +66,94 @@ ROUTES = demand_log_from_env(f"{ROUTER_ID}-routes", log=lambda m: print(m, flush
 app = FastAPI(title="harmony-router", version="1.0.0")
 # Optional: refresh the fleet view off the request path (see fleet_route.start_refresher).
 VIEW_REFRESH_S = float(os.environ.get("HARMONY_ROUTER_VIEW_REFRESH_S", "0") or 0)
+
+# --- the client-facing error contract (benchday-nodes A.6) ----------------------
+# Whatever answers a phone, directly or through a relay, must not name the fleet:
+# no engine id, host, device-busy reason, attempt list, `Server` or `X-Harmony-*`.
+# Speech endpoints (/v1/audio/transcriptions, /ws/transcribe) are ALWAYS public;
+# HARMONY_ROUTER_PUBLIC_ERRORS=1 makes every path public (the speech router sets
+# it; the loopback LLM router leaves it off because its callers are operators).
+# The detail is not lost: it goes, with the request id, to the router's own log
+# (`router_public_error`) and to the route/decision records.
+PUBLIC_ALL = os.environ.get("HARMONY_ROUTER_PUBLIC_ERRORS", "").strip().lower() in ("1", "true", "yes")
+PUBLIC_VOCAB = {"unauthorized": 401, "rate_limited": 429, "too_large": 413,
+                "bad_request": 400, "unavailable": 503}
+# Response headers a client may receive from an upstream answer. Everything else
+# (server, x-harmony-*, via, x-powered-by, ...) is dropped.
+PUBLIC_HEADER_ALLOW = frozenset({"content-type", "content-encoding", "cache-control"})
+PUBLIC_RETRY_DEFAULT_S = 30
+_REQUEST_ID_OK = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def _request_id(raw) -> str:
+    """The caller's X-Request-Id when it is a short token, else a fresh one: the
+    id is echoed to the client and written to logs, so it is never free text."""
+    raw = (raw or "").strip()
+    return raw if _REQUEST_ID_OK.match(raw) else fr.new_request_id()
+
+
+def _vocab_code(status: int) -> str:
+    if status in (401, 403):
+        return "unauthorized"
+    if status == 429:
+        return "rate_limited"
+    if status == 413:
+        return "too_large"
+    if 400 <= status < 500:
+        return "bad_request"
+    return "unavailable"
+
+
+def _is_public(path: str) -> bool:
+    return PUBLIC_ALL or path == "/v1/audio/transcriptions"
+
+
+def _log_public_error(request_id: str, surface: str, status: int, code: str, detail) -> None:
+    """Rule 13: the cause stays diagnosable by request id, in the server-side log."""
+    try:
+        text = detail if isinstance(detail, str) else json.dumps(detail, default=str)
+    except Exception:
+        text = repr(detail)
+    print(json.dumps({"event": "router_public_error", "router_id": ROUTER_ID,
+                      "request_id": request_id, "surface": surface, "status": status,
+                      "code": code, "detail": text[:2000]}), flush=True)
+
+
+def _retry_after_s(headers) -> int:
+    ra = (headers or {}).get("Retry-After") or (headers or {}).get("retry-after")
+    try:
+        return int(max(1, min(300, float(ra))))
+    except (TypeError, ValueError):
+        return PUBLIC_RETRY_DEFAULT_S
+
+
+def _public_response(request_id: str, status: int, detail, headers=None, surface="http"):
+    code = _vocab_code(status)
+    out_status = PUBLIC_VOCAB[code]
+    _log_public_error(request_id, surface, status, code, detail)
+    out_headers = {"x-request-id": request_id}
+    if code == "unavailable":
+        out_headers["Retry-After"] = str(_retry_after_s(headers))
+    return JSONResponse({"error": code, "request_id": request_id},
+                        status_code=out_status, headers=out_headers)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request: Request, exc: StarletteHTTPException):
+    if _is_public(request.url.path):
+        rid = getattr(request.state, "request_id", None) or _request_id(request.headers.get("x-request-id"))
+        return _public_response(rid, exc.status_code, exc.detail, exc.headers)
+    from fastapi.exception_handlers import http_exception_handler
+    return await http_exception_handler(request, exc)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    if _is_public(request.url.path):
+        rid = getattr(request.state, "request_id", None) or _request_id(request.headers.get("x-request-id"))
+        return _public_response(rid, 400, str(exc.errors())[:500])
+    from fastapi.exception_handlers import request_validation_exception_handler
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.on_event("startup")
@@ -107,10 +198,16 @@ def health():
     body["health_kind"] = HEALTH_KIND
     view = fr.fleet_view(FLEET_URL) if FLEET_URL else None
     if view is None:
+        if PUBLIC_ALL:
+            _log_public_error("health", "health", 503, "unavailable", "no fleet view (unreachable or stale)")
+            return JSONResponse({"status": "no_fleet_view"}, status_code=503)
         return JSONResponse({**body, "status": "no_fleet_view",
                              "detail": "no fleet view (unreachable or stale)"}, status_code=503)
     target, rec = fr.choose(view, None, [], SELF_BASE, kind=HEALTH_KIND)
     if not target:
+        if PUBLIC_ALL:
+            _log_public_error("health", "health", 503, "unavailable", str(rec.get("reason")))
+            return JSONResponse({"status": "no_provider"}, status_code=503)
         return JSONResponse({**body, "status": "no_provider", "detail": str(rec.get("reason"))[:300]},
                             status_code=503)
     body["providers"] = len(rec.get("targets") or [])
@@ -190,6 +287,8 @@ def _expected_tokens(body):
 @app.post("/harmony/route")
 async def route_explain(request: Request):
     """DRY RUN: where this chat request would be sent, and why. Sends nothing."""
+    if PUBLIC_ALL:      # it names engines and hosts: operator-only, never on a public router
+        raise HTTPException(status_code=404, detail="route explain disabled on a public router")
     try:
         body = await request.json()
     except Exception:
@@ -211,9 +310,9 @@ async def proxy(path: str, request: Request):
     # request carries its own caller's credential and owner assertion to the
     # target untouched, the route record is attributed to that caller, and no
     # response, body or identity is kept after the request.
-    ctx = {"t0": time.time(), "request_id":
-           (request.headers.get("x-request-id") or "").strip() or fr.new_request_id(),
+    ctx = {"t0": time.time(), "request_id": _request_id(request.headers.get("x-request-id")),
            "owner_ns": owner_namespace(request.headers.get("x-harmony-owner"))}
+    request.state.request_id = ctx["request_id"]
     try:
         ctx["principal"] = _request_log.principal_label(
             request.headers.get("authorization"), _PRINCIPALS)
@@ -361,6 +460,19 @@ async def _route(path: str, request: Request, raw: bytes, ctx: dict):
             ROUTES.record(**fr.route_row(
                 ctx, ROUTER_ID, "ok" if resp.status_code < 400 else "refused", resp.status_code))
 
+    if _is_public("/v1/" + path):
+        if resp.status_code >= 400:
+            # An engine's own refusal (its body can name devices, models, hosts) is
+            # logged and answered from the fixed vocabulary.
+            detail = (await resp.aread())[:500].decode("utf-8", "replace")
+            await resp.aclose()
+            await client.aclose()
+            ROUTES.record(**fr.route_row(ctx, ROUTER_ID, "refused", resp.status_code))
+            return _public_response(ctx["request_id"], resp.status_code, detail, dict(resp.headers))
+        keep = {k: v for k, v in resp.headers.items() if k.lower() in PUBLIC_HEADER_ALLOW}
+        keep["x-request-id"] = ctx["request_id"]
+        return StreamingResponse(relay(), status_code=resp.status_code, headers=keep)
+
     return StreamingResponse(
         relay(), status_code=resp.status_code,
         headers={k: v for k, v in resp.headers.items()
@@ -400,7 +512,7 @@ async def ws_transcribe(ws: WebSocket):
     import websockets
     await ws.accept()
     t0 = time.time()
-    ctx = {"t0": t0, "request_id": (ws.headers.get("x-request-id") or "").strip() or fr.new_request_id(),
+    ctx = {"t0": t0, "request_id": _request_id(ws.headers.get("x-request-id")),
            "owner_ns": owner_namespace(ws.headers.get("x-harmony-owner"))}
     inbox: asyncio.Queue = asyncio.Queue()
 
@@ -428,11 +540,16 @@ async def ws_transcribe(ws: WebSocket):
     retry_after = 30
     up = None
 
-    async def refuse(why):
+    async def refuse(why, status=503):
+        # The client gets the fixed vocabulary; `why` (engine ids, hosts, device
+        # reasons) and the attempt list go to the log and the decision record.
+        code = _vocab_code(status)
+        _log_public_error(ctx["request_id"], "ws", status, code,
+                          {"reason": why, "attempts": attempts})
         try:
-            await ws.send_json({"type": "error", "error": why, "attempts": attempts,
+            await ws.send_json({"type": "error", "error": code, "requestId": ctx["request_id"],
                                 "retryAfterS": retry_after})
-            await ws.close(code=1013, reason=why[:100])
+            await ws.close(code=1013, reason=code)
         except Exception:
             pass
 
@@ -491,9 +608,14 @@ async def ws_transcribe(ws: WebSocket):
                             msg = t_up.result()
                         except websockets.ConnectionClosed as e:
                             if committed:
+                                up_code = e.rcvd.code if e.rcvd else 1011
+                                if up_code not in (1000, 1001):
+                                    _log_public_error(ctx["request_id"], "ws", 503, "unavailable",
+                                                      f"upstream closed {up_code}: {(e.rcvd.reason if e.rcvd else '')[:100]}")
                                 try:
-                                    await ws.close(code=e.rcvd.code if e.rcvd else 1011,
-                                                   reason=(e.rcvd.reason if e.rcvd else "")[:100])
+                                    # normal closes pass; anything else is generic
+                                    await ws.close(code=up_code if up_code in (1000, 1001) else 1011,
+                                                   reason="" if up_code in (1000, 1001) else "unavailable")
                                 except Exception:
                                     pass
                                 placement.record_outcome(pid, target=target, success=False, cause="upstream_closed_after_commit",
@@ -511,7 +633,12 @@ async def ws_transcribe(ws: WebSocket):
                             except Exception:
                                 refused = "error"
                             break
-                        if not committed and typ in _CONTROL:
+                        if committed and typ == "error":
+                            # a node's own error frame after admission: same vocabulary
+                            _log_public_error(ctx["request_id"], "ws", 503, "unavailable", msg)
+                            await ws.send_json({"type": "error", "error": "unavailable",
+                                                "requestId": ctx["request_id"], "retryAfterS": retry_after})
+                        elif not committed and typ in _CONTROL:
                             if typ == "warming" or not acked:
                                 await ws.send_text(msg)
                             acked = acked or typ in ("started", "resumed")
@@ -547,7 +674,7 @@ async def ws_transcribe(ws: WebSocket):
         placement.record_outcome(pid, target=None, success=False, cause=reason[:200], attempts=attempts,
                                  final_ms=round((time.time() - t0) * 1000, 1))
     except HTTPException as e:
-        await refuse(str(e.detail))
+        await refuse(str(e.detail), e.status_code)
     finally:
         reader.cancel()
         if up is not None:
@@ -565,4 +692,4 @@ if __name__ == "__main__":
     import uvicorn
     print(f"[harmony-router] {ROUTER_ID} rev={REVISION} region={REGION or '-'} "
           f"fleet={FLEET_URL or '(unset)'} on {BIND_HOST}:{PORT}", flush=True)
-    uvicorn.run(app, host=BIND_HOST, port=PORT)
+    uvicorn.run(app, host=BIND_HOST, port=PORT, server_header=False)

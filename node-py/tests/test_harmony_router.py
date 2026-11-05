@@ -381,15 +381,26 @@ def test_a_plain_503_is_also_failed_over_but_not_called_busy(speech):
     assert routes.rows[-1]["fleet_route"]["attempts"][0]["result"].startswith("unavailable")
 
 
-def test_when_no_speech_provider_can_serve_the_reason_and_retry_after_come_back(speech):
+def test_when_no_speech_provider_can_serve_the_client_gets_only_unavailable_and_retry_after(speech, capfd):
     client, nodes, routes = speech(({"busy": True, "retry_after": "45"}, {"in_flight": 0}),
                                    ({"busy": True, "retry_after": "20"}, {"in_flight": 1}))
-    r = client.post("/v1/audio/transcriptions", files=_WAV)
+    r = client.post("/v1/audio/transcriptions", files=_WAV, headers={"x-request-id": "req-abc.1"})
     assert r.status_code == 503 and r.headers["retry-after"] == "20"
-    detail = r.json()["detail"]
-    assert detail["error"] == "route_failed" and len(detail["attempts"]) == 2
-    assert "harmony-image" in detail["attempts"][0]["result"]
+    assert r.json() == {"error": "unavailable", "request_id": "req-abc.1"}
+    # the diagnosis moved, it did not vanish: server-side log by request id + decision record
+    logged = [json.loads(l) for l in capfd.readouterr().out.splitlines() if "router_public_error" in l]
+    assert logged and logged[-1]["request_id"] == "req-abc.1"
+    assert "route_failed" in logged[-1]["detail"] and "harmony-image" in logged[-1]["detail"]
+    attempts = routes.rows[-1]["fleet_route"]["attempts"]
+    assert len(attempts) == 2 and "harmony-image" in attempts[0]["result"]
     assert routes.rows[-1]["outcome"] == "refused"
+
+
+def test_a_retry_after_less_failure_still_tells_the_client_when_to_retry(speech):
+    client, _, _ = speech()
+    r = client.post("/v1/audio/transcriptions", files=_WAV)
+    assert r.status_code == 503 and r.headers["retry-after"] == "30"
+    assert r.json()["error"] == "unavailable" and r.json()["request_id"]
 
 
 def test_the_attempt_budget_is_bounded(speech):
@@ -401,7 +412,8 @@ def test_the_attempt_budget_is_bounded(speech):
 def test_a_speech_request_with_no_node_says_so(speech):
     client, _, _ = speech()
     r = client.post("/v1/audio/transcriptions", files=_WAV)
-    assert r.status_code == 503 and "no polyasr target" in r.text
+    assert r.status_code == 503 and r.json()["error"] == "unavailable"
+    assert "no polyasr target" not in r.text
 
 
 def test_llm_503_is_not_retried_by_the_speech_rule(wired):
@@ -479,3 +491,140 @@ def test_a_background_refresher_keeps_the_view_fresh_so_requests_never_fetch(rou
         assert fleet_route.fleet_view(url) is not None
     finally:
         stop.set()
+
+
+# --- A.6: nothing about the fleet reaches a client ------------------------------
+# Strings seeded into every upstream failure; none may appear in any response.
+LEAKS = ("ENGINE-ID-7f3a", "gpu-host-secret.internal", "harmony-image", "10.99.88.77",
+         "RTX-SECRET-DEVICE")
+
+
+class _LeakyNode(_SpeechNode):
+    """Fails in every way a real engine does, naming engine/host/device in the
+    body AND in headers (Server, X-Harmony-*)."""
+
+    def __init__(self, status=503, retry_after=None):
+        self.got, outer = [], self
+        body = json.dumps({"status": "device_busy", "engine": "ENGINE-ID-7f3a",
+                           "host": "gpu-host-secret.internal", "ip": "10.99.88.77",
+                           "detail": "device RTX-SECRET-DEVICE held exclusively by harmony-image"}).encode()
+
+        class H(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("content-length") or 0))
+                outer.got.append(1)
+                self.send_response(status)
+                self.send_header("server", "ENGINE-ID-7f3a/1.0")
+                self.send_header("x-harmony-engine", "ENGINE-ID-7f3a")
+                self.send_header("x-harmony-host", "gpu-host-secret.internal")
+                if retry_after:
+                    self.send_header("retry-after", retry_after)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
+
+
+def _whole_response(r) -> str:
+    return r.text + "\n" + "\n".join(f"{k}: {v}" for k, v in r.headers.items())
+
+
+def _leaky_world(router, monkeypatch, *nodes):
+    view = {"generated_at": time.time(), "hosts": {
+        f"gpu-host-secret.internal-{i}": {"nodes": [n.row(in_flight=i)]} for i, n in enumerate(nodes)}}
+    monkeypatch.setattr(router, "FLEET_URL", "http://fleet.invalid:8801")
+    monkeypatch.setattr(fleet_route, "fleet_view", lambda url, *a, **k: view)
+    monkeypatch.setattr(fleet_route, "mark_busy", lambda *a: None)
+    monkeypatch.setattr(router, "ROUTES", _Rows())
+    monkeypatch.setattr(router, "_PRINCIPALS", None)
+    from fastapi.testclient import TestClient
+    return TestClient(router.app)
+
+
+@pytest.mark.parametrize("status,retry_after,expect", [
+    (503, "20", "unavailable"), (503, None, "unavailable"), (500, None, "unavailable"),
+    (401, None, "unauthorized"), (429, None, "rate_limited"), (413, None, "too_large"),
+    (400, None, "bad_request"), (422, None, "bad_request")])
+def test_no_upstream_failure_text_or_header_reaches_the_client(router, monkeypatch, status, retry_after, expect):
+    node = _LeakyNode(status, retry_after)
+    try:
+        client = _leaky_world(router, monkeypatch, node)
+        r = client.post("/v1/audio/transcriptions", files=_WAV)
+        assert r.json()["error"] == expect and r.status_code == router.PUBLIC_VOCAB[expect]
+        whole = _whole_response(r)
+        assert node.got                                        # the failure really happened
+        for leak in LEAKS:
+            assert leak not in whole, leak
+        assert "server" not in r.headers or "ENGINE" not in r.headers["server"]
+        assert not [h for h in r.headers if h.lower().startswith("x-harmony")]
+        assert (expect == "unavailable") == ("retry-after" in r.headers)
+    finally:
+        node.close()
+
+
+def test_exhausted_failover_over_leaky_nodes_leaks_nothing(router, monkeypatch):
+    nodes = [_LeakyNode(503, "20"), _LeakyNode(503, "45"), _LeakyNode(503)]
+    try:
+        client = _leaky_world(router, monkeypatch, *nodes)
+        r = client.post("/v1/audio/transcriptions", files=_WAV)
+        assert r.status_code == 503 and len(sum(([n.got for n in nodes]), [])) >= 2   # failover kept working
+        assert r.json()["error"] == "unavailable" and r.headers["retry-after"] == "20"
+        for leak in LEAKS:
+            assert leak not in _whole_response(r), leak
+    finally:
+        for n in nodes:
+            n.close()
+
+
+def test_a_successful_answer_carries_no_upstream_server_or_harmony_headers(speech, monkeypatch):
+    client, (ok,), _ = speech(({}, {}))
+    r = client.post("/v1/audio/transcriptions", files=_WAV)
+    assert r.status_code == 200 and r.json() == {"text": "hello"}
+    assert not [h for h in r.headers if h.lower() in ("server", "via") or h.lower().startswith("x-harmony")]
+
+
+def test_positive_control_the_leak_test_fails_when_the_scrub_is_removed(router, monkeypatch):
+    # Without the scrub the same fixture DOES leak, so the assertions above can fail.
+    node = _LeakyNode(503, "20")
+    try:
+        client = _leaky_world(router, monkeypatch, node)
+        monkeypatch.setattr(router, "_public_response",
+                            lambda rid, status, detail, headers=None, surface="http":
+                            router.JSONResponse({"detail": detail}, status_code=status))
+        r = client.post("/v1/audio/transcriptions", files=_WAV)
+        assert any(leak in _whole_response(r) for leak in LEAKS)
+    finally:
+        node.close()
+
+
+def test_request_ids_are_tokens_never_free_text(router):
+    assert router._request_id("abc-1.2_X") == "abc-1.2_X"
+    for bad in ("", None, "a b", "x" * 65, "<script>", "host: gpu-host-secret.internal"):
+        out = router._request_id(bad)
+        assert out != bad and router._REQUEST_ID_OK.match(out)
+
+
+def test_public_all_covers_health_explain_and_unknown_paths(router, monkeypatch):
+    monkeypatch.setattr(router, "PUBLIC_ALL", True)
+    monkeypatch.setattr(router, "HEALTH_KIND", "polyasr")
+    client = _leaky_world(router, monkeypatch)             # no nodes: no provider
+    h = client.get("/health")
+    assert h.status_code == 503 and h.json() == {"status": "no_provider"}
+    assert client.post("/harmony/route", json={}).json()["error"] == "bad_request"
+    r = client.get("/v1/not-a-thing")
+    assert r.json()["error"] == "bad_request" and "harmony-router routes" not in r.text
+
+
+def test_public_off_keeps_the_llm_router_detail_for_operators(wired):
+    client, _, _ = wired
+    r = client.get("/v1/not-a-thing")
+    assert r.status_code == 404 and "harmony-router routes" in r.text
