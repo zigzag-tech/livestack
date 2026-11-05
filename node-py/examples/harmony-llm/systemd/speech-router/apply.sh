@@ -1,5 +1,6 @@
 #!/bin/bash
 # Add the relay target harmony-asr (-> router 127.0.0.1:8189) ADDITIVELY and restart the relay once, when idle.
+# Relay target ONLY. Router code is deployed/rolled back by deploy-router.sh / rollback-router.sh.
 set -e
 B=~/.local/share/harmony-speech-router; CFG=/etc/benchday/relay/regional-relay-zz-tower2-cn.json
 systemctl --user enable --now harmony-speech-router.service

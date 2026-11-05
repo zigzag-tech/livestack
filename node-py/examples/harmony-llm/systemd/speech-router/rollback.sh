@@ -1,5 +1,6 @@
 #!/bin/bash
 # Remove ONLY the harmony-asr target (every other relay setting is left as it is now), restart the relay once when idle.
+# Relay target ONLY. Router code is deployed/rolled back by deploy-router.sh / rollback-router.sh.
 # `--unit` also stops and disables the router unit.
 set -e
 B=~/.local/share/harmony-speech-router; CFG=/etc/benchday/relay/regional-relay-zz-tower2-cn.json

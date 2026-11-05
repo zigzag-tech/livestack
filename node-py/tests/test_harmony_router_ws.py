@@ -62,6 +62,17 @@ class FakeNode:
                     await ws.send(json.dumps({"type": "error", "error": "engine ENGINE-ID-7f3a on gpu-host-secret.internal OOM"}))
                     await ws.close(code=1011, reason="gpu-host-secret.internal crashed")
                     return
+                elif isinstance(m, bytes) and self.mode == "leaky":
+                    # seeded leaks: extra fields on every frame type, a typeless exception frame,
+                    # a frame of an unknown type, a binary frame
+                    await ws.send(b"BIN-ENGINE-ID-7f3a")
+                    await ws.send(json.dumps({"type": "gpu-status", "gpu": "GPU-SECRET-0"}))
+                    await ws.send(json.dumps({"type": "partial", "partial": "hi", "delta": "hi", "sessionId": "s",
+                                              "engine": "ENGINE-ID-7f3a", "host": "gpu-host-secret.internal"}))
+                    await ws.send(json.dumps({"type": "final", "sessionId": "s", "stopId": "x", "text": "hi",
+                                              "recognizedThroughSeq": 3, "model": "MODEL-SECRET-large", "gpu": "GPU-SECRET-0"}))
+                    await ws.send(json.dumps({"error": "weights at /models/MODEL-SECRET-large missing"}))
+                    await ws.send(json.dumps({"type": "done", "sessionId": "s", "stopId": "x", "device": "GPU-SECRET-0"}))
                 elif isinstance(m, bytes) and self.mode == "ok":
                     await ws.send(json.dumps({"type": "partial", "text": "SECRET-TRANSCRIPT", "from": self.port}))
 
@@ -202,10 +213,12 @@ def test_native_streaming_is_a_preference_not_a_requirement(world):
     # equal distance and load: native wins the tie ...
     url, (syn, nat) = world(("ok", {"streaming": "synthetic"}), ("ok", {"streaming": "native"}))
     frames = Loop().run(_dictate(url))
-    assert [f for f in frames if f["type"] == "partial"][0]["from"] == nat.port
+    # the client frame carries no node identity (whitelist): see which node received the audio
+    assert any(isinstance(m, bytes) for m in nat.got) and not any(isinstance(m, bytes) for m in syn.got)
+    assert any(f["type"] == "partial" for f in frames)
     # ... and a synthetic-only fleet still serves
     url, (only,) = world(("ok", {"streaming": "synthetic"}))
-    assert [f for f in Loop().run(_dictate(url)) if f["type"] == "partial"][0]["from"] == only.port
+    assert any(f["type"] == "partial" for f in Loop().run(_dictate(url))) and any(isinstance(m, bytes) for m in only.got)
 
 
 def test_the_decision_log_holds_features_and_outcomes_never_audio_transcript_or_context(world, router, monkeypatch, tmp_path):
@@ -239,3 +252,31 @@ def test_the_decision_log_holds_features_and_outcomes_never_audio_transcript_or_
         assert any(b"SECRET-AUDIO" in m for m in ok.got if isinstance(m, bytes))
     finally:
         placement.set_decision_log(None)
+
+
+def test_frames_are_whitelisted_per_type_so_node_extras_never_reach_the_client(world):
+    url, (node,) = world(("leaky", {}))
+
+    async def go():
+        seen = []
+        async with connect(url) as ws:
+            await ws.send(START)
+            await ws.send(b"\x00" * 8)
+            try:
+                while True:
+                    seen.append(await asyncio.wait_for(ws.recv(), 1.5))
+            except Exception:
+                pass
+        return seen
+
+    seen = Loop().run(go())
+    blob = json.dumps([m if isinstance(m, str) else "<bytes>" for m in seen])
+    frames = [json.loads(m) for m in seen]
+    for leak in ("ENGINE-ID-7f3a", "gpu-host-secret", "MODEL-SECRET", "GPU-SECRET", "/models", "gpu-status"):
+        assert leak not in blob, leak
+    # positive control: the protocol fields survive, so the whitelist is not simply dropping everything
+    by = {f["type"]: f for f in frames}
+    assert by["partial"] == {"type": "partial", "sessionId": "s", "partial": "hi", "delta": "hi"}
+    assert by["final"] == {"type": "final", "sessionId": "s", "stopId": "x", "text": "hi", "recognizedThroughSeq": 3}
+    assert by["done"] == {"type": "done", "sessionId": "s", "stopId": "x"}
+    assert by["error"]["error"] == "unavailable"                     # the typeless exception frame

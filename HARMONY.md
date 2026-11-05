@@ -1436,6 +1436,17 @@ only (tokens + route hints); no audio or transcript is stored by it or by the ro
   `partial`, `final`) are node protocol and pass through unmodified, so the relay owns scrubbing
   any engine-identifying field there. Tests: `test_harmony_router.py` (leak test with seeded
   engine/host/device strings and a positive control) and `test_harmony_router_ws.py`.
+- **Code deploy and rollback are separate from `apply.sh` / `rollback.sh`.** Those two only add or
+  remove the `harmony-asr` relay target and restart the relay; they never change router code. Router
+  code lives in `~/.local/share/harmony-speech-router/releases/<rev8>/node-py` with a `current`
+  symlink (the unit's `PYTHONPATH`/`WorkingDirectory`), and `HARMONY_ROUTER_REV` /
+  `HARMONY_ROUTER_PUBLIC_ERRORS` in `~/.config/harmony-speech-router/env`. `deploy-router.sh <rev>`
+  extracts the release from `$ROUTER_SRC_REPO` (a livestack checkout holding the commit), backs up the
+  env (`env.bak.<ts>`, mode 600), sets both variables, repoints `current`, waits for `relay-quiet.sh`,
+  restarts the user unit and checks `/health` `revision == <rev>`. `rollback-router.sh` (no argument:
+  restore the newest env backup and its release; with `<rev>`: switch to that release) does the same
+  steps in reverse. `DRY_RUN=1` with `ROUTER_BASE` / `ROUTER_ENV` pointed at a scratch directory
+  skips the quiet check, restart and health probe. Copy the scripts next to the others.
 - **A relay deploy drops the target.** benchday's `scripts/deploy-regional-relays.sh` regenerates
   `regional-relay-zz-tower2-cn.json` from its own node table, which does not list `harmony-asr`, and
   restarts the relay without a quiet check. After any relay deploy run `apply.sh` again

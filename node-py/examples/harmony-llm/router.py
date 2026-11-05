@@ -499,11 +499,40 @@ WS_DEFAULT_PREFER = [{"attribute": "asr.streaming", "value": "native"}]
 _CONTROL = ("started", "resumed", "warming")
 
 
-def _msg_type(text):
+# What a client may see of a node's frame, per type: the ASR wire protocol's own fields and
+# nothing else, so an extra field (an engine/host/model/device name a node adds, now or later)
+# never reaches a phone. Error frames are not listed: they are rebuilt in the fixed vocabulary.
+_WS_CLIENT_FIELDS = {
+    "started": ("type", "protocol", "sessionId", "ackSeq", "control"),
+    "resumed": ("type", "protocol", "sessionId", "ackSeq", "control"),
+    "warming": ("type", "protocol", "sessionId"),
+    "ack": ("type", "protocol", "sessionId", "ackSeq"),
+    "partial": ("type", "sessionId", "partial", "text", "delta"),
+    "final": ("type", "sessionId", "stopId", "text", "recognizedThroughSeq"),
+    "done": ("type", "sessionId", "stopId"),
+    "stopExpired": ("type", "sessionId", "stopId", "reason"),
+}
+
+
+def _client_frame(msg):
+    """(type, scrubbed text) for a node frame; scrubbed is None when the frame must not reach the
+    client (binary, not JSON, an unknown type). A frame with an `error` and no type (a node's
+    bare exception text) is an error frame."""
+    if isinstance(msg, bytes):
+        return None, None
     try:
-        return json.loads(text).get("type")
+        d = json.loads(msg)
     except Exception:
-        return None
+        return None, None
+    if not isinstance(d, dict):
+        return None, None
+    typ = d.get("type")
+    if typ is None and "error" in d:
+        return "error", None
+    keep = _WS_CLIENT_FIELDS.get(typ)
+    if keep is None:
+        return typ, None
+    return typ, json.dumps({k: d[k] for k in keep if k in d})
 
 
 @app.websocket(WS_PATH)
@@ -626,7 +655,7 @@ async def ws_transcribe(ws: WebSocket):
                             break
                         if t_first is None:
                             t_first = round((time.time() - t0) * 1000, 1)
-                        typ = None if isinstance(msg, bytes) else _msg_type(msg)
+                        typ, clean = _client_frame(msg)
                         if not committed and typ == "error":
                             try:
                                 refused = json.loads(msg).get("error") or "error"
@@ -638,9 +667,13 @@ async def ws_transcribe(ws: WebSocket):
                             _log_public_error(ctx["request_id"], "ws", 503, "unavailable", msg)
                             await ws.send_json({"type": "error", "error": "unavailable",
                                                 "requestId": ctx["request_id"], "retryAfterS": retry_after})
+                        elif clean is None:
+                            # not part of the client protocol: never forwarded, never commits
+                            _log_public_error(ctx["request_id"], "ws", 503, "unavailable",
+                                              f"dropped node frame type={typ!r}")
                         elif not committed and typ in _CONTROL:
                             if typ == "warming" or not acked:
-                                await ws.send_text(msg)
+                                await ws.send_text(clean)
                             acked = acked or typ in ("started", "resumed")
                         else:
                             if not committed:
@@ -648,7 +681,7 @@ async def ws_transcribe(ws: WebSocket):
                                 sent.clear()
                             if t_partial is None and typ in ("partial", "final"):
                                 t_partial = round((time.time() - t0) * 1000, 1)
-                            await (ws.send_bytes(msg) if isinstance(msg, bytes) else ws.send_text(msg))
+                            await ws.send_text(clean)
                         t_up = asyncio.create_task(up.recv())
                 t_client.cancel()
                 t_up.cancel()
