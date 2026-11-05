@@ -1410,6 +1410,14 @@ only (tokens + route hints); no audio or transcript is stored by it or by the ro
   (success, cause, first-byte/partial/final ms), never audio, transcript or the `start`
   context (tests: `test_the_decision_log_holds_features_and_outcomes_never_...`,
   `test_batch_asr_logs_never_hold_...`; checked on the live host with a grep).
+- **Files in the repo:** `node-py/examples/harmony-llm/systemd/speech-router/` holds the unit,
+  the env example (HARMONY_ROUTER_REV is the release sha), `apply.sh`, `rollback.sh`, `relay-quiet.sh` and
+  `relay_target.py` exactly as installed on zz-tower2 (copy the scripts to
+  `~/.local/share/harmony-speech-router/`).
+- **A relay deploy drops the target.** benchday's `scripts/deploy-regional-relays.sh` regenerates
+  `regional-relay-zz-tower2-cn.json` from its own node table, which does not list `harmony-asr`, and
+  restarts the relay without a quiet check. After any relay deploy run `apply.sh` again
+  (idempotent: `no change` when present) and confirm the target with `relay_target.py`'s output.
 - **Not done yet:** the hub does not emit a `harmony-asr` route (a hub change, release
   train), so no phone reaches the target yet; TTS has no router mount; histo-one (NA)
   has no router; tailnet phones still dial engines directly.

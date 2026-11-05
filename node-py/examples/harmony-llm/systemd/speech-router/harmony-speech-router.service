@@ -1,0 +1,22 @@
+# Harmony speech router (zz-tower2-cn relay door): loopback only, behind the relay target harmony-asr.
+# Rollback: ~/.local/share/harmony-speech-router/rollback.sh
+[Unit]
+Description=Harmony speech router (relay target harmony-asr, loopback 8189)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/harmony-speech-router/env
+Environment=PYTHONPATH=%h/.local/share/harmony-speech-router/current/node-py
+WorkingDirectory=%h/.local/share/harmony-speech-router/current/node-py/examples/harmony-llm
+ExecStart=%h/.local/share/harmony-speech-router/venv/bin/python router.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=%h/.cache/livestack/demand-speech
+
+[Install]
+WantedBy=default.target
