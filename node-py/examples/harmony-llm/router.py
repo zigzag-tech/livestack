@@ -92,6 +92,15 @@ def _request_id(raw) -> str:
     return raw if _REQUEST_ID_OK.match(raw) else fr.new_request_id()
 
 
+def _refusal_text(detail) -> str:
+    """The server-side cause of a refusal: a route_failed's last attempt, else the
+    detail text. Goes to the ROUTE log only (`cause`, `cause_code`), never to a client."""
+    if isinstance(detail, dict):
+        attempts = detail.get("attempts") or []
+        return str(attempts[-1].get("result") if attempts else detail.get("error") or "")
+    return str(detail or "")
+
+
 def _vocab_code(status: int) -> str:
     if status in (401, 403):
         return "unauthorized"
@@ -455,7 +464,7 @@ async def proxy(path: str, request: Request):
     try:
         return await _route(path, request, raw, ctx)
     except HTTPException as e:
-        ROUTES.record(**fr.route_row(ctx, ROUTER_ID, "refused", e.status_code))
+        ROUTES.record(**fr.route_row(ctx, ROUTER_ID, "refused", e.status_code, cause=_refusal_text(e.detail)))
         raise
 
 
@@ -741,6 +750,7 @@ async def ws_transcribe(ws: WebSocket):
     reason = "no speech target"
     retry_after = 30
     up = None
+    final_cause = None       # why this session ended unserved (ROUTE log only)
     warned = 0               # router-origin `warming` frames sent on this session
     owe_warming = None       # why a `warming` frame is owed once the client holds `started`
 
@@ -845,6 +855,7 @@ async def ws_transcribe(ws: WebSocket):
                                                    reason="" if up_code in (1000, 1001) else "unavailable")
                                 except Exception:
                                     pass
+                                final_cause = "upstream_closed_after_commit"
                                 placement.record_outcome(pid, target=target, success=False, cause="upstream_closed_after_commit",
                                                          first_byte_ms=t_first, first_partial_ms=t_partial, attempts=attempts)
                                 t_client.cancel()
@@ -903,12 +914,18 @@ async def ws_transcribe(ws: WebSocket):
                 break
             if n >= max_attempts:
                 break
+        final_cause = reason
         await refuse(reason)
         placement.record_outcome(pid, target=None, success=False, cause=reason[:200], attempts=attempts,
                                  final_ms=round((time.time() - t0) * 1000, 1))
     except HTTPException as e:
+        final_cause = str(e.detail)
         await refuse(str(e.detail), e.status_code)
     finally:
+        # One ROUTE row per session, keyed by the request id the client was handed,
+        # so the real cause of a refusal is joinable server-side (never sent to a client).
+        ROUTES.record(**fr.route_row(ctx, ROUTER_ID, "refused" if final_cause else "ok" if committed else "abandoned",
+                                     503 if final_cause else 101, cause=final_cause))
         reader.cancel()
         if up is not None:
             try:

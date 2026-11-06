@@ -374,3 +374,29 @@ def test_the_warm_hint_needs_a_credential_and_never_names_the_fleet(world, route
     assert r.status_code == 401 and node.starts == 0
     ok = _warm_hint(url, headers={"authorization": "Bearer x"})
     assert ok.status_code == 202 and set(ok.json()) == {"status", "request_id"}
+
+
+def test_a_refused_session_leaves_its_real_cause_in_the_route_log_keyed_by_the_request_id(world, router, monkeypatch, tmp_path):
+    """The client gets the generic frame + request id; the ROUTE log (bounded
+    JsonlLedger, the hub's join source for asr_outcomes.cause) holds the cause
+    under that SAME id. Positive: the refused session. Control: a served one."""
+    from livestack_node.demand_log import demand_log_from_env
+    monkeypatch.setenv("HARMONY_DEMAND_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("HARMONY_DEMAND_LOG_AGE_DAYS", "1")
+    routes = demand_log_from_env("routes")
+    monkeypatch.setattr(router, "ROUTES", routes)
+    url, _ = world(("busy", {"in_flight": 0}), ("busy", {"in_flight": 1}))
+    frames = Loop().run(_dictate(url))
+    err = [f for f in frames if f["type"] == "error"][-1]
+    assert err["error"] == "unavailable" and "cause" not in json.dumps(frames)    # client output unchanged
+    url2, _ = world(("ok", {"in_flight": 0}))
+    ok_frames = Loop().run(_dictate(url2))
+    assert any(f["type"] == "partial" for f in ok_frames)
+    routes.flush()
+    rows = [json.loads(l) for p in tmp_path.glob("routes.jsonl*") for l in p.read_text().splitlines()]
+    rows = [r.get("record", r) for r in rows]
+    refused = [r for r in rows if r.get("request_id") == err["requestId"]]
+    assert len(refused) == 1 and refused[0]["outcome"] == "refused"
+    assert refused[0]["cause_code"] == "device_busy" and "grant" in refused[0]["cause"]
+    served = [r for r in rows if r.get("outcome") == "ok" and r.get("http_status") == 101]
+    assert served and all(r["cause"] is None and r["cause_code"] is None for r in served)
