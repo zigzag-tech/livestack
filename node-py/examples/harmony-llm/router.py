@@ -104,8 +104,11 @@ def _vocab_code(status: int) -> str:
     return "unavailable"
 
 
+WARM_PATH = "/v1/audio/warm"
+
+
 def _is_public(path: str) -> bool:
-    return PUBLIC_ALL or path == "/v1/audio/transcriptions"
+    return PUBLIC_ALL or path in ("/v1/audio/transcriptions", WARM_PATH)
 
 
 def _log_public_error(request_id: str, surface: str, status: int, code: str, detail) -> None:
@@ -301,6 +304,136 @@ async def route_explain(request: Request):
     _record(ctx, FLEET_URL, rec, "router", source)
     return JSONResponse({"router": ROUTER_ID, "revision": REVISION, "requirement": requirement,
                          "prefer": prefer, "fleet": rec})
+
+
+# --- warm hint: POST /v1/audio/warm ----------------------------------------------
+# A cheap "a dictation is probably coming" signal the hub (or the relay) sends when a
+# person opens the app / fetches the ASR manifest. The router asks the likely
+# provider(s) to be ready by doing what a real session does: opening a short
+# /ws/transcribe session on them (a `start` frame), which is request-driven
+# admission -- Harmony's planner grants it, warms the provider, and the idle policy
+# alone decides when it is released again. Nothing is pinned or preloaded, the
+# router holds no fleet credential (the caller's own bearer / query is forwarded, as
+# for a real session), and it never calls a node's control surface.
+#
+# The synthetic session lives only as long as the load: a node announces a cold
+# admission with `warming` frames about once a second; when none has arrived for
+# PREWARM_SETTLE_S (or PREWARM_MAX_S has passed) the session is closed and the
+# provider's ordinary idle timer starts. Closing releases the hold at once, so the
+# provider stays warm for exactly its normal idle window and no longer.
+# Answer: always 202 {"status":"accepted"} for an authenticated caller, whatever
+# was or was not started (a probe learns nothing about the fleet).
+PREWARM_TARGETS = max(1, min(2, int(os.environ.get("HARMONY_ROUTER_PREWARM_TARGETS", "1") or 1)))
+PREWARM_MAX_S = float(os.environ.get("HARMONY_ROUTER_PREWARM_MAX_S", "60"))
+PREWARM_SETTLE_S = float(os.environ.get("HARMONY_ROUTER_PREWARM_SETTLE_S", "2.5"))
+# A provider asked within this window (or still being asked) is not asked again.
+PREWARM_COOLDOWN_S = float(os.environ.get("HARMONY_ROUTER_PREWARM_COOLDOWN_S", "30"))
+PREWARM_MAX_INFLIGHT = int(os.environ.get("HARMONY_ROUTER_PREWARM_MAX_INFLIGHT", "4"))
+_prewarm_last: "dict[str, float]" = {}      # target -> when it was last asked (bounded: see _prewarm_gate)
+_prewarm_inflight: set = set()
+_prewarm_tasks: set = set()
+
+
+def _prewarm_gate(target: str) -> "str | None":
+    """Why this target is not asked now, or None to go ahead. Also bounds the
+    memory: entries older than the cooldown are dropped on every call."""
+    now = time.time()
+    for t in [t for t, at in _prewarm_last.items() if now - at > PREWARM_COOLDOWN_S]:
+        del _prewarm_last[t]
+    if target in _prewarm_inflight:
+        return "in flight"
+    if target in _prewarm_last:
+        return "cooldown"
+    if len(_prewarm_inflight) >= PREWARM_MAX_INFLIGHT:
+        return "too many in flight"
+    return None
+
+
+def _prewarm_event(rid: str, target: str, outcome: str, t0: float, **extra) -> None:
+    print(json.dumps({"event": "router_prewarm", "router_id": ROUTER_ID, "request_id": rid,
+                      "target": target, "outcome": outcome,
+                      "ms": round((time.time() - t0) * 1000, 1), **extra}), flush=True)
+
+
+async def _prewarm_one(rid: str, target: str, query: str) -> None:
+    import asyncio
+    import websockets
+    t0 = time.time()
+    _prewarm_inflight.add(target)
+    _prewarm_last[target] = t0
+    up = None
+    outcome, saw = "settled", 0
+    try:
+        url = target.replace("http://", "ws://", 1).replace("https://", "wss://", 1) + WS_PATH
+        up = await asyncio.wait_for(websockets.connect(url + (f"?{query}" if query else ""), max_size=None), 5)
+        await up.send(json.dumps({"type": "start", "protocol": 1, "sessionId": f"warm-{rid[:32]}"}))
+        while True:
+            left = PREWARM_MAX_S - (time.time() - t0)
+            if left <= 0:
+                outcome = "max"
+                break
+            try:
+                msg = await asyncio.wait_for(up.recv(), min(left, PREWARM_SETTLE_S))
+            except asyncio.TimeoutError:
+                break                       # quiet: admitted (or already warm)
+            typ, _clean = _client_frame(msg)
+            if typ == "warming":
+                saw += 1
+            elif typ == "error":
+                outcome = "refused"
+                _prewarm_last.pop(target, None)         # a refusal is not a reason to wait 30 s
+                fr.mark_busy(FLEET_URL, target)
+                _log_public_error(rid, "prewarm", 503, "unavailable", {"target": target, "frame": str(msg)[:300]})
+                break
+    except Exception as e:  # noqa: BLE001 - a hint never raises; the cause goes to the journal
+        outcome = "failed"
+        _prewarm_last.pop(target, None)
+        _log_public_error(rid, "prewarm", 503, "unavailable", f"{type(e).__name__}: {e or '(no message)'}")
+    finally:
+        _prewarm_inflight.discard(target)
+        if up is not None:
+            try:
+                await up.close()
+            except Exception:
+                pass
+        _prewarm_event(rid, target, outcome, t0, warming_frames=saw)
+
+
+@app.post(WARM_PATH)
+async def audio_warm(request: Request):
+    import asyncio
+    rid = _request_id(request.headers.get("x-request-id"))
+    request.state.request_id = rid
+    # Authenticated: a configured principal table must recognise the caller; with
+    # none configured (the speech router holds no table) a bearer or query
+    # credential must at least be present -- the relay in front authenticates, and
+    # the credential is forwarded to the node exactly as for a real session.
+    if _PRINCIPALS:
+        if _principal(request) is None:
+            raise HTTPException(status_code=401, detail="harmony: warm hint needs a known principal")
+    elif not (request.headers.get("authorization") or request.url.query):
+        raise HTTPException(status_code=401, detail="harmony: warm hint needs a credential")
+    regions, _src = _regions(request, None)
+    view = _view()
+    chosen: list = []
+    for _ in range(PREWARM_TARGETS):
+        target, _rec = fr.choose(view, None, WS_DEFAULT_PREFER, SELF_BASE, kind="polyasr",
+                                 regions=regions, exclude=chosen)
+        if not target:
+            break
+        chosen.append(target)
+    started = []
+    for target in chosen:
+        why_not = _prewarm_gate(target)
+        if why_not:
+            _prewarm_event(rid, target, "skipped", time.time(), why=why_not)
+            continue
+        task = asyncio.create_task(_prewarm_one(rid, target, request.url.query))
+        _prewarm_tasks.add(task)
+        task.add_done_callback(_prewarm_tasks.discard)
+        started.append(target)
+    return JSONResponse({"status": "accepted", "request_id": rid}, status_code=202,
+                        headers={"x-request-id": rid})
 
 
 @app.api_route("/v1/{path:path}", methods=["GET", "POST"])
@@ -505,7 +638,7 @@ _CONTROL = ("started", "resumed", "warming")
 _WS_CLIENT_FIELDS = {
     "started": ("type", "protocol", "sessionId", "ackSeq", "control"),
     "resumed": ("type", "protocol", "sessionId", "ackSeq", "control"),
-    "warming": ("type", "protocol", "sessionId"),
+    "warming": ("type", "protocol", "sessionId", "elapsedMs", "expectedMs"),
     "ack": ("type", "protocol", "sessionId", "ackSeq"),
     "partial": ("type", "sessionId", "partial", "text", "delta"),
     "final": ("type", "sessionId", "stopId", "text", "recognizedThroughSeq"),
@@ -533,6 +666,46 @@ def _client_frame(msg):
     if keep is None:
         return typ, None
     return typ, json.dumps({k: d[k] for k in keep if k in d})
+
+
+def _target_cold(view: dict, target: str) -> bool:
+    """True when the fleet view says the speech node at `target` holds its `asr`
+    unit non-resident, i.e. a session placed there pays a model load. The ranker
+    cannot say so for speech: it judges warmth only for units that declare a
+    `class` (LLMs), so `rec["expect"]` is "warm" for every speech target. Unknown
+    (no such node or unit in the view) is not cold: absence of evidence is not a
+    load."""
+    for host in (view.get("hosts") or {}).values():
+        for node in host.get("nodes") or []:
+            peer = str(node.get("peer") or "")
+            if (peer[: -len("/livestack")] if peer.endswith("/livestack") else peer).rstrip("/") != target.rstrip("/"):
+                continue
+            asr = [u for u in node.get("units") or [] if isinstance(u, dict) and u.get("kind") == "asr"]
+            return bool(asr) and not any(u.get("resident") for u in asr)
+    return False
+
+
+def _warming_frame(session_id, t0: float, expected_ms=None) -> dict:
+    """The router's own `warming` frame: the same shape a node sends (see
+    _WS_CLIENT_FIELDS), sent as soon as the router knows the session may wait for
+    a model load -- the chosen provider ranks cold, or a first provider refused and
+    the session was re-placed. `elapsedMs` counts from the client's `start`."""
+    frame = {"type": "warming", "protocol": 1}
+    if isinstance(session_id, str) and session_id:
+        frame["sessionId"] = session_id[:128]
+    frame["elapsedMs"] = int((time.time() - t0) * 1000)
+    if expected_ms:
+        frame["expectedMs"] = int(expected_ms)
+    return frame
+
+
+def _session_id_of(first) -> "str | None":
+    try:
+        d = json.loads(first.get("text") or "")
+        sid = d.get("sessionId") if isinstance(d, dict) else None
+        return sid if isinstance(sid, str) else None
+    except Exception:
+        return None
 
 
 @app.websocket(WS_PATH)
@@ -568,6 +741,22 @@ async def ws_transcribe(ws: WebSocket):
     reason = "no speech target"
     retry_after = 30
     up = None
+    warned = 0               # router-origin `warming` frames sent on this session
+    owe_warming = None       # why a `warming` frame is owed once the client holds `started`
+
+    async def send_warming(why):
+        """One router-origin `warming` frame per placement that may wait for a load.
+        The cause (`why`) stays in the journal; the client sees only the frame."""
+        nonlocal warned, owe_warming
+        owe_warming = None
+        warned += 1
+        print(json.dumps({"event": "router_warming", "router_id": ROUTER_ID,
+                          "request_id": ctx["request_id"], "why": why, "n": warned,
+                          "after_ms": round((time.time() - t0) * 1000, 1)}), flush=True)
+        try:
+            await ws.send_json(_warming_frame(_session_id_of(sent[0]) if sent else None, t0))
+        except Exception:
+            pass
 
     async def refuse(why, status=503):
         # The client gets the fixed vocabulary; `why` (engine ids, hosts, device
@@ -605,6 +794,15 @@ async def ws_transcribe(ws: WebSocket):
                 break
             n += 1
             tried.append(target)
+            # A cold provider, or a re-placement after a refusal, may hold the client
+            # past its no-partial watchdog: say so now, not when a node first speaks.
+            why_cold = ("re-placed after a refusal" if n > 1
+                        else "ranked cold" if rec.get("expect") == "cold" or _target_cold(view, target) else None)
+            if why_cold:
+                if acked:
+                    await send_warming(why_cold)
+                else:
+                    owe_warming = why_cold      # sent the moment the client holds `started`
             url = target.replace("http://", "ws://", 1).replace("https://", "wss://", 1) + WS_PATH
             q = ws.url.query
             refused = None
@@ -675,6 +873,8 @@ async def ws_transcribe(ws: WebSocket):
                             if typ == "warming" or not acked:
                                 await ws.send_text(clean)
                             acked = acked or typ in ("started", "resumed")
+                            if owe_warming and acked:
+                                await send_warming(owe_warming)
                         else:
                             if not committed:
                                 committed = True        # an ack / partial means the node admitted and is working

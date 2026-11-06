@@ -1168,8 +1168,13 @@ class HostBroker:
             self._probe_degradation.pop(key, None)
             # Last good read, so a peer that stops ANSWERING is not mistaken for
             # a peer that stops HOLDING. See `_remembered_peer`.
+            try:
+                absent = frozenset(p.authoritative_absent())
+            except Exception:
+                absent = frozenset()          # a Peer need not implement it
             peer_placements = self._with_recently_resident(
-                peer_units, peer_placements, self._clock() if self._clock else 0.0, key)
+                peer_units, peer_placements, self._clock() if self._clock else 0.0, key,
+                absent=absent)
             self._last_good[key] = {"units": peer_units, "placements": peer_placements}
             try:
                 if p.node_id:
@@ -1381,7 +1386,8 @@ class HostBroker:
 
     def _with_recently_resident(self, units: Mapping[str, Unit],
                                 placements: List[Placement], now: float,
-                                key: str = "") -> List[Placement]:
+                                key: str = "",
+                                absent: frozenset = frozenset()) -> List[Placement]:
         """A unit that was resident a moment ago and is reported absent NOW has
         almost certainly not gone anywhere.
 
@@ -1415,6 +1421,13 @@ class HostBroker:
             if peer_of != key:
                 continue                        # another node's memory
             if (kind, did) in here:
+                continue
+            if kind in absent:
+                # The node that owns the process says the unit is gone (it reclaimed
+                # an idle worker). Remembering it resident made the broker GRANT
+                # without dispatching a warm for 90 s -- the provider then refused
+                # "grant did not warm this provider" (observed 2026-11-06 00:50Z).
+                del self._resident_at[(peer_of, kind, did)]
                 continue
             if kind not in units:
                 continue                        # this peer does not serve it
@@ -2756,6 +2769,20 @@ class RestPeer:
         snap = self._s()
         return [Placement(u["kind"], snap["device_id"], busy=u["busy"])
                 for u in snap["units"] if u["resident"]]
+
+    def authoritative_absent(self):
+        """Units this node says are NOT resident, when it is the authority on it.
+
+        `residence_authority: owner` means the report comes from the process that
+        starts and stops the worker (the process-node facade), not from a health
+        probe against a model server that may merely be busy. Its "absent" is a
+        fact, so the broker must not keep believing the unit resident for
+        `residency_grace_s` (see `_with_recently_resident`). Empty for every node
+        that does not say so: their absence stays a sample."""
+        snap = self._s() or {}
+        if snap.get("residence_authority") != "owner":
+            return frozenset()
+        return frozenset(u["kind"] for u in snap.get("units", []) if not u.get("resident"))
 
     def device_memory(self):
         """Measured free resource vector (e.g. {"vram_bytes": ...}) the node read off

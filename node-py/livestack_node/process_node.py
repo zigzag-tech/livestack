@@ -237,26 +237,30 @@ class ProcessNode:
         if unit not in self.rows:
             raise HTTPException(400, 'unknown managed unit')
         async with self.lock:
-            await self._refresh()
-            if unit in self.resident:
-                self.last_used = time.monotonic()
-                return {'resident':sorted(self.resident),'device':self.config['device_id']}
-            if self._protected():
-                raise HTTPException(409, 'worker is busy; retry admission')
-            if headers: self.control_headers = headers
-            try:
-                await self._start()
-                result = await self._request('POST', '/livestack/model/warm',
-                    json={'unit':unit,'device':self.config['device_id'], **({'budget':budget} if budget else {})},
-                    headers=self.control_headers, timeout=self.config.get('warm_timeout',600))
-                if unit not in result.get('resident', []):
-                    raise RuntimeError('worker_did_not_acknowledge_residency')
-                self.resident = set(result['resident'])
-                self.last_used = time.monotonic()
-                return result
-            except BaseException:
-                if not self._protected(): await self._stop()
-                raise
+            return await self._warm_locked(unit, headers, budget)
+
+    async def _warm_locked(self, unit, headers=None, budget=None):
+        """Make `unit` resident. The caller holds self.lock."""
+        await self._refresh()
+        if unit in self.resident:
+            self.last_used = time.monotonic()
+            return {'resident':sorted(self.resident),'device':self.config['device_id']}
+        if self._protected():
+            raise HTTPException(409, 'worker is busy; retry admission')
+        if headers: self.control_headers = headers
+        try:
+            await self._start()
+            result = await self._request('POST', '/livestack/model/warm',
+                json={'unit':unit,'device':self.config['device_id'], **({'budget':budget} if budget else {})},
+                headers=self.control_headers, timeout=self.config.get('warm_timeout',600))
+            if unit not in result.get('resident', []):
+                raise RuntimeError('worker_did_not_acknowledge_residency')
+            self.resident = set(result['resident'])
+            self.last_used = time.monotonic()
+            return result
+        except BaseException:
+            if not self._protected(): await self._stop()
+            raise
 
     async def evict(self, unit, headers=None):
         async with self.lock:
@@ -369,8 +373,18 @@ class ProcessNode:
                                 headers={'Retry-After':'30'})
         async with self.lock:
             if not self._alive() or unit not in self.resident:
-                log.warning('admission granted but the provider is not resident')
-                raise HTTPException(503,'Harmony grant did not warm this provider')
+                # The broker granted without dispatching a warm because its picture of
+                # this node said the unit was resident (it keeps a unit it stopped
+                # hearing about "resident" for `residency_grace_s`, so a worker this
+                # facade reclaimed on idle looks warm for up to 90 s; observed
+                # 2026-11-06 00:50-00:51Z). The grant stands and the planner already
+                # counts the unit's memory as taken, so load it here under that grant
+                # rather than refuse a request the fleet said yes to.
+                log.warning('admission granted but the provider is not resident; warming it under the grant')
+                try: await self._warm_locked(unit)
+                except Exception as exc:
+                    log.warning('warming under the grant failed: %s', type(exc).__name__)
+                    raise HTTPException(503,'Harmony grant did not warm this provider') from None
             token = uuid.uuid4().hex
             self.holds[token] = owner or asyncio.current_task()
             self.last_used = time.monotonic()
@@ -435,7 +449,12 @@ class ProcessNode:
             row.update(residency=2,resident=name in self.resident,
                        busy=bool(self._protected() or self.last_error))
             rows.append(row)
+        # `residence_authority: owner` -- this report comes from the process that starts
+        # and stops the worker, not from a health probe against a busy server. A unit it
+        # lists as not resident is NOT resident (an unreachable worker keeps its last
+        # residents, `_refresh`), so a broker may stop remembering it as resident at once.
         result = dict(host_id=self.config['host_id'],node_id=self.config['node_id'],
+                      residence_authority='owner',
                       device_id=self.config['device_id'],device_candidates=[self.config['device_id']],
                       units=rows,process_mem=self.last_child_report.get('process_mem') or
                       {'allocated_bytes':0,'reserved_bytes':0},

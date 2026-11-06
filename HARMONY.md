@@ -1451,6 +1451,56 @@ only (tokens + route hints); no audio or transcript is stored by it or by the ro
   `regional-relay-zz-tower2-cn.json` from its own node table, which does not list `harmony-asr`, and
   restarts the relay without a quiet check. After any relay deploy run `apply.sh` again
   (idempotent: `no change` when present) and confirm the target with `relay_target.py`'s output.
+- **Cold starts: the `warming` frame and the warm hint (2026-11-06).** A dictation placed on a
+  provider that must load its model (or re-placed after a refusal) can sit silent past the
+  client's ~10 s no-partial watchdog. Observed 2026-11-06 00:50:45Z: the Mac refused, the session
+  moved to a cold zz-joe (~15 s load) and the watchdog fired first. Now:
+  - **Client frame.** The router sends `{"type":"warming","protocol":1,"sessionId":"<the client's
+    sessionId>","elapsedMs":<ms since the client's start>}` as soon as it knows the session may
+    wait for a load: right after the client's `started` when the chosen provider's `asr` unit is
+    not resident in the fleet view (`_target_cold`), and immediately on every re-placement after
+    a refusal. A node's own `warming` frames (about once a second while its admission is pending)
+    are forwarded too, now with `elapsedMs` and `expectedMs` (the node's last measured cold load,
+    when known); every other field is dropped by the per-type whitelist. The frame has no
+    reason, host or engine in it. **Client contract:** treat `warming` as "alive, still preparing":
+    restart the no-partial watchdog on each one (they come within ~1 s of `start`, then ~1/s from
+    the node) and, if `expectedMs` is present, allow `expectedMs` plus a margin from the first
+    one; stop extending on the first `partial`/`final`/`error`. The first router-origin frame
+    carries no `expectedMs`. The cause (`ranked cold` / `re-placed after a refusal`) is in the
+    journal as `{"event":"router_warming",...}`.
+  - **Warm hint** `POST /v1/audio/warm` (credential required: the caller's bearer, or a
+    query token, forwarded to the node like a real session; a configured principal table must
+    recognise it). Answer is always `202 {"status":"accepted","request_id":...}`; a probe learns
+    nothing about the fleet. The router picks the likely provider(s) with the same ranking a real
+    session uses (`HARMONY_ROUTER_PREWARM_TARGETS`, default 1, max 2) and opens a short
+    `/ws/transcribe` session on each: a `start` frame, i.e. ordinary request-driven admission, so
+    Harmony's planner grants and warms the provider. The session is closed when the node's
+    `warming` frames stop for `HARMONY_ROUTER_PREWARM_SETTLE_S` (2.5 s) or after
+    `HARMONY_ROUTER_PREWARM_MAX_S` (60 s); from then the provider's ordinary idle timer runs
+    (60 s on the fleet), so a hint never keeps a provider warm longer than a real session would.
+    No pin, no preload, no credential held by the router, no call to a node control surface.
+    A provider asked within `HARMONY_ROUTER_PREWARM_COOLDOWN_S` (30 s), or still being asked,
+    is skipped; at most `HARMONY_ROUTER_PREWARM_MAX_INFLIGHT` (4) run at once. Journal:
+    `{"event":"router_prewarm","target","outcome":"settled|max|refused|failed|skipped","ms"}`.
+    The hub calls it when a phone fetches the ASR manifest (relay mapping for this path is the
+    relay owner's; the router side is complete).
+  - **Journal visibility.** The unit and env set `PYTHONUNBUFFERED=1`; without it a
+    redirected stdout buffered `router_public_error`, `router_warming` and `router_prewarm` for
+    minutes (only startup lines reached the journal). The causes stay server-side.
+- **Why the Mac refused "grant did not warm this provider" (2026-11-06 00:50:45Z, 00:51:19Z) and
+  what changed.** The Mac's polyasr facade (process-node) reclaims its worker 60 s after the last
+  session. The Mac's host broker kept the unit "resident" for `residency_grace_s` (90 s: a debounce
+  so a busy node's one missed health probe is not an eviction, `_with_recently_resident`), so a new
+  admission was granted as `resident` (decision ledger: reason `resident`, no `loaded on demand`,
+  no `measured free`) and no warm was dispatched; `process_node.begin()` then found no worker and
+  refused. 00:54:03Z was past the grace window, so the broker dispatched the warm (`demand:`
+  decision) and it worked. Fixes: (1) a process-node facade now says `residence_authority: owner`
+  in `/livestack/residence`, and `RestPeer.authoritative_absent()` makes the broker drop the sticky
+  memory for any unit such an owner reports not resident (a busy or unreachable worker keeps its
+  last residents in the facade, so its absence is a fact, not a sample); (2) `begin()` warms the
+  unit itself under the grant when a stale belief reaches it anyway, instead of refusing.
+  The broker fix needs the new `hostbroker.py` on the host running hostd; the facade fix needs a new
+  process-node release (the Mac runs release `e2fb4bbace24e144`, 2026-10-29).
 - **Not done yet:** the hub does not emit a `harmony-asr` route (a hub change, release
   train), so no phone reaches the target yet; TTS has no router mount; histo-one (NA)
   has no router; tailnet phones still dial engines directly.

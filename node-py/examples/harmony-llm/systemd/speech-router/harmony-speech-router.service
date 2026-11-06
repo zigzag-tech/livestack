@@ -8,6 +8,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=%h/.config/harmony-speech-router/env
+# Journal lines (router_public_error, router_warming, router_prewarm) must not sit in a pipe buffer.
+Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=%h/.local/share/harmony-speech-router/current/node-py
 WorkingDirectory=%h/.local/share/harmony-speech-router/current/node-py/examples/harmony-llm
 ExecStart=%h/.local/share/harmony-speech-router/venv/bin/python router.py
