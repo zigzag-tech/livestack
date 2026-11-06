@@ -182,3 +182,19 @@ These fix the morning's four 503s; see HARMONY.md, "Four 503s in one morning".
 - After the switch, the chain's next take (10:58) holds both leases (rows 319/320), stamped with the tower's real boot id `7b2eab2d-…`. A same-boot open of the store by any main-code process is now harmless.
 
 Roll back: `deploy-busy-tenant.sh --rollback` (back to `caller-gone-on-holder-first` and `imagegen-hangup-20261103`).
+
+## Deployed: stale-resident grants (6f5f19fe), 2026-11-06
+
+**Symptom:** qwen text-to-image requests got 503 "Harmony grant did not warm this provider".
+
+**Cause:** at 12:45:28 (tower time) hostd evicted `qwen_image_2512` to make room for drama3. The harmony-image facade finished the job it was running and stopped the worker at 12:45:32. hostd's snapshots in between still saw qwen resident, and hostd remembers a resident unit for 90 s (`residency_grace_s`). So from 12:45:38 to 12:46:37 it granted eight qwen icon requests as "resident" without dispatching a warm (decision ledger: `grant … resident; measured free 25 GB`), and the facade refused each one. 6f5f19fe was already on main; this deploy puts it on the tower.
+
+**Releases:**
+- hostd: `stale-resident-6f5f19fe-on-device-busy`, which is `device-busy-dd5e748c` plus 6f5f19fe's `hostbroker.py` hunks (`authoritative_absent`, `absent=`).
+- harmony-image facade: `c1761ed3ec8f29b5`, which is `5619d4e8d1e093c4` after `node-py/scripts/backport-process-node-stale-resident.py`. The residence report now says `residence_authority: owner`, and `begin()` warms under a stale grant. `mesh_outbound_py/` was copied unchanged.
+
+**Tests, run on the tower with its venvs:**
+- 6f5f19fe's hostbroker test fails on the old release and passes on the new one (95/96; the one failure is the device-hold test, a feature this release predates).
+- Its two facade tests, run against each facade file, fail on the old file and pass on the new one. The two other failures fail on both files; they test features these releases predate.
+
+**Deploy:** `~/.local/share/livestack-releases/deploy-stale-resident.sh [--rollback]` at 13:13:05. It waits for no active lease, no open :8210/:8211 connection, and nothing in flight on polyasr or drama3; it reads `load.in_flight` there, because the speech router keeps idle keep-alive connections. `~/histo-scroll/PAUSE` was set from 13:12 to 13:13. The backups are `*.before-stale-resident-*` in `/etc/systemd/system/`. After the restart, `GET :8210/livestack/residence` carries `residence_authority: owner`. The other facades are unchanged; the hostd half alone stops the stale grants for them once they report owner authority, which they do not yet.
