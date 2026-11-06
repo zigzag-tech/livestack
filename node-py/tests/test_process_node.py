@@ -89,6 +89,24 @@ class ProcessNodeTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.status_code, 503)
             self.assertIsNone(self.node.process)
 
+    async def test_a_grant_for_a_unit_the_broker_thinks_resident_warms_it_instead_of_refusing(self):
+        # Observed 2026-11-06: the facade reclaimed an idle worker; the broker still
+        # remembered the unit resident, granted without dispatching a warm, and the
+        # session was refused "grant did not warm this provider".
+        async def admit(unit): return {'granted':True,'device_id':self.cfg['device_id']}   # no warm dispatched
+        self.node.admit = admit
+        self.assertIsNone(self.node.process)
+        token = await self.node.begin('asr')
+        self.assertIsNotNone(self.node.process)
+        self.assertIn('asr', self.node.resident)
+        self.assertIn(token, self.node.holds)
+        self.node.finish(token)
+
+    async def test_the_residence_report_says_its_owner_vouches_for_absence(self):
+        report = await self.node.residence()
+        self.assertEqual(report['residence_authority'], 'owner')
+        self.assertTrue(all(not u['resident'] for u in report['units']))
+
     async def test_refusal_carries_the_planner_reason_and_busy_device_reports_not_ready(self):
         async def admit(_unit): return {'granted':False,'defer_reason':'device held by an image job'}
         self.node.admit = admit

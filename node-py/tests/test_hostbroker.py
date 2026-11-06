@@ -1408,6 +1408,28 @@ def test_a_unit_that_stays_gone_is_eventually_believed():
         "a unit that is really gone should be placed again"
 
 
+def test_a_unit_its_owner_says_is_gone_is_not_remembered_resident():
+    # The process-node facade starts and stops its worker, so its "not resident"
+    # is a fact, not a probe that timed out on a busy server. Remembering the unit
+    # resident for the grace window made the broker GRANT without dispatching a warm
+    # (2026-11-06 00:50-00:51Z: Mac polyasr reclaimed on idle, then two dictations
+    # refused "grant did not warm this provider").
+    broker, a, b, clock = _two_card_discovered_host()
+    broker.residency_grace_s = 90.0
+    broker.plan_and_apply([])
+    holder = next(p for p in (a, b) if ("warm", "llm_title") in p.calls)
+    holder.arrive()
+    clock["t"] += 30
+    broker.plan_and_apply([])
+
+    holder._resident = False                     # the owner reclaimed it
+    holder.authoritative_absent = lambda: frozenset({"llm_title"})
+    clock["t"] += 20                             # well inside the 90 s grace
+    broker.plan_and_apply([])
+    assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 2, \
+        "an owner-confirmed absence must be acted on at once, not after the grace window"
+
+
 def _image_routing_unit(kind, quantization="nf4", depth=False):
     attributes = {
         "class": "imagegen", "task": "text_to_image",

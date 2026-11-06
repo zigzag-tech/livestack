@@ -45,14 +45,27 @@ class Loop:
 
 class FakeNode:
     def __init__(self, lp, mode="ok"):
-        self.got, self.mode, self.starts = [], mode, 0
+        self.got, self.mode, self.starts, self.closed = [], mode, 0, 0
 
         async def handler(ws):
+            try:
+                await serve_one(ws)
+            finally:
+                self.closed += 1
+
+        async def serve_one(ws):
             async for m in ws:
                 self.got.append(m)
                 if isinstance(m, str) and json.loads(m).get("type") == "start":
                     self.starts += 1
                     await ws.send(json.dumps({"type": "started", "protocol": 1, "sessionId": "s", "ackSeq": -1}))
+                    if self.mode == "loading":
+                        # a cold admission: the node's own warming notes (with extras a client must not see)
+                        for i in range(3):
+                            await asyncio.sleep(0.3)
+                            await ws.send(json.dumps({"type": "warming", "sessionId": "s", "elapsedMs": 300 * (i + 1),
+                                                      "expectedMs": 15000, "engine": "ENGINE-ID-7f3a"}))
+                        continue
                     if self.mode == "busy":
                         await ws.send(json.dumps({"type": "error", "error": "Harmony did not grant this device: held by image"}))
                         await ws.close(code=1013, reason="busy")
@@ -82,11 +95,11 @@ class FakeNode:
     async def _start(self, handler):
         return await serve(handler, "127.0.0.1", 0)
 
-    def row(self, streaming="native", in_flight=0):
+    def row(self, streaming="native", in_flight=0, resident=True):
         return {"peer": f"http://127.0.0.1:{self.port}/livestack", "state": "fresh", "ready": True,
                 "kinds": ["polyasr"], "region": "na", "detail": "x", "load": {"in_flight": in_flight},
                 "inventory": {"asr": {"streaming": streaming}},
-                "units": [{"kind": "asr", "resident": True}]}
+                "units": [{"kind": "asr", "resident": resident}]}
 
 
 @pytest.fixture
@@ -280,3 +293,84 @@ def test_frames_are_whitelisted_per_type_so_node_extras_never_reach_the_client(w
     assert by["final"] == {"type": "final", "sessionId": "s", "stopId": "x", "text": "hi", "recognizedThroughSeq": 3}
     assert by["done"] == {"type": "done", "sessionId": "s", "stopId": "x"}
     assert by["error"]["error"] == "unavailable"                     # the typeless exception frame
+
+
+def _frame_times(url, wait=4.0, until=("partial", "error")):
+    """(frame, seconds since start) for each frame until one of `until` arrives."""
+    async def go():
+        out, t0 = [], time.time()
+        async with connect(url) as ws:
+            await ws.send(START)
+            await ws.send(b"\x00" * 64)
+            try:
+                while True:
+                    f = json.loads(await asyncio.wait_for(ws.recv(), wait))
+                    out.append((f, time.time() - t0))
+                    if f["type"] in until:
+                        break
+            except Exception:
+                pass
+        return out
+    return Loop().run(go())
+
+
+def test_a_cold_provider_gets_a_router_warming_frame_right_after_started(world):
+    url, (node,) = world(("ok", {"resident": False}))
+    frames = _frame_times(url)
+    types = [f["type"] for f, _ in frames]
+    assert types[:2] == ["started", "warming"] and "partial" in types
+    warming, at = frames[1]
+    assert at < 1.0
+    assert warming["protocol"] == 1 and warming["sessionId"] == "s" and isinstance(warming["elapsedMs"], int)
+    assert set(warming) <= {"type", "protocol", "sessionId", "elapsedMs", "expectedMs"}
+
+
+def test_a_warm_provider_gets_no_router_warming_frame(world):
+    url, (node,) = world(("ok", {"resident": True}))
+    assert "warming" not in [f["type"] for f, _ in _frame_times(url)]
+
+
+def test_a_replacement_after_a_refusal_says_warming_even_when_the_next_provider_ranks_warm(world):
+    url, (busy, ok) = world(("busy", {"in_flight": 0}), ("ok", {"in_flight": 1}))
+    types = [f["type"] for f, _ in _frame_times(url)]
+    assert types.count("started") == 1 and types.count("warming") == 1
+    assert types.index("started") < types.index("warming") < types.index("partial")
+
+
+def test_a_node_warming_frame_keeps_its_timing_and_loses_everything_else(world):
+    url, (node,) = world(("loading", {"resident": True}))
+    frames = [f for f, _ in _frame_times(url, wait=2.0, until=("error",))]
+    warm = [f for f in frames if f["type"] == "warming"]
+    assert warm and warm[-1] == {"type": "warming", "sessionId": "s", "elapsedMs": 900, "expectedMs": 15000}
+    assert "ENGINE-ID-7f3a" not in json.dumps(frames)
+
+
+def _warm_hint(url, **kw):
+    import httpx
+    base = url.replace("ws://", "http://").rsplit("/ws/", 1)[0]
+    return httpx.post(base + "/v1/audio/warm", **kw)
+
+
+def test_the_warm_hint_starts_a_short_session_on_the_likely_provider_then_lets_go(world, router):
+    router._prewarm_last.clear()
+    url, (node,) = world(("loading", {"resident": False}))
+    r = _warm_hint(url, headers={"authorization": "Bearer x"})
+    assert r.status_code == 202 and r.json()["status"] == "accepted" and r.json()["request_id"]
+    deadline = time.time() + 8
+    while node.closed == 0 and time.time() < deadline:
+        time.sleep(0.1)
+    assert node.starts == 1 and node.closed == 1          # asked once, then released
+    assert json.loads(node.got[0])["sessionId"].startswith("warm-")
+    # asked again inside the cooldown: no second session, same opaque answer
+    assert _warm_hint(url, headers={"authorization": "Bearer x"}).status_code == 202
+    time.sleep(0.5)
+    assert node.starts == 1
+
+
+def test_the_warm_hint_needs_a_credential_and_never_names_the_fleet(world, router):
+    router._prewarm_last.clear()
+    url, (node,) = world(("ok", {}))
+    r = _warm_hint(url)
+    assert r.status_code == 401 and node.starts == 0
+    ok = _warm_hint(url, headers={"authorization": "Bearer x"})
+    assert ok.status_code == 202 and set(ok.json()) == {"status", "request_id"}
