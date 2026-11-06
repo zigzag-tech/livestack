@@ -418,8 +418,30 @@ class _Replay:
         return None
 
 
+_CAUSE_CODES = (  # (substring of the lowercased refusal text, token); first match wins
+    ("device_busy", "device_busy"), ("did not grant", "device_busy"), ("busy", "device_busy"),
+    ("held", "device_busy"), ("no polyasr target", "no_capacity"), ("no speech target", "no_capacity"),
+    ("no target", "no_capacity"), ("no attempt", "no_capacity"), ("timeout", "timeout"),
+    ("timed out", "timeout"), ("upstream_closed", "upstream_closed"), ("connect", "unreachable"),
+)
+
+
+def cause_code(text) -> "str | None":
+    """The refusal text boiled down to a short lowercase token (`device_busy`,
+    `no_capacity`, ...), or `refused` when nothing known matches. The ROUTE log
+    keeps the token next to the free text so a consumer that must not carry
+    engine ids or hosts (the hub's `asr_outcomes.cause`) joins on the token."""
+    if text is None or text == "":
+        return None
+    low = str(text).lower()
+    for needle, code in _CAUSE_CODES:
+        if needle in low:
+            return code
+    return "refused"
+
+
 def route_row(ctx: dict, router_id: str, outcome: str, status: int,
-              now: "float | None" = None) -> dict:
+              now: "float | None" = None, cause: "str | None" = None) -> dict:
     """The router's own record of a request it placed, for the ROUTE log (kept
     apart from the demand log: its readers count a record as a request served,
     and the target serves it). Joined to the target's demand record by
@@ -430,7 +452,8 @@ def route_row(ctx: dict, router_id: str, outcome: str, status: int,
             "owner_ns": ctx.get("owner_ns"),
             "requirement_hash": ctx.get("requirement_hash"),
             "fleet_route": ctx.get("fleet_route"), "outcome": outcome,
-            "http_status": status, "elapsed_ms": round((now - ctx["t0"]) * 1000, 1)}
+            "http_status": status, "elapsed_ms": round((now - ctx["t0"]) * 1000, 1),
+            "cause": (str(cause)[:200] if cause else None), "cause_code": cause_code(cause)}
 
 
 def _same(a: str, b: str) -> bool:
