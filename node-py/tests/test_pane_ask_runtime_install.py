@@ -51,16 +51,18 @@ def test_unqualified_profile_refuses_before_loading_any_credential(tmp_path):
     assert app.state.pane_ask_runtime_refusal['detail'] == 'extraction runtime prerequisites refused: profile digest and qualification'
 
 
-def waived_artifacts():
+def waived_artifacts(profile_id='pane-ask-27b-v1:unqualified'):
     candidate = engine()
+    if profile_id == 'pane-ask-flash-next-v1:unqualified':
+        candidate = replace(candidate, profile_id=profile_id, family='qwen', unit='flash_next', params_b=125)
     waiver = json.dumps({'version': 1, 'decision': 'waive-qualification',
         'scope': 'internal-testing', 'operator': 'settinghead',
-        'profile_id': 'pane-ask-27b-v1:unqualified', 'unit': candidate.unit,
+        'profile_id': profile_id, 'unit': candidate.unit,
         'model_revision': candidate.model_revision, 'tokenizer_hash': candidate.tokenizer_hash,
         'reason': 'Explicit operator acceptance; no measured qualification claimed.'}).encode()
     marker = 'operator-waiver:sha256:' + hashlib.sha256(waiver).hexdigest()
     candidate = replace(candidate, qualification_hash=marker)
-    profile = json.loads((DATA_DIR/'profiles'/'pane-ask-27b-v1.json').read_bytes())
+    profile = json.loads((DATA_DIR/'profiles'/f'{profile_id.split(":")[0]}.json').read_bytes())
     profile.update(qualification_hash=marker, calibration_hash=marker, physical_kinds=[candidate.unit])
     return candidate, waiver, json.dumps(profile).encode()
 
@@ -74,8 +76,9 @@ def test_operator_marker_alone_cannot_bypass_private_receipt():
             replace(candidate, model_revision='different-model'), operator_waiver_raw=waiver)
 
 
-def test_private_operator_waiver_installs_clients_without_claiming_qualification(tmp_path):
-    candidate, waiver, profile = waived_artifacts()
+@pytest.mark.parametrize('profile_id', ['pane-ask-27b-v1:unqualified', 'pane-ask-flash-next-v1:unqualified'])
+def test_private_operator_waiver_installs_clients_without_claiming_qualification(tmp_path, profile_id):
+    candidate, waiver, profile = waived_artifacts(profile_id)
     def private(name, raw):
         path = tmp_path/name; path.write_bytes(raw); path.chmod(0o600); return str(path)
     config = {'version': 1, 'engine': candidate.__dict__,
@@ -90,10 +93,20 @@ def test_private_operator_waiver_installs_clients_without_claiming_qualification
     async def run():
         app = FastAPI()
         clients = await configure_pane_ask_runtime(app, host_id='host-control',
-            device_id='device-control', units={'llm_general': object()}, config_path=path)
+            device_id='device-control', units={candidate.unit: object()}, config_path=path)
         assert len(clients) == 2
         assert app.state.pane_ask_runtime is not None
         assert app.state.pane_ask_runtime.adapter.engine.qualification_hash.startswith('operator-waiver:sha256:')
         for client in clients:
             await client.aclose()
     asyncio.run(run())
+
+
+def test_flash_next_cannot_reuse_legacy_operator_receipt():
+    candidate, waiver, raw = waived_artifacts('pane-ask-flash-next-v1:unqualified')
+    _, legacy_waiver, _ = waived_artifacts()
+    with pytest.raises(ContractError):
+        validate_registry_profile(raw, hashlib.sha256(raw).hexdigest(), candidate,
+                                  operator_waiver_raw=legacy_waiver)
+    assert validate_registry_profile(raw, hashlib.sha256(raw).hexdigest(), candidate,
+                                    operator_waiver_raw=waiver)['profile_id'] == candidate.profile_id

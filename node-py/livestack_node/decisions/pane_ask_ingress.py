@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from .admission import Admission
 from .auth import authenticate_decision
 from .contract import ContractError, MAX_BODY_BYTES, validate_request
-from .extraction_contract import PROFILE_ID
+from .extraction_contract import EXTRACTION_PROFILE_IDS
 from .execution_uncertain import ExecutionUnconfirmed
 from .nominal_27b_adapter import Nominal27BExtractionAdapter
 from .resident_extraction_scope import ResidentExtractionScope
@@ -65,12 +65,14 @@ def install_pane_ask_route(app, principals_supplier):
             # expired requests retain their contract cause.
             now = runtime.adapter.now_ms() if isinstance(runtime, PaneAskRuntime) else int(time.time() * 1000)
             validate_request(payload, now_ms=now)
-            if payload["profile_id"] != PROFILE_ID or payload["questions"][0]["type"] != "extraction":
+            if payload["profile_id"] not in EXTRACTION_PROFILE_IDS or payload["questions"][0]["type"] != "extraction":
                 raise ContractError("unsupported_profile", "facade serves only pinned pane-ask extraction", 422)
             if not isinstance(runtime, PaneAskRuntime):
                 refusal = getattr(app.state, 'pane_ask_runtime_refusal', None)
                 detail = refusal['detail'] if isinstance(refusal, dict) and refusal.get('cause') == 'profile_unavailable' else "qualified pane-ask runtime is not installed"
                 raise ContractError("profile_unavailable", detail, 503)
+            if payload["profile_id"] != runtime.adapter.engine.profile_id:
+                raise ContractError("profile_unavailable", "installed extraction runtime serves a different profile", 503)
             scope = getattr(app.state, "pane_ask_execution_scope", None)
             if not isinstance(scope, ResidentExtractionScope):
                 raise ContractError("profile_unavailable", "resident extraction protection is not installed", 503)
@@ -80,7 +82,7 @@ def install_pane_ask_route(app, principals_supplier):
                 raise ContractError("invalid_input", "pane-ask deadline exceeds eight seconds", 400)
             try:
                 candidate = await asyncio.wait_for(runtime.admit(owner=owner, realm=realm,
-                    profile_id=PROFILE_ID, request_id=payload["request_id"],
+                    profile_id=payload["profile_id"], request_id=payload["request_id"],
                     deadline_at_ms=payload["deadline_at_ms"]), max(0, remaining) / 1000)
             except TimeoutError as exc:
                 raise ContractError("deadline_exceeded", "decision admission deadline exceeded", 504) from exc

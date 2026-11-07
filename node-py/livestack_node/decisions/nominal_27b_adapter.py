@@ -15,7 +15,7 @@ import httpx
 
 from .admission import Admission
 from .contract import ContractError, MAX_BODY_BYTES, validate_request, validate_result
-from .extraction_contract import PROFILE_ID, validate_extraction
+from .extraction_contract import PROFILE_ID, FLASH_NEXT_PROFILE_ID, validate_extraction
 from .execution_uncertain import ExecutionUnconfirmed
 from .identity import PACKING_VERSION, SCHEMA_VERSION
 
@@ -32,10 +32,15 @@ class QualifiedEngine:
     precision: str
     params_b: float
     model_class: str = "llm"
+    profile_id: str = PROFILE_ID
+    family: str = ""
 
     def validate(self) -> None:
-        if self.model_class != "llm" or not 26 <= self.params_b < 28:
-            raise ContractError("profile_unavailable", "extraction requires the nominal 27B tier", 503)
+        eligible = ((self.profile_id == PROFILE_ID and 26 <= self.params_b < 28)
+                    or (self.profile_id == FLASH_NEXT_PROFILE_ID and self.family == "qwen"
+                        and self.unit == "flash_next" and 120 <= self.params_b < 130))
+        if self.model_class != "llm" or not eligible:
+            raise ContractError("profile_unavailable", "extraction engine does not match its pinned model profile", 503)
         if self.backend not in ("cuda", "mlx"):
             raise ContractError("profile_unavailable", "unsupported extraction backend", 503)
         identities = (self.unit, self.device_id, self.model_revision, self.tokenizer_hash,
@@ -66,7 +71,7 @@ class Nominal27BExtractionAdapter:
     async def infer(self, request: dict, *, admission: Admission) -> dict:
         started = self.now_ms()
         validate_request(request, now_ms=started)
-        if request["profile_id"] != PROFILE_ID or request["questions"][0]["type"] != "extraction":
+        if request["profile_id"] != self.engine.profile_id or request["questions"][0]["type"] != "extraction":
             raise ContractError("unsupported_profile", "adapter serves only pinned pane-ask extraction", 422)
         self.engine.validate()
         if (not admission.granted or not admission.lease_id or admission.kind != self.engine.unit
@@ -131,7 +136,7 @@ class Nominal27BExtractionAdapter:
         elapsed = max(0, self.now_ms() - started)
         result = {
             "schema_version": SCHEMA_VERSION, "request_id": request["request_id"],
-            "evidence_revision": request["evidence_revision"], "profile_id": PROFILE_ID,
+            "evidence_revision": request["evidence_revision"], "profile_id": self.engine.profile_id,
             "outcome": "ok", "answers": {"ask": {"type": "extraction", "value": value}},
             "execution": {"backend": self.engine.backend, "implementation_id": self.engine.unit,
                 "model_revision": self.engine.model_revision, "tokenizer_hash": self.engine.tokenizer_hash,

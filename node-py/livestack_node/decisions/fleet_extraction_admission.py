@@ -36,7 +36,7 @@ class FleetExtractionAdmission:
     async def admit(self, *, owner: str, realm: str, profile_id: str,
                     request_id: str, deadline_at_ms: int) -> Admission:
         self.engine.validate()
-        if profile_id != PROFILE_ID or not owner or not realm or not request_id:
+        if profile_id != self.engine.profile_id or not owner or not realm or not request_id:
             raise ContractError("invalid_input", "extraction admission scope is incomplete", 400)
         remaining = deadline_at_ms - self.now_ms()
         if remaining <= 0:
