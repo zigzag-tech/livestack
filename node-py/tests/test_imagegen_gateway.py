@@ -464,3 +464,16 @@ def test_worker_token_from_callers_can_be_refused(setup, tmp_path):
     response = TestClient(create_app(config, call=call)).post("/v1/images/generations", json={"prompt": "x", "harmony_requires": {"params_b>=": 20}}, headers={"Authorization": "Bearer worker-secret"})
     assert response.status_code == 401
     assert calls == []
+
+
+def test_a_503_names_an_error_that_has_no_message(setup):
+    config, calls, call = setup
+
+    def timing_out(base, method, path, body=None, token=None, timeout=None, cancel=None):
+        if path == "/v1/images/generations":
+            raise TimeoutError()
+        return call(base, method, path, body, token, timeout, cancel)
+
+    response = TestClient(create_app(config, call=timing_out)).post("/v1/images/generations", json={"prompt": "x", "harmony_requires": {"params_b>=": 20}}, headers={"Authorization": "Bearer worker-secret"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == "TimeoutError during the image request"
