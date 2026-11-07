@@ -6,6 +6,8 @@ text questions and interprets the permitted next-token logits.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import math
 from typing import Any, Awaitable, Callable, Mapping
@@ -25,6 +27,15 @@ MAX_OPTIONS = 20  # vLLM's default OpenAI top_logprobs ceiling.
 
 class SimpleJevError(ValueError):
     pass
+
+
+IMAGE_TYPES = frozenset({"image/png", "image/jpeg"})
+
+
+def _images(state: Any) -> list:
+    """The evidence items of a state that are pictures (`{"id", "image": {media_type, b64_json, sha256}}`)."""
+    evidence = state.get("evidence") if isinstance(state, Mapping) else None
+    return [item for item in evidence if isinstance(item, Mapping) and "image" in item] if isinstance(evidence, list) else []
 
 
 def canonical(value: Any) -> str:
@@ -50,6 +61,17 @@ def validate_request(payload: Mapping[str, Any]) -> dict:
                 raise SimpleJevError("messages contain an unsupported role or shape")
             if not isinstance(message.get("content"), str):
                 raise SimpleJevError("Simple Jev accepts text message content only")
+    if "state" in payload:
+        for item in _images(payload["state"]):
+            image = item["image"]
+            if not isinstance(image, Mapping) or image.get("media_type") not in IMAGE_TYPES or not isinstance(image.get("b64_json"), str):
+                raise SimpleJevError(f"evidence {item.get('id')!r}: an image needs media_type ({', '.join(sorted(IMAGE_TYPES))}) and b64_json")
+            try:
+                data = base64.b64decode(image["b64_json"], validate=True)
+            except ValueError as e:
+                raise SimpleJevError(f"evidence {item.get('id')!r}: image b64_json is not base64") from e
+            if image.get("sha256") is not None and hashlib.sha256(data).hexdigest() != image["sha256"]:
+                raise SimpleJevError(f"evidence {item.get('id')!r}: image does not match its sha256")
     normalized = dict(payload)
     normalized_questions = {}
     for qid, raw in questions.items():
@@ -116,7 +138,20 @@ def compile_branch(payload: Mapping[str, Any], qid: str) -> tuple[list[dict], di
     suffix = ("Reminder: answer only the one selected question using the context above and its options or rubric. "
               "Return only the requested JSON answer; do not explain or reason aloud.\nI am going to ask the selected question now.\n\n" +
               plan["instruction"])
-    if "state" in request:
+    if "state" in request and _images(request["state"]):
+        # Image evidence goes in as pictures: the state text names each by id and hash where it stands, and the
+        # pictures follow it, before the question. The unit must take images (the route derives `vision` from them).
+        images = _images(request["state"])
+        state = {**request["state"], "evidence": [
+            {"id": item.get("id"), "image": f"picture {item.get('id')} below (sha256 {item['image'].get('sha256') or hashlib.sha256(base64.b64decode(item['image']['b64_json'])).hexdigest()})"} if "image" in item else item
+            for item in request["state"]["evidence"]]}
+        content = [{"type": "text", "text": "State:\n" + canonical(state) + "\n"}]
+        for item in images:
+            content += [{"type": "text", "text": f"Picture {item.get('id')}:"},
+                        {"type": "image_url", "image_url": {"url": f"data:{item['image']['media_type']};base64,{item['image']['b64_json']}"}}]
+        content.append({"type": "text", "text": "\n" + suffix})
+        messages = [{"role": "system", "content": SYSTEM + prefix}, {"role": "user", "content": content}]
+    elif "state" in request:
         messages = [{"role": "system", "content": SYSTEM + prefix},
                     {"role": "user", "content": "State:\n" + canonical(request["state"]) + "\n\n" + suffix}]
     else:
