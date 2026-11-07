@@ -222,3 +222,18 @@ def test_an_unanswering_facade_does_not_hold_the_leases_to_the_deadline(monkeypa
     assert module._await_worker_idle(call, "http://w", time.monotonic() + 60,
                                      poll_s=0.01, unreachable_s=0.1) is False
     assert time.monotonic() - started < 2
+
+
+def test_a_facade_whose_worker_has_exited_counts_as_idle():
+    """xc-tower-ubuntu, 2026-11-07 09:45-10:02: the FLUX worker stopped on the
+    cut and exited, but its facade still reported busy (a stale last_error), and
+    the gateway held both leases until the facade was restarted."""
+    from livestack_node.imagegen import gateway as module
+    reports = []
+
+    def call(base, method, path, *a, **k):
+        reports.append(path)
+        return {"units": [{"kind": "flux", "busy": True}],
+                "worker": {"running": False, "pid": None, "last_error": "worker_state_unknown"}}
+    assert module._await_worker_idle(call, "http://w", time.monotonic() + 60, poll_s=0.01) is True
+    assert reports == ["/livestack/residence"]
