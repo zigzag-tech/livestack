@@ -216,6 +216,11 @@ class WorkloadWorker:
                 max_bytes=config['input_cache_bytes'], max_entries=config.get('input_cache_entries', 32),
                 retention_seconds=config.get('input_cache_retention_seconds', 14*86400), mirror=mirror,
                 retained_seconds=config.get('input_cache_retained_seconds', 7*86400))
+        self.store_guard = None
+        if config.get('store_guard') is not None:
+            from .store_guard import StoreGuard
+            self.store_guard = StoreGuard(config['store_guard'], workspace=self.workspace, state_dir=config['state_dir'])
+            self.store_guard.check_environment(config.get('environment'))
         self.reconciled = False
         self._host_pressure_state = None
         try:
@@ -380,6 +385,9 @@ class WorkloadWorker:
         path = Path(path)
         try:
             if path.exists():
+                if self.store_guard is not None:
+                    # Last look before the attempt's tree disappears: a model repo it wrote is a named violation.
+                    self.store_guard.scan(root=path)
                 remove_data(path)
                 rmtree_writable(path)
             self.stuck_workspaces.pop(str(path), None)
@@ -1145,6 +1153,8 @@ class WorkloadWorker:
         self._retry_stuck_workspaces()
         if self.input_cache:
             self.input_cache.prune()
+        if self.store_guard:
+            self.store_guard.tick()
         if self.task_environments and time.monotonic() >= self._environment_sweep_at:
             try:
                 self.task_environments.prune()
@@ -1179,6 +1189,8 @@ class WorkloadWorker:
         HARMONY_OWNER is the end user's owner string (labels.owner) when the
         submitter named one, else the submitting principal itself."""
         env = dict(self.config.get('environment', {}))
+        if self.store_guard is not None:
+            env.update(self.store_guard.job_env())
         spec = assignment['spec']
         owner = (spec.get('labels') or {}).get('owner') or assignment['owner']
         env.update(HOME=str(root/'home'), TMPDIR=str(root/'tmp'),
