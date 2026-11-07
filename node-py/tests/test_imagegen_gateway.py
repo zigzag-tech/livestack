@@ -433,9 +433,14 @@ def test_caller_principal_is_admitted_under_its_owner(setup, tmp_path):
 
     client = TestClient(create_app(config, call=recording))
     body = {"prompt": "A frieze", "harmony_requires": {"params_b>=": 20}}
-    response = client.post("/v1/images/generations", json=body, headers={"Authorization": "Bearer histo-caller-secret-0001", "X-Harmony-Owner": "histo:history-scroll"})
+    headers = {"Authorization": "Bearer histo-caller-secret-0001", "X-Harmony-Owner": "histo:history-scroll"}
+    response = client.post("/v1/images/generations", json=body, headers=headers)
     assert response.status_code == 200
-    assert owners == ["histo:history-scroll"]
+    # The broker admits under the gateway's own owner unless its fleet principal relays callers.
+    assert owners == ["acct_harmony-image"]
+    config["admit_as_caller"] = True
+    assert TestClient(create_app(config, call=recording)).post("/v1/images/generations", json=body, headers=headers).status_code == 200
+    assert owners == ["acct_harmony-image", "histo:history-scroll"]
     assert response.json()["harmony"]["owner"] == "histo:history-scroll"
     assert response.json()["harmony"]["principal"] == "histo"
     # The worker token is still the gateway's own credential for the worker call.
