@@ -162,7 +162,12 @@ def _await_worker_idle(call, endpoint, deadline, poll_s=None, unreachable_s=30.0
         try:
             report = call(endpoint, "GET", "/livestack/residence", timeout=10)
             unreachable_since = None
-            if not any(unit.get("busy") for unit in report.get("units", [])):
+            # A facade whose worker process is not running has no GPU work, whatever
+            # its units say: an older facade kept `last_error` (so busy=true) after its
+            # worker exited, and a cut on xc-tower-ubuntu (2026-11-07 09:45) held both
+            # leases 17 min past the worker's exit, until the facade was restarted.
+            if (report.get("worker", {}).get("running") is False
+                    or not any(unit.get("busy") for unit in report.get("units", []))):
                 return True
         except (RuntimeError, OSError, ValueError):
             unreachable_since = unreachable_since or time.monotonic()
