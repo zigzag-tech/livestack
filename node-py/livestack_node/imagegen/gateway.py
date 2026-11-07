@@ -144,6 +144,35 @@ def _device_leases(profile, token, wait_deadline, cancel=None):
         yield [grants[device_id] for device_id in profile["device_ids"]]
 
 
+WORKER_IDLE_POLL_S = 2.0
+
+
+def _await_worker_idle(call, endpoint, deadline, poll_s=None, unreachable_s=30.0):
+    """Wait until the worker's facade reports every unit idle, or ``deadline`` (monotonic).
+
+    A worker call that was cut (the caller hung up) or failed does not stop the
+    GPU work behind it at once. Releasing the device leases first left a FLUX job
+    generating on both cards with no lease (xc-tower-ubuntu, 2026-11-07: 06:43 and
+    08:47); the next request's drain saw its memory as external and timed out at
+    240 s, three times in a row. So the leases are kept until the worker is idle.
+    A facade that stops answering for ``unreachable_s`` is taken as gone (its
+    process owns the worker), not as busy for the rest of the deadline."""
+    unreachable_since = None
+    while True:
+        try:
+            report = call(endpoint, "GET", "/livestack/residence", timeout=10)
+            unreachable_since = None
+            if not any(unit.get("busy") for unit in report.get("units", [])):
+                return True
+        except (RuntimeError, OSError, ValueError):
+            unreachable_since = unreachable_since or time.monotonic()
+            if time.monotonic() - unreachable_since >= unreachable_s:
+                return False
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(WORKER_IDLE_POLL_S if poll_s is None else poll_s)
+
+
 def create_app(config=None, call=json_call):
     config = config or json.loads(Path(os.environ["HARMONY_IMAGE_GATEWAY_CONFIG"]).read_text())
     worker_token = Path(config["worker_token_file"]).read_text().strip()
@@ -238,11 +267,21 @@ def create_app(config=None, call=json_call):
                 lease_evidence = json.dumps(lease_ids, separators=(",", ":")) if lease_ids else None
                 if cancel.cancelled:
                     raise transport.Cancelled("the caller hung up before its work started")
-                result = call(endpoint, "POST", "/v1/images/generations", request,
-                              token=worker_token, timeout=request_timeout,
-                              lease_id=lease_evidence, cancel=cancel) if lease_evidence else call(
-                                  endpoint, "POST", "/v1/images/generations", request,
-                                  token=worker_token, timeout=request_timeout, cancel=cancel)
+                worker_deadline = time.monotonic() + request_timeout
+                try:
+                    result = call(endpoint, "POST", "/v1/images/generations", request,
+                                  token=worker_token, timeout=request_timeout,
+                                  lease_id=lease_evidence, cancel=cancel) if lease_evidence else call(
+                                      endpoint, "POST", "/v1/images/generations", request,
+                                      token=worker_token, timeout=request_timeout, cancel=cancel)
+                except BaseException:
+                    if lease_ids:
+                        print(f"image ingress: worker call to {endpoint} ended early; holding "
+                              f"{len(lease_ids)} device lease(s) until it reports idle", flush=True)
+                        idle = _await_worker_idle(call, endpoint, worker_deadline)
+                        print(f"image ingress: {endpoint} {'idle' if idle else 'still busy at request_timeout_s'}; "
+                              "releasing device leases", flush=True)
+                    raise
                 actual = result.get("harmony", {})
                 if actual.get("unit") != grant["kind"] or actual.get("device_id") != grant["device_id"]:
                     raise RuntimeError("worker result does not match the fleet grant")

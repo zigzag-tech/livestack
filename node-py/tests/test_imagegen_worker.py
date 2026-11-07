@@ -173,7 +173,7 @@ class _GuidedRuntime:
         self.max_active = 0
         self.lock = threading.Lock()
 
-    def generate(self, request):
+    def generate(self, request, cancel=None):
         with self.lock:
             self.calls.append(request)
             self.active += 1
@@ -731,3 +731,54 @@ def test_exclusive_device_rejects_invalid_memory_threshold(tmp_path):
     config["exclusive_device"] = {"min_free_bytes": 0}
     with pytest.raises(ValueError, match="min_free_bytes"):
         worker.create_app(config)
+
+
+def test_a_caller_that_hangs_up_stops_the_generation(tmp_path, monkeypatch):
+    """xc-tower-ubuntu, 2026-11-07: two FLUX.2 requests whose callers had gone
+    kept both cards generating 12-15 minutes after their device leases were
+    released. The worker now hands the runtime a cancel that is set when its
+    caller disconnects (runtime.stop_when ends the pipeline at the next step)."""
+    import socket
+    uvicorn = pytest.importorskip("uvicorn")
+    from livestack_node.imagegen.runtime import GenerationCancelled
+    config = _depth_config(tmp_path)
+    running, stopped = threading.Event(), threading.Event()
+
+    class SlowRuntime(_GuidedRuntime):
+        def generate(self, request, cancel=None):
+            running.set()
+            deadline = time.monotonic() + 10
+            while not cancel.is_set():
+                assert time.monotonic() < deadline, "the worker never noticed its caller hang up"
+                time.sleep(0.02)
+            stopped.set()
+            raise GenerationCancelled("caller went away; stopped at step 3")
+
+    _, coordinator = _attach_runtime(monkeypatch, SlowRuntime(config))
+    monkeypatch.setattr(worker, "admit", lambda *a, **k: {
+        "granted": True, "device_id": config["device_id"], "kind": config["unit"]})
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(worker.create_app(config), host="127.0.0.1", port=port,
+                                           log_level="error", lifespan="off"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        while not server.started:
+            time.sleep(0.02)
+        data = json.dumps(_guided_body(config)).encode()
+        sock = socket.create_connection(("127.0.0.1", port))
+        sock.sendall(b"POST /v1/images/generations HTTP/1.1\r\nHost: test\r\n"
+                     b"Authorization: Bearer secret\r\nContent-Type: application/json\r\n"
+                     + f"Content-Length: {len(data)}\r\n\r\n".encode() + data)
+        assert running.wait(5)
+        sock.close()
+        assert stopped.wait(5)
+        deadline = time.monotonic() + 5
+        while coordinator.acquired != coordinator.released and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert coordinator.acquired == coordinator.released
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)

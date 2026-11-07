@@ -31,6 +31,12 @@ class Handler(BaseHTTPRequestHandler):
     try:self.wfile.write(b'x');self.wfile.flush();time.sleep(.05)
     except OSError:return
    return
+  if self.path=='/hang':
+   import select
+   for _ in range(100):
+    if select.select([self.connection],[],[],.05)[0] and not self.connection.recv(1):
+     open(__file__+'.cut','w').write('cut');return
+   self.send_response(200);self.end_headers();self.wfile.write(b'{}');return
   if self.path.endswith('/warm'): resident.append(json.loads(data)['unit'])
   elif self.path.endswith('/evict'): resident.clear()
   elif self.path=='/slow': time.sleep(.3)
@@ -200,6 +206,43 @@ class ProcessNodeTest(unittest.IsolatedAsyncioTestCase):
         await sweep
         await asyncio.sleep(.2)
         self.assertEqual(self.node.holds,{},'the hold is returned by its request, not pruned later')
+
+    async def test_a_caller_that_hangs_up_before_the_answer_cuts_the_worker_call(self):
+        # xc-tower-ubuntu, 2026-11-07: the image gateway hung up on this facade
+        # mid-FLUX.2 job; the facade kept waiting on the worker, so the worker
+        # never saw its client go and generated 12-15 min more for nobody.
+        import uvicorn
+        async def admit(unit):
+            await self.node.warm(unit)
+            return {'granted':True,'device_id':self.cfg['device_id']}
+        self.node.admit=admit
+        self.node.config['announce_brokers']=[]
+        with socket.socket() as s:
+            s.bind(('127.0.0.1', 0))
+            port = s.getsockname()[1]
+        server=uvicorn.Server(uvicorn.Config(create_app(self.node),host='127.0.0.1',port=port,
+                                             log_level='error',lifespan='off'))
+        serving=asyncio.create_task(server.serve())
+        async def stop():
+            server.should_exit=True
+            await serving
+        self.addAsyncCleanup(stop)
+        while not server.started:await asyncio.sleep(.02)
+        marker=Path(self.temp.name)/'worker.py.cut'
+        async with httpx.AsyncClient() as c:
+            request=asyncio.create_task(c.post(f'http://127.0.0.1:{port}/hang',content=b'job',timeout=10))
+            for _ in range(100):
+                if self.node.holds:break
+                await asyncio.sleep(.02)
+            self.assertEqual(len(self.node.holds),1)
+            request.cancel()
+            await asyncio.gather(request,return_exceptions=True)
+        for _ in range(150):
+            if marker.exists():break
+            await asyncio.sleep(.02)
+        self.assertTrue(marker.exists(),'the worker never saw its caller go')
+        await asyncio.sleep(.1)
+        self.assertEqual(self.node.holds,{})
 
     async def test_idle_eviction_terminates_worker(self):
         await self.node.warm('asr')
