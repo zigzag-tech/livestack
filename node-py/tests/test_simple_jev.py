@@ -65,3 +65,20 @@ def test_classifier_returns_served_model_and_answers():
     assert calls[0]["add_generation_prompt"] is False
     assert calls[0]["max_tokens"] == 1
     assert calls[0]["structured_outputs"] == {"choice": ["A", "B"]}
+
+
+def test_image_evidence_is_compiled_as_pictures_after_the_state_text():
+    import base64, hashlib
+    from livestack_node.decisions.simple_jev import compile_branch, SimpleJevError, validate_request
+    data = b"\x89PNG\r\n\x1a\nfake"
+    payload = {"model": "m", "state": {"evidence": [{"id": "note", "text": "a frieze"}, {"id": "view", "image": {"media_type": "image/png", "b64_json": base64.b64encode(data).decode(), "sha256": hashlib.sha256(data).hexdigest()}}]},
+               "questions": {"q": {"type": "choice", "instructions": "Is there a cut?", "criteria": {"no_cut": "no", "cut": "yes"}}}}
+    messages, _ = compile_branch(payload, "q")
+    user = messages[1]["content"]
+    assert isinstance(user, list)
+    assert "picture view below" in user[0]["text"] and base64.b64encode(data).decode() not in user[0]["text"]
+    assert user[2] == {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(data).decode()}}
+    assert "Is there a cut?" in user[-1]["text"]
+    bad = {**payload, "state": {"evidence": [{"id": "view", "image": {**payload["state"]["evidence"][1]["image"], "sha256": "0" * 64}}]}}
+    with pytest.raises(SimpleJevError):
+        validate_request(bad)
