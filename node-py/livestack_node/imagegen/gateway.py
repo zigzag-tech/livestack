@@ -215,10 +215,14 @@ def create_app(config=None, call=json_call):
             # timeout is the window plus a margin.
             wait_s = request["harmony_wait_s"]
             wait_deadline = time.monotonic() + wait_s
+            # The fleet broker admits under the gateway's own fleet principal, which may act only for its own owners
+            # (the hub's prefix): a caller's owner reaches the broker only where that principal relays callers
+            # (`admit_as_caller`, a fleet principal with delegate_prefix "*"). Otherwise the gateway's configured
+            # owner is admitted, and the caller's owner and principal are kept on the result.
             admission = {
                 "requires": request["harmony_requires"],
                 "wait_s": wait_s,
-                "owner": owner,
+                "owner": owner if config.get("admit_as_caller") else config.get("owner", "acct_harmony-image"),
             }
             grant = call(config["fleet"], "POST", "/admit", admission, token=fleet_token,
                          timeout=wait_s + 60, cancel=cancel)
