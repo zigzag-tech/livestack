@@ -12,7 +12,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Body, Header, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from livestack_node import transport
+from livestack_node import fleet_auth, transport
 from livestack_node.client import exclusive_lease
 
 from .contract import resolve_worker, validate_request
@@ -148,6 +148,13 @@ def create_app(config=None, call=json_call):
     config = config or json.loads(Path(os.environ["HARMONY_IMAGE_GATEWAY_CONFIG"]).read_text())
     worker_token = Path(config["worker_token_file"]).read_text().strip()
     fleet_token = Path(config["fleet_token_file"]).read_text().strip()
+    # Callers authenticate as fleet principals (fleet_auth: `Authorization` names the principal, `X-Harmony-Owner`
+    # the owner a delegating one acts for), from a 0600 file in LIVESTACK_FLEET_TOKENS shape. The worker token is the
+    # gateway's credential for its own call to the worker; callers that still present it are admitted as before,
+    # under the configured owner, and logged by fingerprint so they can be moved to their own principal, after which
+    # `worker_token_callers: false` refuses it from callers.
+    principals = fleet_auth.load_principals(Path(config["principals_file"]).read_text(), log=print) if config.get("principals_file") else {}
+    worker_token_callers = config.get("worker_token_callers", True)
     request_timeout = config.get("request_timeout_s", 1200)
     if isinstance(request_timeout, bool) or not isinstance(request_timeout, (int, float)) or request_timeout <= 0:
         raise ValueError("request_timeout_s must be positive")
@@ -160,7 +167,8 @@ def create_app(config=None, call=json_call):
 
     @app.post("/v1/images/generations")
     async def generate(http_request: Request, body: dict = Body(...),
-                       authorization: str | None = Header(None)):
+                       authorization: str | None = Header(None),
+                       x_harmony_owner: str | None = Header(None)):
         # A caller that hangs up must not keep GPUs: its leases are released and
         # its work is not started (or is cut, which the worker's facade sees).
         # Observed 2026-11-03 on xc-tower-ubuntu: histo's chain was killed while
@@ -175,13 +183,25 @@ def create_app(config=None, call=json_call):
 
         watcher = asyncio.ensure_future(watch())
         try:
-            return await run_in_threadpool(serve, body, authorization, cancel)
+            return await run_in_threadpool(serve, body, authorization, x_harmony_owner, cancel)
         finally:
             watcher.cancel()
 
-    def serve(body, authorization, cancel):
-        if not secrets.compare_digest(authorization or "", f"Bearer {worker_token}"):
+    def caller(authorization, requested_owner):
+        """The owner this request is admitted and accounted under, decided by the credential."""
+        if worker_token_callers and secrets.compare_digest(authorization or "", f"Bearer {worker_token}"):
+            print(f"image ingress: caller on the worker token (owner {config.get('owner', 'acct_harmony-image')}); give it a principal", flush=True)
+            return config.get("owner", "acct_harmony-image"), None
+        if not principals:
             raise HTTPException(401, "image ingress credential required")
+        try:
+            owner, principal = fleet_auth.authenticate(principals, authorization, requested_owner)
+        except fleet_auth.AuthError as e:
+            raise HTTPException(e.status, e.detail) from e
+        return owner, principal.name
+
+    def serve(body, authorization, requested_owner, cancel):
+        owner, principal = caller(authorization, requested_owner)
         try:
             request = validate_request(body)
         except ValueError as e:
@@ -198,7 +218,7 @@ def create_app(config=None, call=json_call):
             admission = {
                 "requires": request["harmony_requires"],
                 "wait_s": wait_s,
-                "owner": config.get("owner", "acct_harmony-image"),
+                "owner": owner,
             }
             grant = call(config["fleet"], "POST", "/admit", admission, token=fleet_token,
                          timeout=wait_s + 60, cancel=cancel)
@@ -229,6 +249,9 @@ def create_app(config=None, call=json_call):
                 if request["harmony_requires"].get("depth_guide") is True:
                     _verify_guided_result(request, actual, target)
                 actual["fleet_grant"] = grant
+                actual["owner"] = owner
+                if principal:
+                    actual["principal"] = principal
                 if device_grants:
                     actual["device_grants"] = device_grants
                 actual["worker_endpoint"] = endpoint

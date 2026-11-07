@@ -412,3 +412,50 @@ def test_a_request_that_runs_out_of_patience_gets_the_planners_reason(setup):
     r = client.post("/v1/images/generations", json=body, headers={"Authorization": "Bearer worker-secret"})
     assert r.status_code == 503 and "no unit satisfies" in r.json()["detail"]
     assert client.post("/v1/images/generations", json={**body, "harmony_wait_s": -1}, headers={"Authorization": "Bearer worker-secret"}).status_code == 400
+
+
+def _principals(tmp_path, config):
+    path = tmp_path / "principals.json"
+    path.write_text(json.dumps({"histo-caller-secret-0001": {"name": "histo", "delegate_prefix": "histo:"}}))
+    config["principals_file"] = str(path)
+
+
+def test_caller_principal_is_admitted_under_its_owner(setup, tmp_path):
+    config, calls, call = setup
+    _principals(tmp_path, config)
+    owners = []
+
+    def recording(base, method, path, body=None, token=None, timeout=None, cancel=None):
+        if path == "/admit":
+            owners.append(body["owner"])
+            body = {**body, "owner": "acct_harmony-image"}
+        return call(base, method, path, body, token, timeout, cancel)
+
+    client = TestClient(create_app(config, call=recording))
+    body = {"prompt": "A frieze", "harmony_requires": {"params_b>=": 20}}
+    response = client.post("/v1/images/generations", json=body, headers={"Authorization": "Bearer histo-caller-secret-0001", "X-Harmony-Owner": "histo:history-scroll"})
+    assert response.status_code == 200
+    assert owners == ["histo:history-scroll"]
+    assert response.json()["harmony"]["owner"] == "histo:history-scroll"
+    assert response.json()["harmony"]["principal"] == "histo"
+    # The worker token is still the gateway's own credential for the worker call.
+    assert calls[-1][4] == "worker-secret"
+
+
+def test_caller_principal_is_refused_outside_its_prefix_and_unknown_tokens_are_401(setup, tmp_path):
+    config, calls, call = setup
+    _principals(tmp_path, config)
+    client = TestClient(create_app(config, call=call))
+    body = {"prompt": "A frieze", "harmony_requires": {"params_b>=": 20}}
+    assert client.post("/v1/images/generations", json=body, headers={"Authorization": "Bearer histo-caller-secret-0001", "X-Harmony-Owner": "media-corpus"}).status_code == 403
+    assert client.post("/v1/images/generations", json=body, headers={"Authorization": "Bearer nobody", "X-Harmony-Owner": "histo:x"}).status_code == 401
+    assert calls == []
+
+
+def test_worker_token_from_callers_can_be_refused(setup, tmp_path):
+    config, calls, call = setup
+    _principals(tmp_path, config)
+    config["worker_token_callers"] = False
+    response = TestClient(create_app(config, call=call)).post("/v1/images/generations", json={"prompt": "x", "harmony_requires": {"params_b>=": 20}}, headers={"Authorization": "Bearer worker-secret"})
+    assert response.status_code == 401
+    assert calls == []
