@@ -261,7 +261,9 @@ def create_app(config=None, call=json_call):
                 actual["worker_endpoint"] = endpoint
                 return result
         except (RuntimeError, OSError, ValueError) as e:
-            raise HTTPException(503, str(e)) from e
+            # A socket timeout has no message: name the exception, so a 503 always says what failed (an empty detail hid
+            # a stalled worker call from histo's scroll on 2026-11-07).
+            raise HTTPException(503, str(e) or f"{type(e).__name__} during the image request") from e
     return app
 
 
