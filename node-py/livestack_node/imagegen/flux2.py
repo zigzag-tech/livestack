@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gc
 import json
+import os
 import tempfile
 import time
 from pathlib import Path
@@ -12,6 +13,17 @@ from ..freeing import free_cuda
 from .runtime import (DepthConfigurationError, FLUX2_IMAGE_MODEL,
                       _decode_control_image, validate_depth_variant,
                       validate_image)
+
+
+def offload_scratch_dir() -> str | None:
+    """Where accelerate spills offloaded blocks. `LIVESTACK_OFFLOAD_DIR` names it; unset means the
+    system temp dir. It must never be another worker's workspace: a workload workspace is a bounded
+    loop mount owned by the authority, and a path hard-wired to one (xc-tower-e2e) kept a retired
+    slot's filesystem alive and invited model downloads into it (a second 166 GB FLUX.2-dev copy)."""
+    path = os.environ.get("LIVESTACK_OFFLOAD_DIR") or None
+    if path:
+        os.makedirs(path, exist_ok=True)
+    return path
 
 
 class Flux2ImageRuntime:
@@ -97,7 +109,7 @@ class Flux2ImageRuntime:
         if self.device not in device_map.values():
             raise DepthConfigurationError("FLUX.2 INT8 transformer has no GPU-resident blocks")
         self._offload_tmp = tempfile.TemporaryDirectory(
-            prefix="flux2-offload-", dir="/var/lib/livestack-workloads/xc-tower-e2e")
+            prefix="flux2-offload-", dir=offload_scratch_dir())
         dispatch_model(transformer, device_map, offload_dir=self._offload_tmp.name)
         workspaces = [device for device in self.gpu_devices if device != self.device]
         if workspaces:
