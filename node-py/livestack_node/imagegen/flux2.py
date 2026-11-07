@@ -11,7 +11,7 @@ from pathlib import Path
 
 from ..freeing import free_cuda
 from .runtime import (DepthConfigurationError, FLUX2_IMAGE_MODEL,
-                      _decode_control_image, validate_depth_variant,
+                      _decode_control_image, stop_when, validate_depth_variant,
                       validate_image)
 
 
@@ -174,7 +174,7 @@ class Flux2ImageRuntime:
     # The Fun Union controller's weight on the supplied image when inpainting (VideoX-Fun's own inpaint example).
     INPAINT_CONTEXT_SCALE = 0.75
 
-    def _inpaint(self, request: dict):
+    def _inpaint(self, request: dict, cancel=None):
         """Repaints the white area of `mask_image` in `init_image` (both already validated by the contract), as
         VideoX-Fun's examples/flux2_fun/predict_i2i_inpaint.py does: the image as RGB in 0..1, the mask as one channel."""
         import base64
@@ -202,7 +202,8 @@ class Flux2ImageRuntime:
                 control_context_scale=self.INPAINT_CONTEXT_SCALE,
                 width=request["width"], height=request["height"],
                 num_inference_steps=self.steps, guidance_scale=self.guidance_scale,
-                generator=torch.Generator(self.device).manual_seed(request["seed"])).images[0]
+                generator=torch.Generator(self.device).manual_seed(request["seed"]),
+                **stop_when(self.pipe, cancel)).images[0]
         if result.size != (request["width"], request["height"]):
             raise RuntimeError("inpainted image dimensions do not match the request")
         validate_image(result)
@@ -220,9 +221,9 @@ class Flux2ImageRuntime:
                                     "quantization_backend": self.quantization_backend},
         }
 
-    def generate(self, request: dict):
+    def generate(self, request: dict, cancel=None):
         if request["harmony_requires"].get("task") == "inpaint":
-            return self._inpaint(request)
+            return self._inpaint(request, cancel)
         torch = self.torch
         guide, image_sha256 = _decode_control_image(
             request["control_image"], request["width"], request["height"])
@@ -239,7 +240,8 @@ class Flux2ImageRuntime:
                 control_context_scale=request["controlnet_conditioning_scale"],
                 width=request["width"], height=request["height"],
                 num_inference_steps=self.steps, guidance_scale=self.guidance_scale,
-                generator=torch.Generator(self.device).manual_seed(request["seed"])).images[0]
+                generator=torch.Generator(self.device).manual_seed(request["seed"]),
+                **stop_when(self.pipe, cancel)).images[0]
         if image.size != (request["width"], request["height"]):
             raise RuntimeError("guided image dimensions do not match the request")
         validate_image(image)
