@@ -1,6 +1,7 @@
 """A reusable image worker advertising one model as a Harmony managed unit."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import io
@@ -13,13 +14,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import FastAPI, Body, Header, HTTPException
+from fastapi import FastAPI, Body, Header, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from livestack_node import attach, counting
 from livestack_node.client import admit
 from livestack_node.manager import ManagedUnit, ResidencyPolicy
 
 from .contract import satisfies, validate_request
-from .runtime import (CONTROLNET_CLASSES, FLUX2_IMAGE_MODEL, QWEN_IMAGE_MODEL,
+from .runtime import (GenerationCancelled, CONTROLNET_CLASSES, FLUX2_IMAGE_MODEL, QWEN_IMAGE_MODEL,
                       SDXL_IMAGE_MODEL, DepthConfigurationError, ImageRuntime,
                       validate_controlnet_quantization, validate_depth_variant,
                       validate_offload)
@@ -249,8 +251,27 @@ def create_app(config: dict | None = None, runtime_factory=ImageRuntime):
         return {"ok": True, "model": config["model"], "loaded": unit.loaded}
 
     @app.post("/v1/images/generations")
-    def generate(body: dict = Body(...), authorization: str | None = Header(None),
-                 x_harmony_device_lease: str | None = Header(None)):
+    async def generate(http_request: Request, body: dict = Body(...),
+                       authorization: str | None = Header(None),
+                       x_harmony_device_lease: str | None = Header(None)):
+        # A caller that hangs up stops the GPU work at the next denoising step
+        # (runtime.stop_when) instead of leaving it to run for nobody: on
+        # xc-tower-ubuntu, 2026-11-07, two cut FLUX.2 requests kept both cards
+        # busy 12-15 minutes after their gateway had released the device leases.
+        cancel = threading.Event()
+
+        async def watch():
+            while not await http_request.is_disconnected():
+                await asyncio.sleep(1.0)
+            cancel.set()
+
+        watcher = asyncio.ensure_future(watch())
+        try:
+            return await run_in_threadpool(serve, body, authorization, x_harmony_device_lease, cancel)
+        finally:
+            watcher.cancel()
+
+    def serve(body, authorization, x_harmony_device_lease, cancel):
         if not secrets.compare_digest(authorization or "", f"Bearer {token}"):
             raise HTTPException(401, "image worker credential required")
         lease_ids = []
@@ -276,6 +297,8 @@ def create_app(config: dict | None = None, runtime_factory=ImageRuntime):
             raise HTTPException(422, f"this worker is qualified for dimensions up to {max_dimension}px")
         # No lock on the GPU executor while admission may dispatch a warm to us.
         with request_lock, busy:
+            if cancel.is_set():
+                raise HTTPException(503, "caller went away before its work started")
             started = time.monotonic()
             leased = coordinator.acquire_lease(unit_name, "harmony-image", ttl_seconds=3600)
             lease_id = leased.get("lease_id") if isinstance(leased, dict) else getattr(leased, "lease_id", None)
@@ -285,7 +308,10 @@ def create_app(config: dict | None = None, runtime_factory=ImageRuntime):
                               device_lease_ids=lease_ids or None)
                 if not grant.get("granted") or grant.get("device_id") != config["device_id"]:
                     raise HTTPException(503, grant.get("reason") or "no concrete local Harmony grant")
-                image, metrics = gpu_call(lambda: manager.run(unit_name, lambda runtime: runtime.generate(request)))
+                image, metrics = gpu_call(lambda: manager.run(
+                    unit_name, lambda runtime: runtime.generate(request, cancel=cancel)))
+            except GenerationCancelled as exc:
+                raise HTTPException(503, str(exc)) from exc
             finally:
                 if lease_id:
                     coordinator.release_lease(lease_id)

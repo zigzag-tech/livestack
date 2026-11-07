@@ -22,7 +22,7 @@ uvicorn = pytest.importorskip("uvicorn")
 DEVICES = ["tower/gpu1", "tower/gpu0"]
 
 
-def _leased(config, body, events, *, refuse=None, on_enter=None, worker=None):
+def _leased(config, body, events, *, refuse=None, on_enter=None, worker=None, residence=None):
     """Configure a two-device lease profile and return (lease factory, call)."""
     config["exclusive_units"] = {"qwen_image_2512_depth_nf4": {
         "broker": "http://host-broker", "owner": "harmony-image", "device_ids": DEVICES,
@@ -48,6 +48,9 @@ def _leased(config, body, events, *, refuse=None, on_enter=None, worker=None):
 
     def call(base, method, path, request=None, token=None, timeout=None, lease_id=None,
              cancel=None):
+        if path == "/livestack/residence":
+            events.append("residence")
+            return residence() if residence is not None else {"units": [{"kind": "u", "busy": False}]}
         if path == "/v1/images/generations":
             events.append("worker")
             if worker is not None:
@@ -177,3 +180,45 @@ def test_a_caller_that_hangs_up_mid_generation_cuts_it_and_releases(setup, gatew
     while len([e for e in events if e.startswith("exit:")]) < 2 and time.monotonic() < deadline:
         time.sleep(0.02)
     assert sorted(e for e in events if e.startswith("exit:")) == ["exit:tower/gpu0", "exit:tower/gpu1"]
+
+
+def test_a_cut_worker_call_keeps_the_leases_until_the_worker_is_idle(setup, gateway, monkeypatch):  # noqa: F811
+    """xc-tower-ubuntu, 2026-11-07 06:43 and 08:47: the gateway released both
+    leases the moment its caller hung up, while the FLUX.2 worker generated on
+    both cards for another 12-15 minutes; the next request's drain saw that
+    memory as external and timed out at 240 s. The leases now outlive the cut
+    until the worker's facade reports every unit idle."""
+    config, _, _ = setup
+    body = {**_guided_body(), "harmony_wait_s": 3600}
+    events, running = [], threading.Event()
+    reports = iter([True, True, False])
+
+    def worker(cancel):
+        running.set()
+        _wait_for_cancel(cancel)
+
+    def residence():
+        return {"units": [{"kind": "qwen_image_2512_depth_nf4", "busy": next(reports)}]}
+
+    monkeypatch.setattr("livestack_node.imagegen.gateway.WORKER_IDLE_POLL_S", 0.01)
+    Lease, call = _leased(config, body, events, worker=worker, residence=residence)
+    monkeypatch.setattr("livestack_node.imagegen.gateway.exclusive_lease", lambda *a, **kw: Lease(kw))
+    port = gateway(config, call)
+    _hang_up_after(port, body, running)
+    deadline = time.monotonic() + 5
+    while len([e for e in events if e.startswith("exit:")]) < 2 and time.monotonic() < deadline:
+        time.sleep(0.02)
+    first_exit = min(i for i, e in enumerate(events) if e.startswith("exit:"))
+    assert events[first_exit - 3:first_exit] == ["residence"] * 3
+    assert sorted(e for e in events if e.startswith("exit:")) == ["exit:tower/gpu0", "exit:tower/gpu1"]
+
+
+def test_an_unanswering_facade_does_not_hold_the_leases_to_the_deadline(monkeypatch):
+    from livestack_node.imagegen import gateway as module
+
+    def call(*a, **k):
+        raise OSError("connection refused")
+    started = time.monotonic()
+    assert module._await_worker_idle(call, "http://w", time.monotonic() + 60,
+                                     poll_s=0.01, unreachable_s=0.1) is False
+    assert time.monotonic() - started < 2

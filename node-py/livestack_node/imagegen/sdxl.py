@@ -7,7 +7,7 @@ import time
 from ..freeing import free_cuda
 from .runtime import (DepthConfigurationError, SDXL_IMAGE_MODEL,
                       _decode_control_image, validate_controlnet_quantization,
-                      validate_depth_variant, validate_image)
+                      validate_depth_variant, validate_image, stop_when)
 
 
 class SDXLImageRuntime:
@@ -76,7 +76,7 @@ class SDXLImageRuntime:
         self.quantization = quantization
         self.offload_map = None
 
-    def generate(self, request: dict):
+    def generate(self, request: dict, cancel=None):
         torch = self.torch
         guide, image_sha256 = _decode_control_image(
             request["control_image"], request["width"], request["height"])
@@ -102,7 +102,7 @@ class SDXLImageRuntime:
                 generator=torch.Generator("cuda:0").manual_seed(request["seed"]))
             encoded = time.monotonic()
             free_cuda()
-            image = self.pipe(**kwargs).images[0]
+            image = self.pipe(**kwargs, **stop_when(self.pipe, cancel)).images[0]
         if image.size != (request["width"], request["height"]):
             raise RuntimeError("guided image dimensions do not match the request")
         validate_image(image)

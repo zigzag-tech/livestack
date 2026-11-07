@@ -562,3 +562,26 @@ def test_close_clears_every_model_reference_before_gc_and_cache_release(monkeypa
     assert instance.pipe is None
     assert instance.depth_pipe is None
     assert instance.controlnet is None
+
+
+def test_stop_when_ends_a_pipeline_at_the_next_step_once_cancelled():
+    import threading
+    from livestack_node.imagegen.runtime import GenerationCancelled, stop_when
+
+    class Pipe:
+        def __call__(self, steps=50, callback_on_step_end=None):
+            for step in range(steps):
+                callback_on_step_end(self, step, 0, {"latents": step})
+            return "done"
+
+    class OldPipe:
+        def __call__(self, steps=50):
+            return "done"
+
+    cancel = threading.Event()
+    assert Pipe()(**stop_when(Pipe(), cancel)) == "done"
+    assert stop_when(OldPipe(), cancel) == {}
+    assert stop_when(Pipe(), None) == {}
+    cancel.set()
+    with pytest.raises(GenerationCancelled, match="step 0"):
+        Pipe()(**stop_when(Pipe(), cancel))

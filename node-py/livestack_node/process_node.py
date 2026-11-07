@@ -623,12 +623,24 @@ def create_app(node):
             body.extend(chunk)
         unit=await node.choose('/'+path,body,request.headers.get('content-type',''))
         hold=await node.begin(unit)
+        sending=None
         try:
             headers={k:v for k,v in request.headers.items() if k.lower() not in HOP_HEADERS}
             req=node.http.build_request(request.method,node.worker_url+'/'+path,
                 params=request.query_params,headers=headers,content=bytes(body))
-            response=await node.http.send(req,stream=True)
+            # Until the worker answers, a caller that hangs up cuts the call to the
+            # worker too, so the worker sees its client go and stops its GPU work.
+            # The facade used to wait on regardless: on xc-tower-ubuntu, 2026-11-07, a
+            # FLUX.2 job ran 12-15 min for a gateway that had already left.
+            sending=asyncio.ensure_future(node.http.send(req,stream=True))
+            while not (await asyncio.wait({sending},timeout=1.0))[0]:
+                if await request.is_disconnected():
+                    sending.cancel()
+                    await asyncio.gather(sending,return_exceptions=True)
+                    raise HTTPException(503,'caller went away; worker call cut')
+            response=sending.result()
         except BaseException:
+            if sending is not None:sending.cancel()
             node.finish(hold);raise
         async def stream():
             try:

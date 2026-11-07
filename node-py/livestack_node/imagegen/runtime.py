@@ -29,6 +29,28 @@ CONTROLNET_CLASSES = {
 }
 
 
+class GenerationCancelled(RuntimeError):
+    """The request's caller went away; the pipeline stopped at a step boundary."""
+
+
+def stop_when(pipe, cancel) -> dict:
+    """Pipeline kwargs that end the denoising loop at the next step once ``cancel``
+    (a ``threading.Event``) is set, for pipelines that take ``callback_on_step_end``.
+
+    A FLUX.2 job whose caller had hung up kept generating on both leased cards for
+    another 12-15 minutes with no lease (xc-tower-ubuntu, 2026-11-07); a step is
+    12-15 s there, so stopping at a step boundary frees the cards within one step."""
+    import inspect
+    if cancel is None or "callback_on_step_end" not in inspect.signature(pipe.__call__).parameters:
+        return {}
+
+    def callback(pipeline, step, timestep, tensors):
+        if cancel.is_set():
+            raise GenerationCancelled(f"caller went away; stopped at step {step}")
+        return tensors
+    return {"callback_on_step_end": callback}
+
+
 class DepthConfigurationError(ValueError):
     pass
 
@@ -321,7 +343,7 @@ class ImageRuntime:
             }
             print(json.dumps({"event": "image_offload_map", **self.offload_map}, sort_keys=True), flush=True)
 
-    def generate(self, request: dict) -> tuple[object, dict]:
+    def generate(self, request: dict, cancel=None) -> tuple[object, dict]:
         guided = "control_image" in request
         if guided and self.depth_guide is None:
             raise RuntimeError("depth guidance is not configured for this runtime")
@@ -362,7 +384,7 @@ class ImageRuntime:
                     control_guidance_start=0.0,
                     control_guidance_end=1.0,
                 )
-            image = pipe(**kwargs, **call_kwargs).images[0]
+            image = pipe(**kwargs, **call_kwargs, **stop_when(pipe, cancel)).images[0]
         if guided and image.size != (request["width"], request["height"]):
             raise RuntimeError(
                 f"guided image dimensions {image.size} do not match the requested output dimensions")
