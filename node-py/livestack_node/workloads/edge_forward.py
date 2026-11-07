@@ -8,12 +8,17 @@ authority). Control calls are edge-key gated and capped at 64 KiB; the key is
 never forwarded. The relay stores no object bytes, and the authority still
 authenticates each request. Traffic is bounded by a monthly byte budget;
 exhaustion answers `budget_exhausted` and is logged, never a 404 or empty body.
+
+Optionally (`stage_dir` in the config; see `Stager`) it stages whole objects, bounded, to beat slow-start on a
+lossy long-RTT upstream; with `stage_dir` unset it stores no bytes at all.
 """
 import argparse
+import hashlib
 import hmac
 import http.client
 import json
 import logging
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import re
@@ -83,6 +88,95 @@ class Budget:
         return not self.admit(0)
 
 
+class Stager:
+    """Optional bounded staging of whole immutable objects on the relay (off unless `stage_dir` is set).
+
+    Why: a short ranged GET over a lossy long-RTT upstream never leaves TCP slow start, so a 54 MB
+    object fetched in 4 MB blocks crawls at a fraction of what ONE warm connection moves. The relay
+    pulls the whole object once, verifies sha256 == the digest in the URL, and serves every range from
+    that copy. Safety: the authority is still asked (a 1-byte probe with the caller's own headers) before
+    every response, so staging never lets a caller read what the authority would refuse. Any staging
+    failure is logged LOUDLY and the request falls back to plain pass-through.
+
+    Bounds (all actively enforced, `sweep()` runs on every admission and on a timer): per-object bytes,
+    total bytes, object count, age. Leftover files from a crash are removed at start.
+    """
+
+    def __init__(self, directory, *, max_object_bytes=512*2**20, max_bytes=2*2**30, max_count=16,
+                 max_age_seconds=900, wait_seconds=900, failure_memory_seconds=60, clock=time.time):
+        for name, value in (('max_object_bytes', max_object_bytes), ('max_bytes', max_bytes), ('max_count', max_count),
+                            ('max_age_seconds', max_age_seconds), ('wait_seconds', wait_seconds)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+                raise ValueError('stage %s must be positive' % name)
+        if max_object_bytes > max_bytes:
+            raise ValueError('stage max_object_bytes exceeds max_bytes')
+        self.dir = Path(directory).expanduser()
+        self.dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        for leftover in self.dir.iterdir():  # staged copies do not survive a restart: bounded by construction
+            leftover.unlink()
+        self.max_object, self.max_bytes, self.max_count = max_object_bytes, max_bytes, max_count
+        self.max_age, self.wait, self.memory, self.clock = max_age_seconds, wait_seconds, failure_memory_seconds, clock
+        self._lock, self._have, self._inflight, self._failed = threading.Lock(), {}, {}, {}
+
+    def sweep(self):
+        with self._lock:
+            self._sweep()
+
+    def _sweep(self, room=0):
+        now = self.clock()
+        for digest in [d for d, (_s, at) in self._have.items() if now-at > self.max_age]:
+            self._drop(digest, 'expired')
+        for digest in [d for d, at in self._failed.items() if now-at > self.memory][:256]:
+            del self._failed[digest]
+        while self._have and (len(self._have) >= self.max_count or sum(s for s, _ in self._have.values())+room > self.max_bytes):
+            self._drop(min(self._have, key=lambda d: self._have[d][1]), 'evicted')
+
+    def _drop(self, digest, why):
+        self._have.pop(digest, None)
+        try:
+            (self.dir/digest).unlink()
+        except FileNotFoundError:
+            pass
+        logging.info('edge stage %s digest=%s', why, digest[:12])
+
+    def path(self, digest):
+        """The staged file for this digest (touched), or None."""
+        with self._lock:
+            self._sweep()
+            if digest not in self._have:
+                return None
+            size, _ = self._have[digest]
+            self._have[digest] = (size, self.clock())
+            return self.dir/digest
+
+    def acquire(self, digest, size):
+        """('have', None) | ('lead', event) | ('wait', event) | ('refuse', reason)."""
+        with self._lock:
+            self._sweep(room=size)
+            if digest in self._have:
+                return 'have', None
+            if digest in self._inflight:
+                return 'wait', self._inflight[digest]
+            if size > self.max_object:
+                return 'refuse', 'oversize'
+            if digest in self._failed:
+                return 'refuse', 'recent_failure'
+            self._inflight[digest] = threading.Event()
+            return 'lead', self._inflight[digest]
+
+    def finish(self, digest, event, size, ok):
+        with self._lock:
+            self._inflight.pop(digest, None)
+            if ok:
+                self._have[digest] = (size, self.clock())
+            else:
+                self._failed[digest] = self.clock()
+        event.set()
+
+    def partial(self, digest):
+        return self.dir/(digest+'.part')
+
+
 class GrantLimits:
     """Admission for the unauthenticated grant route: per-IP and global sliding windows plus a
     concurrent-upload cap. Every request counts, accepted or not, so junk is rate-limited too.
@@ -126,7 +220,7 @@ class EdgeForwarder(BoundedRequests, ThreadingHTTPServer):
     max_connections = 4
 
     def __init__(self, address, upstream, budget, admin_token, edge_key, *, timeout=60, max_connections=None,
-                 grant_limits=None, early_reject_seconds=1.5):
+                 grant_limits=None, early_reject_seconds=1.5, stager=None):
         if len(admin_token) < 32 or len(edge_key) < 32 or admin_token == edge_key:
             raise ValueError('admin token and edge key must be distinct and strong')
         parsed = urlparse(upstream)
@@ -141,7 +235,18 @@ class EdgeForwarder(BoundedRequests, ThreadingHTTPServer):
         self._reported_exhausted = False
         self.grant_limits, self.early_reject_seconds = grant_limits or GrantLimits(), early_reject_seconds
         self._crossed = set()
+        self.stager = stager
         super().__init__(address, Handler)
+        if stager:
+            threading.Thread(target=self._sweep_stage, daemon=True).start()
+
+    def _sweep_stage(self):
+        while True:  # the age bound must hold with no traffic too
+            time.sleep(min(60, self.stager.max_age))
+            try:
+                self.stager.sweep()
+            except OSError as error:
+                logging.error('edge stage sweep failed: %s', error)
 
     def report_thresholds(self):
         """One log line (and one alert signal) per month when usage first crosses 50/80/100%."""
@@ -307,6 +412,124 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             server.grant_limits.done()
 
+    def upstream_headers(self, *, ranged):
+        """Caller headers the authority needs to authorize (never the edge key); optionally the range."""
+        keep = ('authorization', 'range') if ranged else ('authorization',)
+        return {k: v for k, v in self.headers.items()
+                if k.lower() in keep or k.lower().startswith('x-workload-')}
+
+    def serve_staged(self, path):
+        """Serve a ranged GET from a staged copy. Returns bytes sent, or None to fall back to pass-through
+        (nothing has been written to the caller in that case)."""
+        server, stager = self.server, self.server.stager
+        digest = path.rsplit('/', 1)[1]
+        match = re.fullmatch(r'bytes=([0-9]{1,15})-([0-9]{1,15})', self.headers.get('Range', ''))
+        if not match:
+            return None
+        first, last = int(match.group(1)), int(match.group(2))
+        try:  # the authority authorizes every request: a 1-byte probe with the caller's own headers
+            connection = http.client.HTTPConnection(*server.upstream, timeout=server.timeout)
+            connection.request('GET', path, headers={**self.upstream_headers(ranged=False), 'Range': 'bytes=0-0'})
+            probe = connection.getresponse()
+            probe.read(2)
+            connection.close()
+            size = re.fullmatch(r'bytes 0-0/([0-9]{1,15})', probe.getheader('Content-Range', ''))
+            if probe.status != 206 or not size:
+                return None  # refusal or odd answer: the plain path relays the authority's own response
+            size = int(size.group(1))
+        except OSError as error:
+            logging.warning('edge stage probe failed for %s: %s', digest[:12], error)
+            return None
+        if first > last or first >= size:
+            return None
+        last = min(last, size-1)  # like the authority, clamp a range that runs past the end
+        state, extra = stager.acquire(digest, size)
+        if state == 'refuse':
+            if extra == 'oversize':
+                logging.info('edge stage skipped digest=%s: %d bytes exceeds the per-object bound', digest[:12], size)
+            else:
+                logging.warning('edge stage skipped digest=%s: %s', digest[:12], extra)
+            return None
+        if state == 'lead':
+            self.stage_object(path, digest, size, extra)
+        elif state == 'wait':
+            extra.wait(stager.wait)
+        staged = stager.path(digest)
+        if staged is None:
+            logging.warning('edge stage unavailable for digest=%s: passing through', digest[:12])
+            return None
+        try:
+            handle = staged.open('rb')
+        except OSError as error:
+            logging.error('edge stage copy unreadable digest=%s: %s', digest[:12], error)
+            return None
+        with handle:
+            length = last-first+1
+            self.send_response(206)
+            for key, value in (('Content-Type', 'application/octet-stream'), ('Content-Length', str(length)),
+                               ('Content-Range', 'bytes %d-%d/%d' % (first, last, size)), ('Accept-Ranges', 'bytes'),
+                               ('Connection', 'close')):
+                self.send_header(key, value)
+            self.end_headers()
+            self.close_connection = True
+            handle.seek(first)
+            left = length
+            try:
+                while left:
+                    part = handle.read(min(BUFFER, left))
+                    if not part:
+                        break
+                    self.wfile.write(part)
+                    left -= len(part)
+            except OSError as error:
+                logging.warning('edge staged transfer interrupted: %s', error)
+        return length-left
+
+    def stage_object(self, path, digest, size, event):
+        """Pull the whole object over ONE connection, verify its digest, publish it atomically.
+        Never raises: on any failure the stage is abandoned loudly and the caller passes through."""
+        server, stager = self.server, self.server.stager
+        part, ok, moved = stager.partial(digest), False, 0
+        started = time.monotonic()
+        try:
+            connection = http.client.HTTPConnection(*server.upstream, timeout=server.timeout)
+            try:
+                connection.request('GET', path, headers=self.upstream_headers(ranged=False))
+                response = connection.getresponse()
+                if response.status != 200 or int(response.getheader('Content-Length', '-1')) != size:
+                    raise OSError('upstream answered %d for the full object' % response.status)
+                hasher = hashlib.sha256()
+                with part.open('wb') as out:
+                    while True:
+                        block = response.read(BUFFER)
+                        if not block:
+                            break
+                        moved += len(block)
+                        if moved > size or time.monotonic()-started > stager.wait:
+                            raise OSError('upstream sent more than declared or took too long')
+                        hasher.update(block)
+                        out.write(block)
+            finally:
+                connection.close()
+            if moved != size:
+                raise OSError('short object: %d of %d bytes' % (moved, size))
+            if hasher.hexdigest() != digest:
+                raise OSError('digest mismatch: upstream bytes are not the named object')
+            os.replace(part, stager.dir/digest)
+            ok = True
+            logging.info('edge stage ok digest=%s bytes=%d seconds=%.1f', digest[:12], size, time.monotonic()-started)
+        except (OSError, ValueError) as error:
+            logging.error('edge stage FAILED digest=%s after %d bytes: %s; falling back to pass-through',
+                          digest[:12], moved, error)
+        finally:
+            if not ok:
+                try:
+                    part.unlink()
+                except FileNotFoundError:
+                    pass
+            server.budget.settle(0, moved)  # staging bytes crossed the authority leg: they count
+            stager.finish(digest, event, size, ok)
+
     def forward(self, path, *, control=False):
         server, declared = self.server, 0
         # Before anything is read or forwarded: the endpoint is public, and an
@@ -330,6 +553,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(503, {'error': 'budget_exhausted'}, [('X-Edge-Reason', 'budget_exhausted')])
         server.report_budget(False)
         moved, connection = 0, None
+        if server.stager and self.command == 'GET' and not control and not path.endswith('/upload'):
+            served = self.serve_staged(path)
+            if served is not None:
+                server.budget.settle(declared, served)
+                server.report_thresholds()
+                return
         try:
             connection = http.client.HTTPConnection(*server.upstream, timeout=server.timeout)
             connection.putrequest(self.command, path, skip_host=True, skip_accept_encoding=True)
@@ -387,7 +616,8 @@ def main():
     server = EdgeForwarder((config.get('bind', '127.0.0.1'), config.get('port', 8803)), config['upstream'],
                            Budget(root/'budget.sqlite', config.get('budget_bytes', 600*10**9)),
                            config['admin_token'], config['edge_key'], timeout=config.get('timeout', 60),
-                           max_connections=config.get('max_connections'))
+                           max_connections=config.get('max_connections'),
+                           stager=Stager(config['stage_dir'], **config.get('stage', {})) if config.get('stage_dir') else None)
     logging.info('edge relay on %s -> %s', server.server_address, config['upstream'])
     try:
         server.serve_forever(poll_interval=1)
