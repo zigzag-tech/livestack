@@ -198,3 +198,23 @@ Roll back: `deploy-busy-tenant.sh --rollback` (back to `caller-gone-on-holder-fi
 - Its two facade tests, run against each facade file, fail on the old file and pass on the new one. The two other failures fail on both files; they test features these releases predate.
 
 **Deploy:** `~/.local/share/livestack-releases/deploy-stale-resident.sh [--rollback]` at 13:13:05. It waits for no active lease, no open :8210/:8211 connection, and nothing in flight on polyasr or drama3; it reads `load.in_flight` there, because the speech router keeps idle keep-alive connections. `~/histo-scroll/PAUSE` was set from 13:12 to 13:13. The backups are `*.before-stale-resident-*` in `/etc/systemd/system/`. After the restart, `GET :8210/livestack/residence` carries `residence_authority: owner`. The other facades are unchanged; the hostd half alone stops the stale grants for them once they report owner authority, which they do not yet.
+
+## Deployed: a cut image request stops its GPU work before its leases go (commit bd05436d), 2026-11-07
+
+On xc-tower-ubuntu at 09:08:38 (FLUX facade) and 09:08:58 (gateway) EST, each hand-applied onto the release it ran:
+
+- Image gateway: `imagegen-principals-20261107-cancel-bd05436d` (= `imagegen-principals-20261107` + bd05436d's
+  `gateway.py`), drop-in `harmony-image-gateway.service.d/70-cut-holds-leases.conf`.
+- FLUX.2 facade: process-node release `31f56b6053018fe7` (= `4ba2ae7f23aa9fe6` + bd05436d's proxy change, applied
+  by hand because that release predates main's `begin`), drop-in `harmony-image-flux2-depth.service.d/70-cut-reaches-worker.conf`
+  overriding `ExecStart`.
+- FLUX.2 worker: `imagegen-20261102-724ec228-cancel-bd05436d` (= `imagegen-20261102-724ec228` + bd05436d's
+  `worker.py`, `runtime.py`, `flux2.py`, `sdxl.py`), set as `PYTHONPATH` in
+  `~/.local/share/harmony-process-node/harmony-image-flux2-depth.json` (backup `.before-cancel-bd05436d`).
+
+The imagegen tests pass against the gateway and worker releases. The facade release passes the new cut test, where
+the old release fails it, and fails nothing else that the old release passes. `stop_when` gives the tower's
+VideoX-Fun `Flux2ControlPipeline` its `callback_on_step_end`. Script:
+`~/.local/share/livestack-releases/deploy-image-cancel.sh [--rollback]`. It waits for no active lease and no open
+:8211/:8217 request, and restarts the FLUX facade (which also ends its worker) and then the gateway. The SDXL depth
+unit is unchanged.
