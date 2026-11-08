@@ -618,7 +618,7 @@ def test_public_all_covers_health_explain_and_unknown_paths(router, monkeypatch)
     monkeypatch.setattr(router, "HEALTH_KIND", "polyasr")
     client = _leaky_world(router, monkeypatch)             # no nodes: no provider
     h = client.get("/health")
-    assert h.status_code == 503 and h.json() == {"status": "no_provider"}
+    assert h.status_code == 503 and h.json() == {"error": "unavailable"}
     assert client.post("/harmony/route", json={}).json()["error"] == "bad_request"
     r = client.get("/v1/not-a-thing")
     assert r.json()["error"] == "bad_request" and "harmony-router routes" not in r.text
@@ -628,3 +628,37 @@ def test_public_off_keeps_the_llm_router_detail_for_operators(wired):
     client, _, _ = wired
     r = client.get("/v1/not-a-thing")
     assert r.status_code == 404 and "harmony-router routes" in r.text
+
+
+def test_a_public_health_names_neither_the_fleet_nor_its_pool(router, monkeypatch):
+    # A probe behind a public edge reads up/down. router id, region, fleet URL, contract,
+    # pool size and the no_fleet_view/no_provider words all say something about the fleet.
+    monkeypatch.setattr(router, "PUBLIC_ALL", True)
+    monkeypatch.setattr(router, "HEALTH_KIND", "polyasr")
+    monkeypatch.setattr(router, "ROUTER_ID", "router-secret-host-7")
+    monkeypatch.setattr(router, "REGION", "secret-region")
+    node = _LeakyNode()
+    client = _leaky_world(router, monkeypatch, node)
+    ok = client.get("/health")
+    assert ok.status_code == 200 and set(ok.json()) == {"status", "revision"}
+    for needle in ("secret", "fleet.invalid", "providers", "polyasr"):
+        assert needle not in ok.text
+    monkeypatch.setattr(fleet_route, "fleet_view", lambda *a, **k: None)
+    down = client.get("/health")
+    assert down.status_code == 503 and down.json() == {"error": "unavailable"}
+    assert "Retry-After" in down.headers or "retry-after" in down.headers
+
+
+def test_an_unhandled_bug_on_a_public_path_answers_from_the_vocabulary(router, monkeypatch, capfd):
+    monkeypatch.setattr(router, "PUBLIC_ALL", True)
+    client = _leaky_world(router, monkeypatch)
+
+    async def boom(*a, **k):
+        raise RuntimeError("gpu-host-secret.internal: engine qwen3-asr-1.7b pool=asr-scarce")
+    monkeypatch.setattr(router, "_route", boom)
+    from fastapi.testclient import TestClient
+    r = TestClient(router.app, raise_server_exceptions=False).post("/v1/audio/transcriptions", content=b"x")
+    assert r.status_code == 503 and r.json()["error"] == "unavailable"
+    assert "secret" not in r.text and "qwen" not in r.text and "asr-scarce" not in r.text
+    assert "server" not in {k.lower() for k in r.headers}
+    assert "gpu-host-secret.internal" in capfd.readouterr().out      # cause kept in the router's own log
