@@ -168,6 +168,16 @@ async def _validation_error(request: Request, exc: RequestValidationError):
     return await request_validation_exception_handler(request, exc)
 
 
+@app.exception_handler(Exception)
+async def _unhandled_error(request: Request, exc: Exception):
+    """A bug on a public path is still answered from the fixed vocabulary: the
+    framework default is a bare text body and (in debug) a traceback."""
+    rid = getattr(request.state, "request_id", None) or _request_id(request.headers.get("x-request-id"))
+    if _is_public(request.url.path):
+        return _public_response(rid, 500, f"{type(exc).__name__}: {exc}", surface="unhandled")
+    return JSONResponse({"detail": "Internal Server Error"}, status_code=500)
+
+
 @app.on_event("startup")
 async def _start_view_refresher():
     if VIEW_REFRESH_S > 0 and FLEET_URL:
@@ -205,24 +215,32 @@ def health():
     body = {"status": "ok", "role": "router", "router_id": ROUTER_ID,
             "revision": REVISION, "contract": fr.ROUTE_CONTRACT, "region": REGION or None,
             "fleet_url": FLEET_URL or None, "units": {}}
+    if PUBLIC_ALL:
+        # What a probe behind a public edge may read: up or not. The router id,
+        # region and fleet URL name the fleet; the revision stays for rollout readback.
+        body = {"status": "ok", "revision": REVISION}
     if not HEALTH_KIND:
         return body
-    body["health_kind"] = HEALTH_KIND
+    if not PUBLIC_ALL:
+        body["health_kind"] = HEALTH_KIND
     view = fr.fleet_view(FLEET_URL) if FLEET_URL else None
     if view is None:
         if PUBLIC_ALL:
             _log_public_error("health", "health", 503, "unavailable", "no fleet view (unreachable or stale)")
-            return JSONResponse({"status": "no_fleet_view"}, status_code=503)
+            return JSONResponse({"error": "unavailable"}, status_code=503,
+                                headers={"Retry-After": str(PUBLIC_RETRY_DEFAULT_S)})
         return JSONResponse({**body, "status": "no_fleet_view",
                              "detail": "no fleet view (unreachable or stale)"}, status_code=503)
     target, rec = fr.choose(view, None, [], SELF_BASE, kind=HEALTH_KIND)
     if not target:
         if PUBLIC_ALL:
             _log_public_error("health", "health", 503, "unavailable", str(rec.get("reason")))
-            return JSONResponse({"status": "no_provider"}, status_code=503)
+            return JSONResponse({"error": "unavailable"}, status_code=503,
+                                headers={"Retry-After": str(PUBLIC_RETRY_DEFAULT_S)})
         return JSONResponse({**body, "status": "no_provider", "detail": str(rec.get("reason"))[:300]},
                             status_code=503)
-    body["providers"] = len(rec.get("targets") or [])
+    if not PUBLIC_ALL:
+        body["providers"] = len(rec.get("targets") or [])   # pool size names the fleet
     return body
 
 
