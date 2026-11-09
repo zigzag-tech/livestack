@@ -31,6 +31,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import threading
 import time
 from typing import Callable, NamedTuple, Optional
@@ -426,6 +427,9 @@ _CAUSE_CODES = (  # (substring of the lowercased refusal text, token); first mat
 )
 
 
+_ENGINE_REFUSED = re.compile(r"engine_refused_[0-9]{3}")
+
+
 def cause_code(text) -> "str | None":
     """The refusal text boiled down to a short lowercase token (`device_busy`,
     `no_capacity`, ...), or `refused` when nothing known matches. The ROUTE log
@@ -434,6 +438,8 @@ def cause_code(text) -> "str | None":
     if text is None or text == "":
         return None
     low = str(text).lower()
+    if _ENGINE_REFUSED.fullmatch(low):   # already a bounded token (`engine_refused_<status>`)
+        return low
     for needle, code in _CAUSE_CODES:
         if needle in low:
             return code

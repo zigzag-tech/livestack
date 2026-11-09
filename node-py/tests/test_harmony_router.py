@@ -662,3 +662,21 @@ def test_an_unhandled_bug_on_a_public_path_answers_from_the_vocabulary(router, m
     assert "secret" not in r.text and "qwen" not in r.text and "asr-scarce" not in r.text
     assert "server" not in {k.lower() for k in r.headers}
     assert "gpu-host-secret.internal" in capfd.readouterr().out      # cause kept in the router's own log
+
+
+def test_an_engine_refusal_on_a_public_path_records_a_bounded_cause(router, monkeypatch):
+    """The ROUTE row of an engine refusal carries a short token (status only) so the
+    cause collector can join it; the client body stays the opaque vocabulary."""
+    node = _LeakyNode(400)
+    try:
+        client = _leaky_world(router, monkeypatch, node)
+        r = client.post("/v1/audio/transcriptions", files=_WAV, headers={"x-request-id": "req-cause-1"})
+        assert r.json()["error"] == "bad_request"
+        rows = [x for x in router.ROUTES.rows if x["request_id"] == "req-cause-1" and x["outcome"] == "refused"]
+        assert rows
+        row = rows[-1]
+        assert row["cause_code"] == "engine_refused_400" and row["cause"] == "engine_refused_400"
+        for leak in LEAKS:
+            assert leak not in json.dumps([row["cause"], row["cause_code"]]), leak
+    finally:
+        node.close()
