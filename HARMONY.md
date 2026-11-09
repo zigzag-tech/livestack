@@ -1395,6 +1395,7 @@ only (tokens + route hints); no audio or transcript is stored by it or by the ro
   `~/.local/share/harmony-speech-router/releases/<sha>` (a `git archive` of
   `node-py/livestack_node` + `examples/harmony-llm`), `current` symlink, own venv (adds
   `websockets`). Env `~/.config/harmony-speech-router/env`; holds no credential.
+- **Bind.** `HARMONY_ROUTER_HOST` is one address or a comma list (`127.0.0.1,100.64.0.12`): the second address lets a relay on another tailnet host (histo-one) use this router as its `harmony-asr` target. Name addresses; never `0.0.0.0`.
 - **Fleet view** from `http://100.64.0.18:8801` (the tower's fleetd), because the
   zz-tower2 fleetd lists only 3 peers and no polyasr node. A refresher thread
   (`HARMONY_ROUTER_VIEW_REFRESH_S=5`) keeps it fresh off the request path (the fetch

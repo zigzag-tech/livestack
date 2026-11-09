@@ -680,3 +680,43 @@ def test_an_engine_refusal_on_a_public_path_records_a_bounded_cause(router, monk
             assert leak not in json.dumps([row["cause"], row["cause_code"]]), leak
     finally:
         node.close()
+
+
+# ---- HARMONY_ROUTER_HOST: one address or a list (asr-harmony-only 3.2) ----
+
+def test_router_host_is_one_address_or_a_deduplicated_list(router):
+    assert router.bind_hosts("127.0.0.1") == ["127.0.0.1"]
+    assert router.bind_hosts(" 127.0.0.1 , 100.64.0.12,127.0.0.1,") == ["127.0.0.1", "100.64.0.12"]
+    with pytest.raises(ValueError):
+        router.bind_hosts(" , ")
+
+
+def test_router_answers_on_every_named_address_and_no_other(router):
+    import socket
+    import urllib.request
+    uvicorn = pytest.importorskip("uvicorn")  # only the speech-router venv carries it
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    socks = router.bind_sockets(["127.0.0.1", "127.0.0.2"], port)
+    server = uvicorn.Server(uvicorn.Config(router.app, server_header=False, log_level="error"))
+    thread = threading.Thread(target=server.run, kwargs={"sockets": socks}, daemon=True)
+    thread.start()
+    try:
+        for host in ("127.0.0.1", "127.0.0.2"):
+            for _ in range(50):
+                try:
+                    body = urllib.request.urlopen(f"http://{host}:{port}/health", timeout=2).read()
+                    break
+                except OSError:
+                    time.sleep(0.1)
+            else:
+                pytest.fail(f"router never answered on {host}")
+            assert b'"status"' in body
+        # a third loopback address was never named, so nothing listens there
+        with pytest.raises(OSError):
+            urllib.request.urlopen(f"http://127.0.0.3:{port}/health", timeout=2)
+    finally:
+        server.should_exit = True
+        thread.join(5)
