@@ -958,8 +958,37 @@ async def ws_transcribe(ws: WebSocket):
                                      final_ms=round((time.time() - t0) * 1000, 1), attempts=attempts)
 
 
+def bind_hosts(value: str) -> list[str]:
+    """`HARMONY_ROUTER_HOST` is one address or a comma list (loopback for a same-host relay plus
+    the tailnet address for a relay on another host). Name each address: a wildcard would also
+    answer on a public interface, and the router holds no credential."""
+    hosts = list(dict.fromkeys(h.strip() for h in value.split(",") if h.strip()))
+    if not hosts:
+        raise ValueError("HARMONY_ROUTER_HOST names no address")
+    return hosts
+
+
+def bind_sockets(hosts: list[str], port: int) -> list[socket.socket]:
+    socks = []
+    try:
+        for host in hosts:
+            s = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM)
+            socks.append(s)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host, port))
+    except Exception:
+        for s in socks:
+            s.close()
+        raise
+    return socks
+
+
 if __name__ == "__main__":
     import uvicorn
     print(f"[harmony-router] {ROUTER_ID} rev={REVISION} region={REGION or '-'} "
           f"fleet={FLEET_URL or '(unset)'} on {BIND_HOST}:{PORT}", flush=True)
-    uvicorn.run(app, host=BIND_HOST, port=PORT, server_header=False)
+    _hosts = bind_hosts(BIND_HOST)
+    if len(_hosts) == 1:
+        uvicorn.run(app, host=_hosts[0], port=PORT, server_header=False)
+    else:
+        uvicorn.Server(uvicorn.Config(app, server_header=False)).run(sockets=bind_sockets(_hosts, PORT))
