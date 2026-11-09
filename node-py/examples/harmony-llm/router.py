@@ -627,7 +627,9 @@ async def _route(path: str, request: Request, raw: bytes, ctx: dict):
             detail = (await resp.aread())[:500].decode("utf-8", "replace")
             await resp.aclose()
             await client.aclose()
-            ROUTES.record(**fr.route_row(ctx, ROUTER_ID, "refused", resp.status_code))
+            # The cause is a bounded token (status only), never the engine's text.
+            ROUTES.record(**fr.route_row(ctx, ROUTER_ID, "refused", resp.status_code,
+                                         cause=f"engine_refused_{int(resp.status_code):03d}"))
             return _public_response(ctx["request_id"], resp.status_code, detail, dict(resp.headers))
         keep = {k: v for k, v in resp.headers.items() if k.lower() in PUBLIC_HEADER_ALLOW}
         keep["x-request-id"] = ctx["request_id"]
