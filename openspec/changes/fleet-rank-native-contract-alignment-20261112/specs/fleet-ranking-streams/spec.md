@@ -71,3 +71,9 @@ reconnect SHALL re-register the same native contract before publication.
 
 - **WHEN** the ranker cannot compute a result
 - **THEN** a named failed partial is emitted and absence is not fabricated
+
+#### Scenario: Shadow acknowledgements never look like active publication
+
+- **WHEN** ingress acknowledges a present, absent or failed ranking publication as shadowed
+- **THEN** the runtime reports `fleet_rank_authority_refused:shadowed`
+- **AND** none of those outcomes is claimed as an active authoritative publication

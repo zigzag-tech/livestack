@@ -322,21 +322,24 @@ class StreamsRuntime:
                 body = fleet_rank_stream.ranking_body(fleet, triple, now_s)
             except fleet_rank_stream.RankingAbsent:
                 self.log(f"streams: {FLEET_RANK} {triple[0]}:{triple[1]} absent: no_targets")
-                await self.publish_state(FLEET_RANK, subject, "absent", None)
+                await self._publish_fleet_rank_state(subject, "absent", None)
                 continue
             except fleet_rank_stream.RankingFailure as error:
                 await self._publish_fleet_rank_failure(triple, error)
                 continue
-            ack = await self.publish_state(FLEET_RANK, subject, "ok", body)
-            if ack.get("shadowed"):
-                raise RuntimeError(f"{FLEET_RANK} source is shadowed")
+            await self._publish_fleet_rank_state(subject, "ok", body)
+
+    async def _publish_fleet_rank_state(self, subject: dict, status: str, body: Optional[dict],
+                                       error: Optional[dict] = None) -> None:
+        ack = await self.publish_state(FLEET_RANK, subject, status, body, error)
+        if ack.get("shadowed"):
+            raise RuntimeError("fleet_rank_authority_refused:shadowed")
 
     async def _publish_fleet_rank_failure(self, triple: Tuple[str, str, str],
                                           failure: fleet_rank_stream.RankingFailure) -> None:
         self.log(f"streams: {FLEET_RANK} {triple[0]}:{triple[1]}={triple[2]} failed "
                  f"({failure.code}: {failure.detail})")
-        await self.publish_state(
-            FLEET_RANK,
+        await self._publish_fleet_rank_state(
             {"kind": triple[0], "region": triple[1]},
             "failed", None, {"code": failure.code, "detail": failure.detail},
         )

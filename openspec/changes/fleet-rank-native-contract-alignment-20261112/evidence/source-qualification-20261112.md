@@ -25,11 +25,21 @@ The SDK tests use a private AF_UNIX protocol fixture. They do NOT prove real
 Hub/daemon authority registration, production activation or final-tree Task-E2E.
 Those remain open in tasks 2.1, 2.3 and 2.4. This change is not ready to archive.
 
-Worker-tested source SHA-256 (verified against local candidate before commit):
+Shadow-acknowledgement follow-up: the same guard now checks present, absent
+and failed publications. A shadow acknowledgement raises the named
+fleet_rank_authority_refused:shadowed outcome for every case. This closes the
+absence/failure branches that previously ignored that acknowledgement.
+The exact updated worker source passed 36/36 module tests, including all 14
+fleet-focused cases and three SDK socket shadow controls. No real authority
+admission or production activation is inferred from the protocol fixture.
+The projection module and its previously validated real-ranker bodies did not
+change; the two schema-vector results remain applicable to that same module.
+
+Worker-tested source SHA-256 (updated hashes verified locally before commit):
 - `node-py/livestack_node/streams/fleet_rank_stream.py`: `a24b48b33442d35487b49d3e498780ade23518192add6326d09fb1ab302a59e6`
-- `node-py/livestack_node/streams/runtime.py`: `f47d628f1f8dc93e2b4996f4a97a90285459b82c063b2c386cf4de3ad082b862`
+- `node-py/livestack_node/streams/runtime.py`: `02b59abbda990c5de3a5ddc4f5a0c18e4b329a6956d0992346ecb8510f257c00`
 - `node-py/tests/test_streams_producers.py`: `1f23d8812207a7ba7846b326a0a3addb340531120170a7fca71d0f8d76c3e02f`
-- `node-py/tests/test_fleet_rank_stream.py`: `e4cfc2c3b632919930ea41c316be110364d0d2e37e8efd3b43cccf21f42c7adf`
+- `node-py/tests/test_fleet_rank_stream.py`: `cd9a36251ebc674bd54af01dad601bcfc9d08c99cbd77bbbefe537d02ee7377d`
 
 Canonical schema SHA-256: `777ccf75bfbcf987ee3cafd677e01163a0cf27a897e72743d6db3ad6a16dc840`.
 Real-ranker body vectors SHA-256: `e966fe93503229581809eb6e77345a6a078f8677733fb699343a4e9af5f48d46`.
