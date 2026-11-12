@@ -19,7 +19,6 @@
   "harmony_requires": {
     "class": "llm",
     "family": "qwen",
-    "benchday_profile": "pane_ask_flash_next_v1",
     "params_b": "[120,130)"
   }
 }
