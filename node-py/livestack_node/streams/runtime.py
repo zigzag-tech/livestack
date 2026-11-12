@@ -122,7 +122,7 @@ class StreamsRuntime:
                identity_namespace: Optional[str] = None,
                workload: Any = None, request: Any = None) -> "StreamsRuntime":
         self.host_facts, self.fleet_reader, self.jobs_reader = host_facts, fleet_reader, jobs_reader
-        self.fleet_rank_pairs = list(fleet_rank_pairs or [])
+        self.fleet_rank_pairs = fleet_rank_stream.bounded_pairs(fleet_rank_pairs or [], self.log)
         self.identity_reader = identity_reader
         self.identity_contract = identity_contract
         self.identity_authority_id = identity_authority_id
@@ -317,15 +317,19 @@ class StreamsRuntime:
             return
         now_s = self.clock() / 1000.0
         for triple in self.fleet_rank_pairs:
-            subject = {"kind": triple[0], "region": triple[1], "vantage": triple[2]}
+            subject = {"kind": triple[0], "region": triple[1]}
             try:
                 body = fleet_rank_stream.ranking_body(fleet, triple, now_s)
+            except fleet_rank_stream.RankingAbsent:
+                self.log(f"streams: {FLEET_RANK} {triple[0]}:{triple[1]} absent: no_targets")
+                await self.publish_state(FLEET_RANK, subject, "absent", None)
+                continue
             except fleet_rank_stream.RankingFailure as error:
                 await self._publish_fleet_rank_failure(triple, error)
                 continue
             ack = await self.publish_state(FLEET_RANK, subject, "ok", body)
             if ack.get("shadowed"):
-                raise RuntimeError("harmony.fleet-rank/1 source is shadowed")
+                raise RuntimeError(f"{FLEET_RANK} source is shadowed")
 
     async def _publish_fleet_rank_failure(self, triple: Tuple[str, str, str],
                                           failure: fleet_rank_stream.RankingFailure) -> None:
@@ -333,7 +337,7 @@ class StreamsRuntime:
                  f"({failure.code}: {failure.detail})")
         await self.publish_state(
             FLEET_RANK,
-            {"kind": triple[0], "region": triple[1], "vantage": triple[2]},
+            {"kind": triple[0], "region": triple[1]},
             "failed", None, {"code": failure.code, "detail": failure.detail},
         )
 
