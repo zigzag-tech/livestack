@@ -9,6 +9,7 @@ import copy
 import json
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -16,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from livestack_node.streams import fleet_rank_stream as source
 from livestack_node.streams.runtime import StreamsRuntime
 from test_streams_producers import REAL_FLEET
+from streams_fake_ingress import FakeIngress
 
 
 class FleetRankProjectionTests(unittest.TestCase):
@@ -92,3 +94,34 @@ class FleetRankProjectionTests(unittest.TestCase):
             with self.assertRaises(source.RankingFailure) as refusal:
                 self.body()
         self.assertEqual(refusal.exception.code, "fleet_rank_compute_failed")
+
+
+class FleetRankShadowAckTests(unittest.IsolatedAsyncioTestCase):
+    async def exercise_shadow(self, reader, status):
+        with tempfile.TemporaryDirectory(prefix="fleet-shadow-") as directory:
+            path = os.path.join(directory, "ingress.sock")
+            fake = FakeIngress(path, shadow=(source.CONTRACT,))
+            await fake.start()
+            logs = []
+            runtime = StreamsRuntime(path, logs.append, "tower", fleet_s=0.03, fleet_rank_s=0.03)
+            runtime.attach(fleet_reader=reader, fleet_rank_pairs=[("llm", "na", "host:tower")])
+            runtime.start()
+            try:
+                self.assertTrue(await fake.settle(lambda: any(
+                    "fleet_rank_authority_refused:shadowed" in line for line in logs)), logs)
+                self.assertTrue(any(row["contract"] == source.CONTRACT and row["status"] == status
+                                    for row in fake.publishes))
+            finally:
+                await runtime.stop()
+                await fake.stop()
+
+    async def test_present_shadow_ack_is_named(self):
+        await self.exercise_shadow(lambda: (REAL_FLEET, {}), "ok")
+
+    async def test_absence_shadow_ack_is_named(self):
+        await self.exercise_shadow(lambda: ({"hosts": {}}, {}), "absent")
+
+    async def test_failure_shadow_ack_is_named(self):
+        def unavailable():
+            raise OSError("fixture source unavailable")
+        await self.exercise_shadow(unavailable, "failed")
