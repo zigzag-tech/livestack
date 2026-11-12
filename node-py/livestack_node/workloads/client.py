@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -161,7 +162,8 @@ class WorkloadClient:
         """This principal's most recent jobs (the authority bounds the page)."""
         return self.request('jobs')['jobs']
 
-    def list_job_changes(self, *, expected_owner, updated_since=0, after_job_id=None, limit=256):
+    def list_job_changes(self, *, expected_owner, updated_since=0, after_job_id=None, limit=256,
+                         source_turn_id=None):
         """Read one bounded page for the configured owner and verify its binding.
 
         Timestamp-only polls replay their watermark; use `next_cursor` only to
@@ -187,6 +189,11 @@ class WorkloadClient:
         query = {'updated_since': updated_since, 'limit': limit}
         if after_job_id is not None:
             query['after_job_id'] = after_job_id
+        if source_turn_id is not None:
+            if (not isinstance(source_turn_id, str) or
+                    not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', source_turn_id)):
+                raise WorkloadError('invalid source_turn_id')
+            query['source_turn_id'] = source_turn_id
         result = self.request('jobs/changes?' + urllib.parse.urlencode(query))
         if not isinstance(result, dict):
             raise WorkloadError('invalid job changes response', 502)
@@ -226,4 +233,38 @@ class WorkloadClient:
                 raise WorkloadError('invalid job changes cursor', 502)
         elif cursor is not None or result['truncated'] != 0:
             raise WorkloadError('invalid job changes cursor', 502)
+        if source_turn_id is not None:
+            states = {'queued', 'running', 'succeeded', 'failed', 'cancelled', 'expired'}
+            for row in jobs:
+                if (row.get('source_kind') != 'overlord_turn' or
+                        row.get('source_turn_id') != source_turn_id):
+                    raise WorkloadError('job lineage source mismatch', 502)
+                explanation = row.get('current_explanation')
+                if (not isinstance(explanation, dict) or set(explanation) != {'code', 'observed_ms'} or
+                        explanation.get('code') not in states or
+                        isinstance(explanation.get('observed_ms'), bool) or
+                        not isinstance(explanation.get('observed_ms'), int) or
+                        explanation.get('observed_ms') != row['updated_ms']):
+                    raise WorkloadError('invalid job lineage explanation', 502)
+                attempt = row.get('attempt')
+                if attempt is not None and (
+                        not isinstance(attempt, dict) or
+                        not isinstance(attempt.get('id'), str) or
+                        not isinstance(attempt.get('worker'), str) or
+                        not isinstance(attempt.get('worker_session_id'), str) or
+                        not 0 < len(attempt['id']) <= 128 or
+                        not 0 < len(attempt['worker']) <= 128 or
+                        not 0 < len(attempt['worker_session_id']) <= 128):
+                    raise WorkloadError('invalid exact job attempt lineage', 502)
+            result = dict(result, complete=result['truncated'] == 0)
         return result
+
+    def list_job_changes_for_turn(self, *, expected_owner, source_turn_id,
+                                  updated_since=0, after_job_id=None, limit=256):
+        """Read one bounded page for one exact Overlord turn under this owner.
+
+        `complete` is true only when the authority reports no withheld matching
+        row. A truncated page remains incomplete and must not create a graph edge.
+        """
+        return self.list_job_changes(expected_owner=expected_owner, source_turn_id=source_turn_id,
+                                     updated_since=updated_since, after_job_id=after_job_id, limit=limit)

@@ -494,7 +494,7 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     allowed = {"version", "key", "handler", "input_digest", "input_objects", "payload", "need",
                "admit", "selector", "labels", "estimate_seconds", "deadline", "priority",
                "locality_host", "retain", "environment", "handler_release", "scope",
-               "max_queue_seconds", "progress_deadline_seconds", "max_attempt_seconds"}
+               "max_queue_seconds", "progress_deadline_seconds", "max_attempt_seconds", "source"}
     version = value.get("version")
     # Version 4 is version 3 plus work scopes and the opt-in deadlines; an authority that predates it
     # refuses a scoped submission loudly instead of ignoring the scope.
@@ -536,6 +536,15 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
         raise WorkloadError("priority must be an integer in [0, 1000000]")
     if not isinstance(value.get("payload", {}), dict) or not isinstance(value.get("retain", False), bool):
         raise WorkloadError("invalid payload or retain flag")
+    source = None
+    if "source" in value:
+        raw_source = value["source"]
+        if (not isinstance(raw_source, dict) or set(raw_source) != {"kind", "turn_id"} or
+                raw_source.get("kind") != "overlord_turn" or
+                not isinstance(raw_source.get("turn_id"), str) or
+                not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", raw_source["turn_id"])):
+            raise WorkloadError("source must be {kind: 'overlord_turn', turn_id: bounded stable id}")
+        source = {"kind": "overlord_turn", "turn_id": raw_source["turn_id"]}
     job_labels = labels(value.get("labels", {}))
     if len(job_labels) > 16:
         raise WorkloadError("a submission carries at most 16 labels")
@@ -550,6 +559,8 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
                   selector=labels(value.get("selector", {})), estimate_seconds=estimate,
                   deadline=deadline, locality_host=value.get("locality_host"),
                   retain=value.get("retain", False))
+    if source is not None:
+        result["source"] = source
     if "handler_release" in value:
         release = value['handler_release']
         if not isinstance(release, dict) or release.get('selection') not in ('default', 'exact'):
