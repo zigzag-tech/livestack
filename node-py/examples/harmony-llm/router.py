@@ -494,8 +494,10 @@ async def proxy(path: str, request: Request):
 # Speech endpoints the router places across hosts: path -> the fleet node KIND
 # that serves it. Batch ASR only for now; streaming ASR (`/ws/transcribe`) and
 # TTS are not under /v1 and need a websocket / non-/v1 mount (design: openspec
-# change harmony-speech-routing).
-SPEECH_PATHS = {"audio/transcriptions": "polyasr"}
+# change harmony-speech-routing). `align` is polyasr's forced alignment (each word of
+# the audio with its start and end, POST /v1/align, served by every polyasr backend):
+# a caller that needs word timings states it by the endpoint, as transcription does.
+SPEECH_PATHS = {"audio/transcriptions": "polyasr", "align": "polyasr"}
 # Optional operator override of the placement attempt policy for speech (the
 # policy itself comes from the ranker, clamped: placement.clamp_attempt_policy).
 SPEECH_ATTEMPTS = int(os.environ.get("HARMONY_ROUTER_SPEECH_ATTEMPTS", "0"))
