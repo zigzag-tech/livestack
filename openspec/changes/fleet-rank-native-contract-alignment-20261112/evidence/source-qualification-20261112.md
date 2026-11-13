@@ -71,3 +71,26 @@ checksum-only rsync comparison confirming no worker/source differences. The
 OpenSpec change validates. These remain SDK socket/projection controls, not
 real daemon/Hub authority evidence. Task 2.1 and integration/archive obligations
 remain open; no production activation or source landing is inferred.
+
+## Workload lifecycle race fixed (2026-11-13)
+
+The duplicate-admitted failure is now reproduced deterministically using the
+production authority factory, real WorkloadStore/CAS and framed SDK. Holding
+the initial submitted publication while invoking the pump produced
+`admitted, submitted, admitted` before the fix: the pump mistook an in-flight
+submit's durable row for crash recovery. This is stronger evidence than the
+earlier startup-timing hypothesis; waiting for initial reannouncement alone
+does not fix that race.
+
+The authority now serializes write, pump and reannouncement mutations with
+one asyncio lock per authority (no growing per-intent lock map). The exact
+owner, reference, admission, cancellation and lifecycle assertions remain.
+The new real-store regression fails before this fix and passes afterward,
+requiring submitted/admitted seq 1/2 and exactly one real job with no attempt.
+
+Final private zz-joe source: `unittest discover -s tests -p 'test*stream*.py'`
+passed **64/64**, including the previously failing five-rung assertion, the new
+concurrent pump regression, fleet/identity and real workload-store controls.
+OpenSpec validates and diff checking passes. Existing SQLite ResourceWarnings
+remain visible. These results supersede the earlier regular-test failure,
+but do not supply real daemon/Hub authority or final-tree Task-E2E evidence.

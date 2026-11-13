@@ -244,6 +244,11 @@ class WorkloadAuthority:
         self.ledger, self.backend, self.publish, self.source = ledger, backend, publish, source
         self.clock, self.log = optional(clock), log
         self.epoch = 0
+        # A durable submitted row becomes visible before its first publish is
+        # acknowledged. Serialize lifecycle mutations so a concurrent pump
+        # cannot mistake that in-flight submit for crash recovery, or replay a
+        # stale row over a cancellation. One lock per authority; no keyed map.
+        self._mutation = asyncio.Lock()
 
     # -- partial minting
     def _partial(self, intent_id: str, seq: int, body: dict) -> dict:
@@ -264,6 +269,10 @@ class WorkloadAuthority:
     # -- write handling
     async def handle_write(self, write: Any) -> dict:
         """The `serve` handler: one answer per write frame, never an exception."""
+        async with self._mutation:
+            return await self._handle_write(write)
+
+    async def _handle_write(self, write: Any) -> dict:
         try:
             if write.op == "submit":
                 return await self._submit(write)
@@ -418,6 +427,10 @@ class WorkloadAuthority:
     # -- background
     async def pump(self) -> int:
         """Look at every live intent once; mint a partial for each rung gained. Returns changes."""
+        async with self._mutation:
+            return await self._pump()
+
+    async def _pump(self) -> int:
         if self.epoch == 0:
             return 0  # not the authority yet (no realm epoch): publishing now would be unversioned
         changed = 0
@@ -455,6 +468,10 @@ class WorkloadAuthority:
 
     async def reannounce(self, epoch: int) -> int:
         """After (re)gaining the realm authority under `epoch`: publish every non-terminal intent's rung."""
+        async with self._mutation:
+            return await self._reannounce(epoch)
+
+    async def _reannounce(self, epoch: int) -> int:
         self.epoch = epoch
         count = 0
         for record in self.ledger.live():
