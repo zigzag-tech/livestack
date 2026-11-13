@@ -1020,3 +1020,34 @@ temporary; this proof does not start the service, contact production, modify
 authority configuration, or affect live jobs. The previously recorded
 `spec_resolver_unconfigured` limitation is stale. HTTP remains the bounded CAS
 transfer plane and is not a fallback for workload submission or observation.
+
+
+## Authenticated source-turn joins
+
+`workloads/provenance.py` accepts a closed optional `{v:1,kind,turn_id}` envelope
+only for caller/admin principals explicitly granted that kind by
+`provenance_kinds` (default empty, at most8 distinct identifiers). The HTTP owner
+resolves the existing delegated-owner scope and stamps principal/effective owner;
+request fields cannot supply authority stamps, attempt/worker or explanation.
+Source-looking advisory labels are refused. Same-key replay with another source
+is an idempotency conflict, never relabeling or an implicit replacement job.
+
+Source metadata lives only in nullable `jobs.source_provenance` plus its authority
+observation timestamp. It is not copied to permanent spec/payload/labels. The
+record is capped at512 encoded bytes and inherits existing active/terminal job
+count caps (defaults1000/10000). `Limits.provenance_seconds` defaults86400, must
+be finite and between60 and604800 seconds. `provenance.expire`, called by the
+store's normal expiry path and idle sweep, clears metadata in one indexed SQL
+statement even for retained jobs; retained job data/exemptions are untouched.
+Reads run expiry before selecting, so a delayed idle sweep cannot expose an
+expired source. The request hash remains an opaque idempotency digest.
+
+The fixed-owner `jobs/changes` reader additionally accepts `source_turn_id`.
+The owner/source-turn/update/id index and set-based attempt query avoid per-job
+read fan-out; cursor,256-row and30KiB response bounds remain. Source kind/turn/
+submitting principal and the current state explanation come from authority rows.
+Attempt worker identity comes from authenticated attempts, never source JSON.
+Jobs without provenance retain their old projection shape. Deployment is opt-in:
+ship authority support, enable the intended producer grant, then enable matching
+Jingway wiring and verify the real job/worker path. No grant/config or service
+restart is performed by this source change.
