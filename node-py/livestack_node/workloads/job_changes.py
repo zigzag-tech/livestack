@@ -86,11 +86,17 @@ def _row(db_row, attempt):
         outcome = _outcome(state, result, cause)
         if outcome:
             row["outcome"] = outcome
+    source = json.loads(db_row["source_provenance"]) if db_row["source_provenance"] else None
+    if source is not None:
+        row.update(source_kind=source["kind"], source_turn_id=source["turn_id"],
+                   source_principal=source["principal"],
+                   current_explanation={"code": state, "observed_ms": row["updated_ms"]})
     return row
 
 
 def job_changes(store, *, updated_since=0, owner=None, limit=MAX_LIMIT,
-                after_job_id=None, inclusive=False, with_cursor=False, bounded=False):
+                after_job_id=None, inclusive=False, with_cursor=False, bounded=False,
+                source_turn_id=None):
     """Read one bounded projection. `bounded` avoids a total-row count for source polling."""
     if isinstance(updated_since, bool) or not isinstance(updated_since, int) or updated_since < 0:
         raise WorkloadError("updated_since must be a non-negative integer (ms)")
@@ -114,6 +120,12 @@ def job_changes(store, *, updated_since=0, owner=None, limit=MAX_LIMIT,
     if owner is not None:
         where += " AND COALESCE(NULLIF(json_extract(labels,'$.owner'), ''), owner) = ?"
         args.append(owner)
+    if source_turn_id is not None:
+        from .provenance import turn_id
+        if owner is None:
+            raise WorkloadError('provenance_owner_required')
+        where += " AND json_extract(source_provenance,'$.turn_id') = ?"
+        args.append(turn_id(source_turn_id))
     with store.transaction() as db:
         store._expire(db, store.clock())
         total = None if bounded else db.execute(f"SELECT count(*) FROM jobs WHERE {where}", args).fetchone()[0]
