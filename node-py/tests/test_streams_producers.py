@@ -184,8 +184,15 @@ class WorkloadTests(Base):
         ledger = IntentLedger(ledger_path or self.path("intents.sqlite"))
         authority = WorkloadAuthority(ledger, backend, runtime.intent_publisher(WORKLOAD), "harmony-workload:h1", log=self.logs.append)
         runtime.attach(workload=authority)
+        initial_logs = len(self.logs)
         runtime.start()
         self.addAsyncCleanup(runtime.stop)
+        # The serving socket exists before on_up finishes re-announcing the
+        # initial ledger. Submitting during that cut can legitimately replay
+        # an admitted row; start ladder assertions after the initial cut.
+        self.assertTrue(await fake.settle(lambda: any(
+            f"workload: authority epoch {epoch}; re-announced" in line
+            for line in self.logs[initial_logs:])))
         return fake, runtime, authority, backend
 
     async def submit(self, fake, intent_id, kind, **extra):
@@ -437,13 +444,13 @@ class FleetRankStreamTests(Base):
             self.logs.append)
         self.assertEqual(pairs, [("asr", "na", "host:tower"), ("llm", "eu", "region:eu")])
         self.assertTrue(any("duplicate" in line for line in self.logs))
-        self.assertTrue(any("malformed" in line for line in self.logs))
+        self.assertTrue(any("fleet_rank_config_invalid" in line for line in self.logs))
         self.assertEqual(fleet_rank_stream.interval_seconds(None), 30)
         self.assertEqual(fleet_rank_stream.interval_seconds("5"), 5)
         self.assertEqual(fleet_rank_stream.interval_seconds("4", self.logs.append), 30)
         self.assertTrue(any("must be 5..60" in line for line in self.logs))
         too_many = ",".join(f"llm:r{i}=direct" for i in range(65))
-        self.assertEqual(len(fleet_rank_stream.parse_pairs(too_many, self.logs.append)), 64)
+        self.assertEqual(len(fleet_rank_stream.parse_pairs(too_many, self.logs.append)), 32)
 
     def test_existing_ranker_preserves_per_vantage_preference_and_target_order(self):
         view = {"hosts": {
@@ -483,9 +490,8 @@ class FleetRankStreamTests(Base):
                              fleet_rank_stream.MAX_BODY_BYTES)
 
     def test_empty_invalid_and_oversized_rankings_fail_with_names(self):
-        with self.assertRaises(fleet_rank_stream.RankingFailure) as empty:
+        with self.assertRaises(fleet_rank_stream.RankingAbsent):
             fleet_rank_stream.ranking_body({}, ("asr", "na", "direct"), 120.0)
-        self.assertEqual(empty.exception.code, "fleet_rank_empty")
 
         valid = {"kind": "llm", "vantage": "direct", "vantage_used": "direct",
                  "generated_at": 120.0, "chosen": "target", "reason": "measured",
@@ -529,7 +535,7 @@ class FleetRankStreamTests(Base):
         self.assertTrue(await fake.settle(lambda: any(row["contract"] == FLEET_RANK for row in fake.publishes)))
         ranking = next(row for row in fake.publishes if row["contract"] == FLEET_RANK)
         self.assertIn(FLEET_RANK, fake.registers)
-        self.assertEqual(ranking["subject"], {"kind": "llm", "region": "na", "vantage": "host:tower"})
+        self.assertEqual(ranking["subject"], {"kind": "llm", "region": "na"})
         self.assertEqual((ranking["status"], ranking["body"]["kind"], ranking["body"]["vantage"]),
                          ("ok", "llm", "host:tower"))
         self.assertTrue(ranking["body"]["targets"])
@@ -548,7 +554,7 @@ class FleetRankStreamTests(Base):
         self.assertNotIn(FLEET_RANK, idle_fake.registers)
         self.assertFalse(any(row["contract"] == FLEET_RANK for row in idle_fake.publishes))
 
-    async def test_empty_rank_is_published_as_a_named_source_failure(self):
+    async def test_successful_empty_rank_publishes_bodyless_absence(self):
         fake = FakeIngress(self.path("fleet-rank-failed.sock"))
         await fake.start()
         self.addAsyncCleanup(fake.stop)
@@ -559,9 +565,9 @@ class FleetRankStreamTests(Base):
         runtime.start()
         self.addAsyncCleanup(runtime.stop)
         self.assertTrue(await fake.settle(lambda: any(
-            row["contract"] == FLEET_RANK and row["status"] == "failed" for row in fake.publishes)))
+            row["contract"] == FLEET_RANK and row["status"] == "absent" for row in fake.publishes)))
         failed = next(row for row in fake.publishes if row["contract"] == FLEET_RANK)
-        self.assertEqual(failed["error"]["code"], "fleet_rank_empty")
+        self.assertIsNone(failed.get("error"))
         self.assertIsNone(failed.get("body"))
 
 

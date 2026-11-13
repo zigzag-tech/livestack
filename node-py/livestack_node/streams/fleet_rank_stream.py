@@ -1,6 +1,7 @@
 """Bounded per-vantage fleet rankings for the native Harmony stream producer."""
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from typing import Any, Callable, Dict, List, Sequence, Tuple
@@ -8,8 +9,8 @@ from typing import Any, Callable, Dict, List, Sequence, Tuple
 from .. import fleet_rank
 from ..preferences import parse_preference_list
 
-CONTRACT = "harmony.fleet-rank/1"
-MAX_PAIRS = 64
+CONTRACT = "harmony.fleet.rank/1"
+MAX_PAIRS = 32
 MAX_TARGETS = 64
 MAX_BODY_BYTES = 28 * 1024  # leave room for the partial envelope under the 32 KiB contract cap
 DEFAULT_TTL_S = 60.0
@@ -36,6 +37,26 @@ class RankingFailure(ValueError):
         super().__init__(detail)
         self.code = code
         self.detail = detail.encode("utf-8")[:256].decode("utf-8", errors="ignore")
+
+
+class RankingAbsent(ValueError):
+    """A successful computation has no eligible targets; publish bodyless absence."""
+
+
+def _valid_preference_clause(clause: Any) -> bool:
+    if not isinstance(clause, dict):
+        return False
+    try:
+        parse_preference_list([clause])
+    except (ValueError, TypeError):
+        return False
+    if "attribute" in clause:
+        value = clause["value"]
+        if isinstance(value, str):
+            return 1 <= len(value) <= 128
+        if isinstance(value, list):
+            return all(1 <= len(item) <= 128 for item in value)
+    return True
 
 
 def _bounded_json_value(value: Any, depth: int) -> bool:
@@ -65,7 +86,7 @@ def _valid_preference_receipt(receipt: Any) -> bool:
         return False
     if set(receipt) - {"clause", "value", "comparable", "matched", "reason"}:
         return False
-    if not isinstance(receipt["clause"], dict) or not isinstance(receipt["comparable"], bool):
+    if not _valid_preference_clause(receipt["clause"]) or not isinstance(receipt["comparable"], bool):
         return False
     if not _bounded_json_value(receipt["clause"], 3):
         return False
@@ -79,7 +100,7 @@ def _valid_preference_receipt(receipt: Any) -> bool:
 def parse_pairs(raw: str, log: Callable[[str], None] = print) -> List[Tuple[str, str, str]]:
     """Read `kind:region=vantage` entries, preserving valid siblings and order."""
     if len(raw.encode("utf-8")) > 32 * 1024:
-        log("streams: fleet-rank configuration exceeds 32768 bytes; contract disabled")
+        log("streams: fleet_rank_config_limit: configuration exceeds 32768 bytes; contract disabled")
         return []
     out: List[Tuple[str, str, str]] = []
     seen = set()
@@ -93,21 +114,44 @@ def parse_pairs(raw: str, log: Callable[[str], None] = print) -> List[Tuple[str,
         fields = (kind, region, vantage)
         if (not separator or not colon or entry.count("=") != 1 or lhs.count(":") != 1
                 or any(not value for value in fields)):
-            log(f"streams: skipping malformed fleet-rank pair {entry!r}")
+            log(f"streams: fleet_rank_config_invalid: skipping {entry[:256]!r}")
             continue
         if (len(kind.encode()) > 32 or len(region.encode()) > 32 or len(vantage.encode()) > 128
                 or any(ord(char) < 0x20 for value in fields for char in value)):
-            log(f"streams: skipping fleet-rank pair outside field bounds {entry!r}")
+            log(f"streams: fleet_rank_config_field_limit: skipping {entry[:256]!r}")
             continue
         triple = (kind, region, vantage)
-        if triple in seen:
-            log(f"streams: skipping duplicate fleet-rank pair {entry!r}")
+        pair = (kind, region)
+        if pair in seen:
+            log(f"streams: fleet_rank_duplicate_pair: skipping {entry[:256]!r}")
             continue
         if len(out) >= MAX_PAIRS:
-            log(f"streams: skipping fleet-rank pair beyond {MAX_PAIRS} configured triples")
+            log(f"streams: fleet_rank_pair_limit: refusing a pair beyond {MAX_PAIRS}; existing pairs preserved")
             continue
-        seen.add(triple)
+        seen.add(pair)
         out.append(triple)
+    return out
+
+
+def bounded_pairs(pairs: Sequence[Tuple[str, str, str]], log: Callable[[str], None]) -> List[Tuple[str, str, str]]:
+    """Fence programmatic runtime attachment as well as environment parsing."""
+    out: List[Tuple[str, str, str]] = []
+    seen = set()
+    if len(pairs) > MAX_PAIRS:
+        log(f"streams: fleet_rank_pair_limit: {len(pairs) - MAX_PAIRS} excess runtime pairs refused")
+    for triple in pairs[:MAX_PAIRS]:
+        if (not isinstance(triple, (tuple, list)) or len(triple) != 3
+                or any(not isinstance(value, str) or not value or any(ord(c) < 32 for c in value)
+                       for value in triple)
+                or any(len(value.encode()) > limit for value, limit in zip(triple, (32, 32, 128)))):
+            log("streams: fleet_rank_config_invalid: runtime pair refused")
+            continue
+        pair = (triple[0], triple[1])
+        if pair in seen:
+            log("streams: fleet_rank_duplicate_pair: runtime pair refused")
+            continue
+        seen.add(pair)
+        out.append(tuple(triple))
     return out
 
 
@@ -127,16 +171,16 @@ def interval_seconds(raw: str | None, log: Callable[[str], None] = print) -> int
 
 def ranking_body(view: dict, triple: Tuple[str, str, str], now_s: float) -> Dict[str, Any]:
     """Run the existing ranker and preserve the daemon's complete ranking shape."""
-    kind, _region, vantage = triple
+    kind, region, vantage = triple
     prefer = parse_preference_list(ASR_PREFERENCES if kind == "asr" else [])
     try:
         result = fleet_rank.rank(view, kind, vantage=vantage, now=now_s,
                                  ttl_s=DEFAULT_TTL_S, prefer=prefer)
     except Exception as error:  # noqa: BLE001 - converted to a named failed partial by the caller
         raise RankingFailure("fleet_rank_compute_failed", type(error).__name__) from error
-    targets = result.get("targets") if isinstance(result, dict) else None
-    if not isinstance(targets, list) or not targets:
-        raise RankingFailure("fleet_rank_empty", f"no ranked targets for {kind} from {vantage}")
+    if not isinstance(result, dict) or not isinstance(result.get("targets"), list):
+        raise RankingFailure("fleet_rank_invalid_result", "ranker returned no result object or target list")
+    targets = result["targets"]
     if len(targets) > MAX_TARGETS:
         raise RankingFailure("fleet_rank_target_limit", f"{len(targets)} targets exceeds {MAX_TARGETS}")
     if any(not isinstance(target, dict) or not isinstance(target.get("target_id"), str)
@@ -149,15 +193,20 @@ def ranking_body(view: dict, triple: Tuple[str, str, str], now_s: float) -> Dict
             or result.get("vantage_used") != vantage
             or isinstance(generated_at, bool) or not isinstance(generated_at, (int, float))
             or not math.isfinite(generated_at) or generated_at <= 0
-            or not isinstance(chosen, str) or not chosen or len(chosen.encode("utf-8")) > 256
-            or chosen != targets[0].get("target_id")
+            or (targets and (not isinstance(chosen, str) or not chosen or len(chosen.encode("utf-8")) > 256
+                             or chosen != targets[0].get("target_id")))
+            or (not targets and chosen is not None)
             or not isinstance(reason, str)):
         raise RankingFailure("fleet_rank_invalid_result", "ranker returned an incomplete ordering")
+    if not targets:
+        raise RankingAbsent(f"no ranked targets for {kind} from {vantage}")
+    if len({target["target_id"] for target in targets}) != len(targets):
+        raise RankingFailure("fleet_rank_duplicate_target", "ranker returned repeated target IDs")
     if len(reason.encode("utf-8")) > MAX_REASON_BYTES:
         raise RankingFailure("fleet_rank_invalid_result", "ranker summary exceeds 2048 bytes")
     prefer = result.get("prefer", [])
     if not isinstance(prefer, list) or len(prefer) > 8 or not all(
-            isinstance(clause, dict) and _bounded_json_value(clause, 3) for clause in prefer):
+            _valid_preference_clause(clause) for clause in prefer):
         raise RankingFailure("fleet_rank_invalid_result", "ranker returned invalid preferences")
     bounded_targets = []
     for index, target in enumerate(targets):
@@ -187,6 +236,7 @@ def ranking_body(view: dict, triple: Tuple[str, str, str], now_s: float) -> Dict
         bounded_targets.append({field: target.get(field) for field in TARGET_FIELDS})
     body = {
         "kind": kind,
+        "region": region,
         "vantage": vantage,
         "generated_at": float(generated_at),
         "ttl_s": DEFAULT_TTL_S,
@@ -196,6 +246,11 @@ def ranking_body(view: dict, triple: Tuple[str, str, str], now_s: float) -> Dict
         "prefer": prefer,
     }
     try:
+        # A new ordering in the same second must not share the prior decision ID.
+        # Hash all visible decision fields before adding the ID itself.
+        decision = json.dumps(body, sort_keys=True, separators=(",", ":"),
+                              ensure_ascii=False, allow_nan=False).encode("utf-8")
+        body["decision_id"] = "fr_" + hashlib.sha256(decision).hexdigest()
         encoded = json.dumps(body, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
     except (TypeError, ValueError, RecursionError) as error:
         raise RankingFailure("fleet_rank_invalid_result", "ranker returned non-JSON ranking data") from error
