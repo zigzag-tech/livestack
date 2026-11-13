@@ -67,7 +67,7 @@ def test_fixed_owner_and_exact_turn_do_not_expose_sibling_jobs(authority):
     assert authority.call('jobs', request, token=SOURCE_SUBMIT)[0] == 200
     assert [r['id'] for r in read(authority)[1]['jobs']] == [own['id']]
     assert read(authority, 'absent_turn')[1]['jobs'] == []
-    assert authority.call('jobs/changes?source_turn_id=turn_a', token=SOURCE_SUBMIT)[0] == 403
+    assert authority.call('jobs/changes?source_turn_id=turn_a', token=ALICE)[0] == 403
 
 
 @pytest.mark.parametrize('source', [None, {}, {'v': True, 'kind': 'overlord_turn', 'turn_id': 'turn_a'},
@@ -119,6 +119,33 @@ def test_source_query_cannot_widen_owner_or_weaken_identity(authority, query):
     assert authority.call('jobs/changes?' + query, token=READER)[0] == 400
 
 
+def test_producer_reads_only_its_exact_turn_and_explicit_authorized_owner(authority):
+    own = submit(authority)[1]
+    submit(authority, key='other-turn', turn='turn_b')
+    path = 'jobs/changes?source_turn_id=turn_a&owner=source-owner'
+    status, page = authority.call(path, token=SOURCE_SUBMIT)
+    assert status == 200 and page['owner'] == 'source-owner'
+    assert [row['id'] for row in page['jobs']] == [own['id']]
+    assert authority.call('jobs/changes?source_turn_id=turn_a', token=SOURCE_SUBMIT)[1]['jobs'] == []
+    assert authority.call('jobs/changes', token=SOURCE_SUBMIT)[0] == 403
+    assert authority.call('jobs/changes?owner=source-owner', token=SOURCE_SUBMIT)[0] == 403
+    assert authority.call('jobs/changes?source_turn_id=turn_a&owner=alice', token=SOURCE_SUBMIT)[0] == 403
+
+
+def test_producer_cannot_read_a_sibling_producers_same_owner_turn(authority):
+    token = 'n' * 32
+    authority.server.replace_principals([*authority.server.principals,
+        Principal('second-producer', token, 'caller', ('test.v1',), delegate_prefix='source-owner',
+                  provenance_kinds=('overlord_turn',))])
+    authority.server.blobs.put('second-producer', authority.digest, 5, BytesIO(b'input'))
+    first = submit(authority)[1]
+    assert submit(authority, key='other-producer', token=token)[0] == 200
+    path = 'jobs/changes?source_turn_id=turn_a&owner=source-owner'
+    rows = authority.call(path, token=SOURCE_SUBMIT)[1]['jobs']
+    assert [row['id'] for row in rows] == [first['id']]
+    assert len(read(authority)[1]['jobs']) == 2  # fixed owner reader retains its declared scope
+
+
 def test_replay_preserves_source_and_conflicting_turn_cannot_relabel(authority):
     first = submit(authority)[1]
     assert submit(authority)[1]['id'] == first['id']
@@ -162,6 +189,17 @@ def test_retained_job_survives_source_expiry_without_hidden_duplicate_metadata(a
         assert row is not None and row['retain'] == 1
         assert row['source_provenance'] is None and row['source_observed'] is None
         assert 'turn_a' not in row['spec'] and 'turn_a' not in row['labels']
+
+
+def test_normal_sweep_clears_source_without_a_source_read(authority):
+    authority.store.limits = replace(authority.store.limits, provenance_seconds=60)
+    job = submit(authority, retain=True)[1]
+    authority.now[0] += 61
+    authority.store.sweep()
+    with authority.store.transaction() as db:
+        row = db.execute('SELECT retain,source_provenance,source_observed FROM jobs WHERE id=?',
+                         (job['id'],)).fetchone()
+        assert tuple(row) == (1, None, None)
 
 
 def test_exact_turn_cursor_handles_ties_and_uses_composite_index(authority):

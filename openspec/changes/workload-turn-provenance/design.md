@@ -16,3 +16,18 @@ Cross-owner leakage → immutable server owner, fixed-owner read and cross-owner
 
 ## Migration Plan
 Ship additive authority support with grants off, then matching Jingway adapter, then Benchday consumption and an actual isolated turn/job/worker proof. Operators enable the intended source kind for the authenticated producer. Rollback disables the new grant; old calls remain compatible. Archive only after gates and runtime evidence.
+
+
+### Exact-source reads by the authenticated producer
+
+A shared application producer may serve multiple delegated owners; requiring a
+separate fixed-owner reader credential per account would not scale or match the
+existing authenticated producer boundary. In addition to unchanged fixed-owner
+readers, explicitly source-granted caller/admin principals may query this endpoint
+ONLY with an exact source_turn_id. An optional owner filter is validated against
+the credential's own id/delegation prefix. SQL additionally restricts original
+submitting principal and currently granted source kinds. No caller-wide history
+listing, sibling-producer read or arbitrary owner query is enabled. The existing
+producer already owns its jobs; this is a bounded projection, not a new authority.
+Tests must prove ungranted/missing-turn/foreign-owner/other-producer refusal or
+exclusion and unchanged fixed-reader semantics. No per-account credential copies.

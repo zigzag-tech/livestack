@@ -1,32 +1,32 @@
 # Authority component evidence — 2026-11-13
 
-Owner approved the contract on2026-11-13 at22:58Asia/Shanghai. This evidence is
-component-level; it is not a deployment, a real Jingway producer journey or E9 completion.
+Owner approved2026-11-13 22:58Asia/Shanghai. Component evidence only: no
+production deploy, actual Jingway producer journey or E9 completion claimed.
 
-## Checks
+## Current checks
 
-- `PYTHONPATH=node-py .../python -m pytest -q node-py/tests/test_workload_turn_provenance.py`:29 passed in13.52s before the final page-size case was added.
-- Added page-size test executed separately with `-k source_metadata_cannot_expand`:1 passed,29 deselected in3.77s. Together all30 current provenance controls have passed.
-- The combined earlier provenance/job-changes run had37 passes and one fixture failure: oversized stamped metadata correctly returned413 while the new test expected400. Corrected ONLY that expected status, then reran provenance controls. All11 existing job-changes regression cases passed in that combined run. The combined command is not claimed green.
-- `git diff --check` passed.
-- `openspec validate workload-turn-provenance --strict` passed.
+- Combined `PYTHONPATH=node-py .../python -m pytest -q node-py/tests/test_workload_turn_provenance.py node-py/tests/test_workload_job_changes.py`:43 passed in16.78s (32 provenance plus11 existing regressions).
+- Subsequently added independent idle-sweep control: `-k normal_sweep`:1 passed,32 deselected in0.70s. Runtime code did not change between these runs. All33 current provenance cases and11 existing regressions have passed across these focused runs.
+- Strict OpenSpec validation and diff checks passed.
+- Earlier byte-bound fixture expected400; the service correctly returned413. Corrected the expectation only, then all affected controls passed. No size guard weakened.
 
-## Real boundaries exercised
+## Boundaries exercised
 
-Authenticated HTTP over a real ephemeral server and SQLite, authority-stamped
-producer/effective owner, ungranted and foreign-owner refusal, closed/oversized
-source data refusal, exact-turn isolation and tied cursors, actual authenticated
-worker claim and attempt projection, byte/page bound, indexed query plan,
-idempotent conflict under concurrent HTTP submissions, additive legacy-database
-migration/replay, and TTL clearing while preserving retained jobs.
+Real authenticated HTTP/SQLite: source-kind opt-in grants; principal/effective
+owner stamps; malformed/forged/oversized source refusal; owner, producer and
+turn isolation; exact-turn-only producer reads; tied cursors and indexed query
+plan;30KiB wire cap; actual authenticated worker claim/attempt projection;
+concurrent idempotency conflict; compatible migration/replay; read-time TTL;
+and independent normal sweep with retained job preservation.
 
-Default24h/max7day provenance retention is enforced by indexed store expiry and
-read-before-query expiry. No metadata is copied to persistent spec/payload/labels;
-only the opaque idempotency hash persists. Operator grants remain default-deny.
+Metadata is at most512bytes/job, inherits1000active/10000terminal default job
+caps, and expires after24h by default (max7days). No duplicate plaintext metadata
+in spec/payload/labels. The opaque idempotency hash persists; job retention
+exemptions are untouched. Source grants remain default-deny.
 
 ## Pending
 
-Full normal repository gates/CI, matching Jingway producer capture, consumer
-pin integration and an actual isolated turn/job/worker/explanation journey.
-No production credentials/config files changed, no authority restart/deploy,
-no placement/model/worker choice and no local execution fallback added.
+Full normal repository gates/CI, operator rollout/grant, matching Jingway producer,
+consumer pin/wiring and an actual isolated turn/job/worker/explanation proof.
+No credentials/config files changed, no authority restart/deploy, no planner or
+worker/model choice, and no local execution fallback added.

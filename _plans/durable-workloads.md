@@ -1051,3 +1051,14 @@ Jobs without provenance retain their old projection shape. Deployment is opt-in:
 ship authority support, enable the intended producer grant, then enable matching
 Jingway wiring and verify the real job/worker path. No grant/config or service
 restart is performed by this source change.
+
+
+Explicitly source-granted caller/admin producers can also use the exact-turn
+projection with `source_turn_id` and an optional authorized `owner` filter.
+Without an owner it defaults to the producer itself; a delegated owner must
+match the existing credential prefix. Producer reads additionally restrict the
+original submitting principal and currently granted source kinds. Omitting the
+exact turn is refused; another producer's jobs are excluded even under the same
+delegated owner/turn. Fixed-owner readers remain fixed and cannot add an owner
+query. This lets an application reuse its producer credential without minting a
+reader credential per account; it does not enable arbitrary history queries.
