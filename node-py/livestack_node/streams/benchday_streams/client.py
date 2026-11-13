@@ -1,5 +1,5 @@
 # VENDORED UNCHANGED from Benchday packages/benchday-plugin-api/sdk/python/benchday_streams/client.py
-# Benchday main commit 05eb4c9de (intent authority fencing and reconnect callbacks).
+# Benchday commit 99f1f1a9743780effd512102ab8a19d421ed6f5d (state serve registration).
 # Re-vendor from Benchday; do not edit this copy.
 """Local-ingress client: publish, register as a native producer, serve and publish intent outcomes.
 
@@ -269,12 +269,18 @@ class IngressClient:
                 "seq": str(answer.get("seq", "0"))}
 
     async def register(self, contract: str, shadow: bool = False) -> dict:
-        """Register as the native producer of a state contract; returns {contract, mode, epoch}."""
-        frame: dict = {"type": "register", "contract": contract}
+        """Become the native producer of a host-service STATE contract (`serve` without a write handler).
+
+        With shadow=True the daemon compares this producer's partials with the Stage 1 adapter's and does not
+        emit them (publish answers shadowed=True); an on_mode notice with "active" says the operator flipped the
+        preference and this session now owns the contract. Returns {contract, mode, epoch}."""
+        frame: dict = {"type": "serve", "contract": contract}
         if shadow:
             frame["mode"] = "shadow"
         answer = await self._request(frame)
-        return {"contract": contract, "mode": "active" if answer.get("mode") == "active" else "shadow",
+        if answer.get("type") != "serving":
+            raise IngressRefusal("serve_refused", str(answer.get("type")))
+        return {"contract": contract, "mode": "shadow" if answer.get("mode") == "shadow" else "active",
                 "epoch": answer.get("epoch") if isinstance(answer.get("epoch"), int) else None}
 
     async def serve(self, contract: str, handler: WriteHandler) -> Optional[int]:
