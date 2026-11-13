@@ -43,3 +43,31 @@ Worker-tested source SHA-256 (updated hashes verified locally before commit):
 
 Canonical schema SHA-256: `777ccf75bfbcf987ee3cafd677e01163a0cf27a897e72743d6db3ad6a16dc840`.
 Real-ranker body vectors SHA-256: `e966fe93503229581809eb6e77345a6a078f8677733fb699343a4e9af5f48d46`.
+# State-registration SDK alignment (2026-11-13)
+
+The first native fixture inspection found that this source's older vendored SDK
+sent `register` and interpreted a reply without explicit `mode: active` as
+shadow. The current daemon treats register as a serve alias and returns
+`serving` plus epoch for active state registration, without a mode field.
+Re-vendored the unchanged Python client from Benchday commit
+`99f1f1a9743780effd512102ab8a19d421ed6f5d`. The AF_UNIX protocol mirror now
+answers both spellings as the daemon does; explicit shadow returns no active
+epoch. Added a control asserting that serving without mode is active.
+
+On the exact updated private source snapshot on zz-joe:
+
+- `unittest discover -s tests -p 'test_fleet_rank_stream.py'`: **10 passed**.
+- `unittest discover -s tests -p 'test_identity_fact_streams.py'`: **22 passed**.
+- `unittest discover -s tests -p 'test*streams*.py'`: **52 passed, 1 failed**.
+  The failure is `WorkloadTests.test_ladder_to_done_and_every_rung_is_published_in_order`:
+  observed submitted, admitted, admitted, placed, running, done. The exact
+  five-rung assertion is preserved. This run predates the protocol mirror's
+  final removal of epoch from its explicit-shadow response; it is not a final
+  all-streams receipt and must not be represented as one. The earlier evidence
+  above already records this duplicate-admitted failure shape.
+
+The two passing discovery runs above used the final mirror and source, with a
+checksum-only rsync comparison confirming no worker/source differences. The
+OpenSpec change validates. These remain SDK socket/projection controls, not
+real daemon/Hub authority evidence. Task 2.1 and integration/archive obligations
+remain open; no production activation or source landing is inferred.

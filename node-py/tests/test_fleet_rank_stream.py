@@ -18,6 +18,7 @@ from livestack_node.streams import fleet_rank_stream as source
 from livestack_node.streams.runtime import StreamsRuntime
 from test_streams_producers import REAL_FLEET
 from streams_fake_ingress import FakeIngress
+from livestack_node.streams.benchday_streams import IngressClient
 
 
 class FleetRankProjectionTests(unittest.TestCase):
@@ -97,6 +98,24 @@ class FleetRankProjectionTests(unittest.TestCase):
 
 
 class FleetRankShadowAckTests(unittest.IsolatedAsyncioTestCase):
+    async def test_state_serving_without_mode_is_active(self):
+        # The SDK must decode the actual daemon reply shape; projection-only
+        # positives cannot detect its older registered/active wire assumption.
+        with tempfile.TemporaryDirectory(prefix="fleet-serving-") as directory:
+            path = os.path.join(directory, "ingress.sock")
+            ingress = FakeIngress(path)
+            await ingress.start()
+            client = None
+            try:
+                client = await IngressClient.open("livestack/harmony", path=path)
+                registration = await client.register(source.CONTRACT)
+                self.assertEqual(registration["mode"], "active")
+                self.assertEqual(registration["epoch"], ingress.realm_epoch)
+            finally:
+                if client is not None:
+                    await client.close()
+                await ingress.stop()
+
     async def exercise_shadow(self, reader, status):
         with tempfile.TemporaryDirectory(prefix="fleet-shadow-") as directory:
             path = os.path.join(directory, "ingress.sock")
