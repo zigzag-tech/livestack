@@ -17,3 +17,12 @@ Provenance SHALL be at most512 bytes per job and expire after a configured windo
 #### Scenario: Retained job after provenance expiry
 - **WHEN** the source retention deadline passes for a retained job
 - **THEN** source metadata is cleared or hidden while the retained job data remains intact
+
+### Requirement: Producer source reads cannot become owner history scans
+An explicitly source-granted producer SHALL read only an exact source turn from its own submitted jobs and authorized owner scope and current source kinds. Fixed-owner readers SHALL retain their existing fixed scope. Producer credentials SHALL NOT list unrestricted history through this endpoint.
+#### Scenario: Producer asks for another owner or omits the source turn
+- **WHEN** a producer requests an owner outside its delegation or requests history without an exact source turn
+- **THEN** the authority refuses the request without returning jobs
+#### Scenario: Another producer used the same turn and delegated owner
+- **WHEN** a granted producer reads that exact turn and owner
+- **THEN** jobs originally submitted by the other producer are excluded

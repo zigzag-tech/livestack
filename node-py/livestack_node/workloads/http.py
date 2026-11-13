@@ -436,11 +436,17 @@ class Handler(BaseHTTPRequestHandler):
     def route(self, principal, method, parts, body):
         store = self.server.store
         if parts == ['jobs', 'changes'] and method == 'GET':
-            if principal.role != 'job_reader':
+            producer = principal.role in ('caller', 'admin') and bool(principal.provenance_kinds)
+            if principal.role != 'job_reader' and not producer:
                 raise WorkloadError('job changes require a job_reader principal', 403)
             query = parse_qs(urlparse(self.path).query, keep_blank_values=True,
-                             strict_parsing=True, max_num_fields=4)
-            unknown = set(query) - {'updated_since', 'after_job_id', 'limit', 'source_turn_id'}
+                             strict_parsing=True, max_num_fields=5 if producer else 4)
+            allowed = {'updated_since', 'after_job_id', 'limit', 'source_turn_id'}
+            if producer:
+                allowed.add('owner')
+                if 'source_turn_id' not in query:
+                    raise WorkloadError('provenance_exact_turn_required', 403)
+            unknown = set(query) - allowed
             if (unknown or any(len(values) != 1 for values in query.values()) or
                     'after_job_id' in query and 'updated_since' not in query):
                 raise WorkloadError('invalid job-changes query')
@@ -461,11 +467,13 @@ class Handler(BaseHTTPRequestHandler):
                 updated_since=number('updated_since', 0),
                 after_job_id=query.get('after_job_id', [None])[0],
                 inclusive='after_job_id' not in query,
-                owner=principal.id,
+                owner=provenance.read_owner(principal, query.get('owner', [None])[0]) if producer else principal.id,
                 limit=number('limit', 256),
                 with_cursor=True,
                 bounded=True,
                 source_turn_id=query.get('source_turn_id', [None])[0],
+                submitted_by=principal.id if producer else None,
+                source_kinds=principal.provenance_kinds if producer else None,
             )
         if parts == ['status'] and method == 'GET':
             if principal.role != 'admin':

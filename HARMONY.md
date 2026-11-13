@@ -2079,3 +2079,14 @@ The normal store expiry/idle sweep enforces this; read expiry is immediate.
 Current source implementation/rollout status is tracked by OpenSpec
 `workload-turn-provenance`; actual live integration proof is required before
 calling the cross-repository journey complete.
+
+
+Explicitly source-granted caller/admin producers can also use the exact-turn
+projection with `source_turn_id` and an optional authorized `owner` filter.
+Without an owner it defaults to the producer itself; a delegated owner must
+match the existing credential prefix. Producer reads additionally restrict the
+original submitting principal and currently granted source kinds. Omitting the
+exact turn is refused; another producer's jobs are excluded even under the same
+delegated owner/turn. Fixed-owner readers remain fixed and cannot add an owner
+query. This lets an application reuse its producer credential without minting a
+reader credential per account; it does not enable arbitrary history queries.

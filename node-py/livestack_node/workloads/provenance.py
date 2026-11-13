@@ -68,6 +68,22 @@ def authorize(principal, body):
     return source
 
 
+def read_owner(principal, value):
+    """Producer projection scope, never a request-selected submitting principal."""
+    from ..fleet_auth import AuthError, Principal as FleetPrincipal, resolve_owner
+    owner = principal.id if value is None else value
+    if not isinstance(owner, str) or not _TOKEN.fullmatch(owner):
+        raise WorkloadError('provenance_owner_invalid')
+    if owner != principal.id:
+        if principal.delegate_prefix is None:
+            raise WorkloadError('provenance_owner_not_authorized', 403)
+        try:
+            resolve_owner(FleetPrincipal(name=principal.id, delegate_prefix=principal.delegate_prefix), owner)
+        except AuthError as error:
+            raise WorkloadError('provenance_owner_not_authorized', error.status) from error
+    return owner
+
+
 def migrate(db):
     columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
     for field, declaration in (("source_provenance", "TEXT"), ("source_observed", "REAL")):
