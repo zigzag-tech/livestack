@@ -179,6 +179,25 @@ def test_every_provider_refusing_ends_in_a_generic_error_frame_and_the_log_names
     assert logged[-1]["request_id"] == err["requestId"] and "did not grant" in logged[-1]["detail"]
 
 
+def test_each_placement_logs_the_session_and_engine_chosen_and_nothing_else(world, capfd):
+    url, (node,) = world(("ok", {"resident": True}))
+    frames = _frame_times(url)
+    assert "partial" in [f["type"] for f, _ in frames]
+    logged = [json.loads(l) for l in capfd.readouterr().out.splitlines() if "router_engine_chosen" in l]
+    assert len(logged) == 1
+    row = logged[0]
+    assert row["session_id"] == "s" and row["request_id"] and row["engine_id"] and row["attempt"] == 1
+    assert set(row) == {"event", "router_id", "request_id", "session_id", "target", "engine_id",
+                        "host_id", "attempt"}                  # no audio, no transcript, no secrets
+
+
+def test_a_failover_logs_one_engine_line_per_attempt(world, capfd):
+    url, _ = world(("busy", {"in_flight": 0}), ("ok", {"in_flight": 1}))
+    _frame_times(url)
+    logged = [json.loads(l) for l in capfd.readouterr().out.splitlines() if "router_engine_chosen" in l]
+    assert [r["attempt"] for r in logged] == [1, 2] and logged[0]["target"] != logged[1]["target"]
+
+
 def test_the_close_carries_a_generic_code_and_reason_only(world):
     url, nodes = world(("busy", {"in_flight": 0}))
 

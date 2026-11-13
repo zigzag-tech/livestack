@@ -824,6 +824,14 @@ async def ws_transcribe(ws: WebSocket):
                 break
             n += 1
             tried.append(target)
+            # One operator-log line per placement: which engine serves this session.
+            # Ids and counts only, no audio; lets "which engine heard this?" be a grep.
+            top = (rec.get("targets") or [{}])[0]
+            print(json.dumps({"event": "router_engine_chosen", "router_id": ROUTER_ID,
+                              "request_id": ctx["request_id"],
+                              "session_id": _session_id_of(first),
+                              "target": target, "engine_id": top.get("target_id"),
+                              "host_id": top.get("host_id"), "attempt": n}), flush=True)
             # A cold provider, or a re-placement after a refusal, may hold the client
             # past its no-partial watchdog: say so now, not when a node first speaks.
             why_cold = ("re-placed after a refusal" if n > 1
