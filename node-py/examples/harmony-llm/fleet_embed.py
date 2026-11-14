@@ -16,6 +16,7 @@ clause cannot mean one thing for a local unit and another for a fleet node.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from typing import Callable, Iterable, Mapping, Optional
 
@@ -78,6 +79,10 @@ def pick(requires: Mapping, nodes: Iterable[Mapping]) -> Optional[dict]:
     return next(iter(pick_all(requires, nodes)), None)
 
 
+# One `/fleet` may take 3-15 s on a many-node mesh; see fleet_route.FLEET_FETCH_TIMEOUT_S.
+FLEET_FETCH_TIMEOUT_S = float(os.environ.get("HARMONY_FLEET_FETCH_TIMEOUT_S", "20"))
+
+
 def fetch_fleets(brokers: Iterable[str], get: Callable) -> "list[dict]":
     """`/fleet` of every broker that answers. All of them, not the first: the
     dispatch broker on the gateway's own host lists only that host's nodes,
@@ -85,7 +90,7 @@ def fetch_fleets(brokers: Iterable[str], get: Callable) -> "list[dict]":
     out = []
     for base in brokers:
         try:
-            out.append(get(f"{base}/fleet", timeout=3.0).json())
+            out.append(get(f"{base}/fleet", timeout=FLEET_FETCH_TIMEOUT_S).json())
         except Exception:
             continue
     return out

@@ -175,6 +175,13 @@ def requirement_from(body_json: dict, is_adapter=lambda model: False) -> "dict |
     return out
 
 
+# Model names callers send for an embedder the fleet serves, to the id its unit declares.
+EMBED_MODEL_ALIASES = {
+    "embeddinggemma-2": "google/embeddinggemma-2",
+    "google/embeddinggemma-2": "google/embeddinggemma-2",
+}
+
+
 def derived_requirements(path: str, body_json: dict) -> dict:
     """What the request already tells us. Never ask a caller to declare this.
 
@@ -205,6 +212,13 @@ def derived_requirements(path: str, body_json: dict) -> dict:
     # declare both kinds and route each correctly.
     elif "embeddings" in path:
         out["class"] = "embed"
+        # A bare `model: embeddinggemma-2` is the fleet embedder named the way
+        # OpenAI-shaped clients name models. It is a requirement on the model,
+        # not "any embedder": a node's own small embed unit meets class=embed
+        # alone and would be asked to place it (503 "nothing satisfies").
+        asked = str(body_json.get("model") or "").strip().lower()
+        if asked in EMBED_MODEL_ALIASES:
+            out["model"] = EMBED_MODEL_ALIASES[asked]
 
     # Vision: an image part anywhere in the messages. Deliberately NOT a
     # recursive scan for `type: image_url` — arbitrary user JSON containing that

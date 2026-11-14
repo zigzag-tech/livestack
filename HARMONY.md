@@ -525,6 +525,13 @@ the gateway -- never an address, never Ollama / TEI / a cloud provider:
     {"model": "require:class=embed,model=google/embeddinggemma-2,dim=512",
      "input": ["..."]}
 
+- A bare `model: embeddinggemma-2` (or `google/embeddinggemma-2`) is derived
+  into `class=embed,model=google/embeddinggemma-2` (`request_language.EMBED_MODEL_ALIASES`),
+  so a node's own small embed unit cannot swallow it.
+- A `/fleet` fetch (gateway embed view, router view) may take 3-15 s on the
+  federated broker; the cap is `HARMONY_FLEET_FETCH_TIMEOUT_S` (default 20). The
+  old 3 s cap read a slow answer as "no fleet view" / `503 nothing satisfies`
+  (2026-11-14). The router refreshes its view in a thread by default (5 s).
 - `model` must START with `require:`. A `harmony/` prefix means the gateway sees
   no requirement and answers 400 "N embedding models meet this need"; a bare
   `class=embed` is refused as ambiguous.
