@@ -786,6 +786,23 @@ class WorkloadStore:
                     release_digest=release['release_digest'], execution_contract=manifest['execution_contract'],
                     payload_schema=manifest['payload_schema'], result_schema=manifest['result_schema'],
                     selection_reason=reason)
+                if intent['selection'] == 'default':
+                    # The same generation's defaults for other platforms: the job is accepted with the whole set,
+                    # placement pins the one the chosen worker advertises (openspec handler-platform-defaults).
+                    from .handler_registry import variant_digests
+                    variants = []
+                    for variant in sorted(variant_digests(digest_map, spec['handler']).values()):
+                        row = db.execute('SELECT handler_id,release_digest,manifest FROM handler_releases '
+                                         'WHERE handler_id=? AND release_digest=?', (spec['handler'], variant)).fetchone()
+                        if row is None:
+                            raise WorkloadError('handler_release_unavailable', 409)
+                        other = json.loads(row['manifest'])
+                        variants.append(dict(handler_id=row['handler_id'], release_digest=row['release_digest'],
+                            execution_contract=other['execution_contract'], payload_schema=other['payload_schema'],
+                            result_schema=other['result_schema'], selection_reason='registry_platform_default',
+                            platform=other['platform'], architecture=other['architecture']))
+                    if variants:
+                        spec['handler_release_variants'] = variants
             self._expire_environments(db, now)
             self._prune(db, now)
             principal = self.principals.get(owner)
@@ -1280,7 +1297,10 @@ class WorkloadStore:
             job = self._job(db, a["job"], project_success=False)
             if job["spec"]["input_digest"] != input_digest:
                 raise WorkloadError("result input digest differs from assignment", 409)
-            expected_release = job['spec'].get('handler_release')
+            # The attempt's pinned descriptor when it has one: a job accepted with platform variants runs the one
+            # placement matched to this worker, not necessarily the primary.
+            expected_release = (json.loads(a['handler_release']) if a['handler_release']
+                                else job['spec'].get('handler_release'))
             if expected_release is not None:
                 from .handler_release import validate_result_identity
                 identity = validate_result_identity(handler_result_identity)
