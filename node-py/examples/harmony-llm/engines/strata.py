@@ -396,6 +396,12 @@ class StrataEngine(Engine):
         """
         attrs = dict(spec.get("attributes") or {})
         attrs["class"] = "llm"
+        # Model family is model identity, not an application profile. Existing
+        # Strata declarations use either the Qwen namespace or its canonical
+        # qwen3.* local artifact name; unknown/aliased names remain undeclared.
+        model = str(spec.get("model") or "").lower()
+        if "family" not in attrs and (model.startswith("qwen/") or model.startswith("qwen3.")):
+            attrs["family"] = "qwen"
         for key in ("thinking", "tools"):
             attrs[key] = bool(attrs.get(key, False))
         attrs["vision"] = self._config_has_vision(spec)

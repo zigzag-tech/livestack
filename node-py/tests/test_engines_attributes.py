@@ -88,9 +88,10 @@ def test_max_concurrent_is_the_engines_admission_limit():
     assert StrataEngine().launch_attributes(s2)["max_concurrent"] == 4
 
 
-def test_strata_never_invents_thinking_or_tools():
+def test_strata_never_invents_thinking_or_tools(tmp_path):
     s = {"name": "flash_next", "model": "qwen/Q2_0", "port": 8191,
          "extra_args": [], "attributes": {}}
+    s["strata_config"] = str(tmp_path / "missing-config.json")
     attrs = StrataEngine().launch_attributes(s)
     assert attrs["class"] == "llm"           # derived: the endpoint shape is fixed
     assert attrs["thinking"] is False
@@ -124,3 +125,16 @@ def test_adapters_are_the_only_attribute_that_names_one(tmp_path):
     bad = _vllm([], adapters={"ghost": str(tmp_path / "nope")})
     assert not any(k.startswith("adapter.") for k in
                    VllmEngine().launch_attributes(bad))
+
+
+def test_strata_family_metadata_matches_declarative_allocation():
+    # Pure selection metadata cannot be exercised by an inference integration
+    # control on hosts whose unit declarations already include the family.
+    from livestack_node.requirements import attrs_meet
+    base = {"name": "flash_next", "port": 8191, "extra_args": [], "attributes": {"params_b": 125}}
+    for model in ("qwen3.8-flash-next-q2_0", "Qwen/Qwen3.8-Flash-Next"):
+        attrs = StrataEngine().launch_attributes({**base, "model": model})
+        assert attrs_meet(attrs, {"class": "llm", "family": "qwen", "params_b>=": 120, "params_b<": 130})
+    assert "family" not in StrataEngine().launch_attributes({**base, "model": "unknown-local-alias"})
+    attrs = StrataEngine().launch_attributes({**base, "model": "qwen3.8-flash-next-q2_0", "attributes": {"family": "explicit"}})
+    assert attrs["family"] == "explicit"
