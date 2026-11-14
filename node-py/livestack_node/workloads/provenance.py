@@ -96,7 +96,11 @@ def migrate(db):
 
 
 def expire(db, now, seconds):
-    # One indexed statement; the containing jobs already have active/terminal
-    # count caps. Retain exempts job data, not this separately declared metadata.
+    # Ordinary claim/read polls must stay read-only when no metadata expired.
+    # Probe the expiry index before issuing the bounded UPDATE; both statements
+    # are independent of entity count. Retain exempts job data, not metadata.
+    cutoff = now - seconds
+    if db.execute("SELECT 1 FROM jobs WHERE source_observed<=? LIMIT 1", (cutoff,)).fetchone() is None:
+        return
     db.execute("UPDATE jobs SET source_provenance=NULL,source_observed=NULL "
-               "WHERE source_observed<=?", (now - seconds,))
+               "WHERE source_observed<=?", (cutoff,))
