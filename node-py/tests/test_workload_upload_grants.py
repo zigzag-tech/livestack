@@ -221,3 +221,19 @@ def test_a_global_public_base_url_with_several_grant_principals_is_refused_by_na
     check_grant_origins(two, None)
     with pytest.raises(ValueError, match='applies to every grant-minting principal \\(a, b\\)'):
         check_grant_origins(two, 'https://relay.example')
+
+
+def test_a_grant_whose_blob_was_pruned_is_reissued_not_reported_uploaded(server):
+    # 2026-11-14: under capacity pressure the authority pruned uploaded source archives, but their grants stayed
+    # `uploaded`; an unchanged retry (same digest) was told "uploaded" and then read the object back as 404.
+    status, grant = mint(server)
+    assert status == 200 and put(server, grant)[0] == 200
+    with server.store.transaction() as db:
+        db.execute('DELETE FROM blob_owners WHERE digest=?', (DIGEST,))
+        db.execute('DELETE FROM blobs WHERE digest=?', (DIGEST,))
+    (server.blobs.root/DIGEST).unlink()
+    status, again = mint(server)
+    assert status == 200 and again['state'] == 'issued' and again.get('capability'), again
+    assert put(server, again)[0] == 200
+    with server.blobs.open('zzops', DIGEST) as (stream, size):
+        assert stream.read() == DATA and size == len(DATA)
