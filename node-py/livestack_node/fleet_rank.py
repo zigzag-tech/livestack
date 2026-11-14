@@ -32,7 +32,14 @@ The order is lexicographic and each level is there for a reason:
    same rule the client picker uses; they must not diverge.
    A candidate with NO OPINION on load sorts after every candidate that has one —
    silence is not idleness — but still ahead of anything in a worse band.
-3. **`target_id`**, so the order is total and deterministic.
+   Within a band, a BUSY candidate (`in_flight >= BUSY_IN_FLIGHT`) sorts after
+   a free one before any preference is consulted.
+3. **`prefer` clauses, within a band.** A soft objective (native streaming,
+   measured latency) breaks ties between candidates that are roughly equally
+   close — the same band — and never outranks distance or a queue. They sit
+   between the busy tier and the exact load value of level 2. Owner rule
+   2026-11-04: China phones route by measured distance.
+4. **`target_id`**, so the order is total and deterministic.
 """
 from __future__ import annotations
 
@@ -128,6 +135,26 @@ def load_value(load: Optional[Dict[str, Any]]) -> Optional[float]:
     if q is None:
         return p
     return max(p, q)
+
+
+# Queued requests at which a candidate counts as BUSY: one stream in flight is
+# ordinary sharing, two more is a queue the next dictation waits behind. Counted
+# from `in_flight` only — resting pressure measures how much model is loaded,
+# not capacity to serve, and is not comparable across device classes.
+BUSY_IN_FLIGHT = 2
+
+
+def _load_tier(load: Optional[Dict[str, Any]]) -> int:
+    """0 free, 1 busy (`in_flight >= BUSY_IN_FLIGHT`), 2 no opinion.
+
+    Load in coarse form so it can rank ahead of a preference without letting a
+    0.01 pressure difference decide everything; the exact value still breaks
+    ties after the preferences. Silence sorts last — it is not idleness.
+    """
+    if load_value(load) is None:
+        return 2
+    n = load.get("in_flight")
+    return 1 if isinstance(n, (int, float)) and n >= BUSY_IN_FLIGHT else 0
 
 
 def distance_to(view: dict, node_host: Optional[str], node_row: dict,
@@ -566,9 +593,16 @@ def rank(view: dict, kind: str, vantage: str = "direct",
         pref_key, receipt = preference_key(t.inventory, prefer or [], now)
         preference_receipts[t.target_id] = receipt
         est = finish.get(t.target_id) if by_finish else None
+        # Distance band, then busy, BEFORE preferences (owner rule, 2026-11-04;
+        # benchday openspec `asr-rank-distance-first`). A preference such as
+        # `asr.streaming=native` only breaks a tie between candidates in the
+        # SAME band — "roughly equally close" — and never pays an ocean to get
+        # it: with it ahead of the band, every Nanjing dictation started on the
+        # Vaughan tower, ~1.3 s away, over an idle engine 20 ms away.
         return ((0, est["finish_s"]) if est else (1, 0.0) if by_finish else (),
-                pref_key,
                 _BAND_ORDER.get(t.distance_band, 4),
+                _load_tier(t.load),
+                pref_key,
                 0 if v is not None else 1,      # an opinion outranks silence
                 v if v is not None else 0.0,
                 t.target_id)

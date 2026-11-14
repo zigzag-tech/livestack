@@ -470,14 +470,14 @@ class FleetRankStreamTests(Base):
         self.assertEqual((body["kind"], body["vantage"], body["generated_at"], body["ttl_s"]),
                          ("asr", "host:west", 120.0, 60.0))
         self.assertLessEqual(len(body["reason"].encode("utf-8")), fleet_rank_stream.MAX_REASON_BYTES)
-        self.assertIn("next was http://local", body["reason"], "the full ranking explanation is preserved")
+        self.assertIn("next was http://native", body["reason"], "the full ranking explanation is preserved")
         self.assertEqual(body["prefer"], fleet_rank_stream.ASR_PREFERENCES)
         self.assertEqual([row["target_id"] for row in body["targets"]],
-                         ["http://native", "http://local"],
-                         "the real ranker applies the native-streaming preference before distance")
+                         ["http://local", "http://native"],
+                         "distance before the native-streaming preference (owner rule 2026-11-04)")
         self.assertEqual(body["chosen"], body["targets"][0]["target_id"])
         self.assertEqual([row["rank"] for row in body["targets"]], [1, 2])
-        self.assertEqual(body["targets"][0]["preferences"][0]["matched"], True)
+        self.assertEqual(body["targets"][1]["preferences"][0]["matched"], True)
         self.assertNotIn("node", body["targets"][0], "only the daemon's established forwarding fields are carried")
         self.assertLessEqual(len(json.dumps(body, separators=(",", ":")).encode()),
                              fleet_rank_stream.MAX_BODY_BYTES)
