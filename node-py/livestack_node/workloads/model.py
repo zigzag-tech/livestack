@@ -54,6 +54,8 @@ class Limits:
     # against a worker that never returns -- see `WorkloadStore._expire`.
     cleanup_seconds: float = 3600
     terminal_seconds: float | None = 14 * 86400
+    # Source joins expire even for retained jobs; no new unbounded history.
+    provenance_seconds: float = 86400
     # A job refused for the same coded reason by every candidate worker this long raises one event.
     stall_report_seconds: float = 300
     # A queued job older than this outranks priority and holds the resources it is short of (placement.py).
@@ -113,6 +115,11 @@ class Limits:
         return self.max_attempt_seconds, "global"
 
     def __post_init__(self):
+        if (isinstance(self.provenance_seconds, bool) or
+                not isinstance(self.provenance_seconds, (int, float)) or
+                not math.isfinite(self.provenance_seconds) or
+                not 60 <= self.provenance_seconds <= 7 * 86400):
+            raise ValueError('provenance_seconds must be in [60, 604800]')
         for name_ in ("max_attempt_seconds", "max_queue_age_seconds"):
             value = getattr(self, name_)
             if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)

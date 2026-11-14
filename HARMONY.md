@@ -2054,3 +2054,39 @@ from xc-tower-ubuntu's unit declarations prevents the saturation fallback from
 loading another 45-GiB RAM claim there. Other tower LLM units remain declared.
 Pi/Jing explicitly request a 100B-or-larger LLM with a speed preference and a
 300-second queue budget, rather than silently accepting the tower's 27B unit.
+
+
+### Optional workload source-turn provenance
+
+The additive workload submission envelope `provenance: {v:1,kind,turn_id}` is
+reserved for trusted caller/admin integration context. Operators must explicitly
+allow its kind through the caller's `provenance_kinds` principal setting; omitted
+means no source grants. Worker/job-reader principals cannot receive these grants.
+Never derive this envelope from a user's job payload or tool arguments. The
+service stamps the authenticated producer and effective owner and refuses
+unknown/forged fields and source-looking advisory labels.
+
+A fixed-owner job-reader can use
+`GET /v1/workloads/jobs/changes?source_turn_id=<turn>&updated_since=0&limit=32`.
+It cannot select another owner. Existing update/id cursors and byte/row bounds
+apply; `source_kind`, `source_turn_id`, `source_principal` and
+`current_explanation` are authority observations, not placement instructions.
+Absent/expired source identity is unknown, never proof no job ran.
+
+Metadata is at most512bytes/job and expires independently of retained job data:
+`limits.provenance_seconds` defaults24hours and cannot exceed7days (minimum60s).
+The normal store expiry/idle sweep enforces this; read expiry is immediate.
+Current source implementation/rollout status is tracked by OpenSpec
+`workload-turn-provenance`; actual live integration proof is required before
+calling the cross-repository journey complete.
+
+
+Explicitly source-granted caller/admin producers can also use the exact-turn
+projection with `source_turn_id` and an optional authorized `owner` filter.
+Without an owner it defaults to the producer itself; a delegated owner must
+match the existing credential prefix. Producer reads additionally restrict the
+original submitting principal and currently granted source kinds. Omitting the
+exact turn is refused; another producer's jobs are excluded even under the same
+delegated owner/turn. Fixed-owner readers remain fixed and cannot add an owner
+query. This lets an application reuse its producer credential without minting a
+reader credential per account; it does not enable arbitrary history queries.
