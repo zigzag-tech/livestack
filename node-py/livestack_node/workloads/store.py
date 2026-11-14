@@ -142,6 +142,8 @@ class WorkloadStore:
                 if column not in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
             db.execute("CREATE INDEX IF NOT EXISTS jobs_environment ON jobs(environment_handle,state)")
+            from .provenance import migrate
+            migrate(db)
             environment_columns = {row[1] for row in db.execute("PRAGMA table_info(task_environments)")}
             for column, declaration in (('writer_job', 'TEXT'), ('writer_attempt', 'TEXT'),
                                         ('affinity_started', 'REAL')):
@@ -453,6 +455,9 @@ class WorkloadStore:
         if row is None or (owner is not None and row["owner"] != owner):
             raise WorkloadError("job not found", 404)
         result = dict(row)
+        # Source metadata is exposed only through the bounded owner projection.
+        result.pop('source_provenance', None)
+        result.pop('source_observed', None)
         if not result.get('environment_handle'):
             result.pop('environment_handle', None)
         result["labels"] = json.loads(result["labels"] or "{}")
@@ -721,8 +726,15 @@ class WorkloadStore:
                                       now+self.limits.environment_idle_seconds, handle))
         return self._environment_row(db, handle, owner, delegated_owner=delegated_owner)
 
-    def submit(self, owner, request, *, allowed_handlers=None):
+    def submit(self, owner, request, *, allowed_handlers=None, provenance=None):
+        from .provenance import SourceProvenance
+        if provenance is not None and not isinstance(provenance, SourceProvenance):
+            raise WorkloadError('provenance_authority_record_invalid')
+        source_record = provenance.record() if provenance is not None else None
         spec = self.validate_submission(owner, request, allowed_handlers=allowed_handlers)
+        if source_record is not None and (source_record['principal'] != owner or
+                source_record['owner'] != (spec.get('labels', {}).get('owner') or owner)):
+            raise WorkloadError('provenance_authority_scope_mismatch', 403)
         provider = self.execution_providers.get(spec['handler'])
         if provider is not None:
             selector = dict(spec['selector'])
@@ -737,6 +749,10 @@ class WorkloadStore:
         hashed = dict(spec, labels={k: v for k, v in spec.get('labels', {}).items() if k not in ('describe', 'origin')})
         if not hashed['labels']:
             hashed.pop('labels')
+        if source_record is not None:
+            # Stamp affects idempotency, but is never copied into permanent
+            # spec/payload/labels: expiry can actually remove the source join.
+            hashed['_source_provenance'] = source_record
         scope = spec.get('scope')
         scope_lease_seconds = None
         if scope is not None:
@@ -820,6 +836,9 @@ class WorkloadStore:
                        "VALUES(?,?,?,?,?,'queued',?,?,?,?,?)",
                        (jid, owner, spec["key"], digest, encode(spec), now, now,
                         encode(spec.get("labels", {})), spec["retain"], scope['key'] if scope else None))
+            if source_record is not None:
+                db.execute('UPDATE jobs SET source_provenance=?,source_observed=? WHERE id=?',
+                           (encode(source_record), now, jid))
             env = self._resolve_environment(db, owner, spec, now, jid)
             if env is not None:
                 db.execute('UPDATE jobs SET environment_handle=? WHERE id=?', (env['handle'], jid))
@@ -1615,6 +1634,8 @@ class WorkloadStore:
                        'WHERE handle=? AND host=?', (now, handle, attempt['host']))
 
     def _expire(self, db, now):
+        from .provenance import expire
+        expire(db, now, self.limits.provenance_seconds)
         # A scope whose owner stopped renewing is closed by the same code as an explicit close. LIMIT bounds
         # the work per call; the remainder is closed by the next call or by sweep().
         for lapsed in list(db.execute("SELECT owner,key FROM scopes WHERE state='open' AND lease_expires IS NOT NULL "

@@ -14,7 +14,7 @@ import threading
 from urllib.parse import parse_qs, urlparse
 
 from .model import WorkloadError, encode, name
-from . import claims, reload_status, rollout, roster, rollout_routes
+from . import claims, reload_status, rollout, roster, rollout_routes, provenance
 from .blobs import BlobStore
 from .job_changes import job_changes
 from .handler_registry import HandlerReleaseRegistry
@@ -58,9 +58,12 @@ class Principal:
     upload_base_url: str | None = None
     # Explicit operator-owned join to the Benchday host identity graph.
     benchday_host_id: str | None = None
+    # Operator-owned opt-in; ordinary callers cannot assert source identities.
+    provenance_kinds: tuple[str, ...] = ()
 
     def __post_init__(self):
         name(self.id, "principal")
+        object.__setattr__(self, 'provenance_kinds', provenance.kinds(self.provenance_kinds, self.role))
         if len(self.token) < 32 or self.role not in ('caller', 'worker', 'admin', 'rollout', 'job_reader'):
             raise ValueError('principal requires a strong token and a known role')
         if self.role == 'job_reader':
@@ -433,11 +436,17 @@ class Handler(BaseHTTPRequestHandler):
     def route(self, principal, method, parts, body):
         store = self.server.store
         if parts == ['jobs', 'changes'] and method == 'GET':
-            if principal.role != 'job_reader':
+            producer = principal.role in ('caller', 'admin') and bool(principal.provenance_kinds)
+            if principal.role != 'job_reader' and not producer:
                 raise WorkloadError('job changes require a job_reader principal', 403)
             query = parse_qs(urlparse(self.path).query, keep_blank_values=True,
-                             strict_parsing=True, max_num_fields=3)
-            unknown = set(query) - {'updated_since', 'after_job_id', 'limit'}
+                             strict_parsing=True, max_num_fields=5 if producer else 4)
+            allowed = {'updated_since', 'after_job_id', 'limit', 'source_turn_id'}
+            if producer:
+                allowed.add('owner')
+                if 'source_turn_id' not in query:
+                    raise WorkloadError('provenance_exact_turn_required', 403)
+            unknown = set(query) - allowed
             if (unknown or any(len(values) != 1 for values in query.values()) or
                     'after_job_id' in query and 'updated_since' not in query):
                 raise WorkloadError('invalid job-changes query')
@@ -458,10 +467,13 @@ class Handler(BaseHTTPRequestHandler):
                 updated_since=number('updated_since', 0),
                 after_job_id=query.get('after_job_id', [None])[0],
                 inclusive='after_job_id' not in query,
-                owner=principal.id,
+                owner=provenance.read_owner(principal, query.get('owner', [None])[0]) if producer else principal.id,
                 limit=number('limit', 256),
                 with_cursor=True,
                 bounded=True,
+                source_turn_id=query.get('source_turn_id', [None])[0],
+                submitted_by=principal.id if producer else None,
+                source_kinds=principal.provenance_kinds if producer else None,
             )
         if parts == ['status'] and method == 'GET':
             if principal.role != 'admin':
@@ -525,6 +537,8 @@ class Handler(BaseHTTPRequestHandler):
                     if body.get('handler') not in principal.handlers:
                         raise WorkloadError('handler is not authorized', 403)
                     self._authorized_labels(principal, body)
+                    source = provenance.authorize(principal, body)
+                    body = {key: value for key, value in body.items() if key != 'provenance'}
                     # Refuse unsupported schema/purpose before checking or
                     # touching the uploaded source objects. SDK callers also
                     # negotiate capabilities before they start an upload.
@@ -538,7 +552,8 @@ class Handler(BaseHTTPRequestHandler):
                         with self.server.blobs.open(principal.id, item.get('digest')) as (_, size):
                             if size != item.get('size'):
                                 raise WorkloadError('input object size mismatch')
-                    return store.submit(principal.id, body, allowed_handlers=principal.handlers)
+                    return store.submit(principal.id, body, allowed_handlers=principal.handlers,
+                                        provenance=source)
                 return {'jobs': store.list_jobs(principal.id),
                         'principal': store.principal_status(principal.id)}
             if len(parts) == 2 and parts[0] == 'jobs' and method == 'GET':
