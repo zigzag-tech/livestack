@@ -259,6 +259,7 @@ def aggregate_units(per_peer: Mapping[Tuple[str, str], Unit],
             exclusive_device=prev.exclusive_device or unit.exclusive_device,
             engine=prev.engine or unit.engine,
             engine_rev=prev.engine_rev or unit.engine_rev,
+            keep_warm_s=max(prev.keep_warm_s, unit.keep_warm_s),
         )
     return out
 
@@ -1498,6 +1499,63 @@ class HostBroker:
             self._exclusive_condition.notify_all()
         return record
 
+    def _exclusive_victims(self, record: dict, world, candidates, now: float) -> list:
+        """The idle tenants a lease drain must evict, as ``(placement, why)``.
+
+        Only enough to bring the device's MEASURED free bytes up to
+        ``min_free_bytes``: none when it already meets it (an exclusive lease
+        does not empty a card, it needs room). Fewest victims first: a single
+        tenant that covers the remaining deficit (the smallest such) beats
+        several, else the largest goes and the search continues. Tenants inside
+        their ``keep_warm_s`` window are a SOFT preference, not a pin: they are
+        considered only after every other idle tenant, so they are evicted when
+        the others cannot cover the deficit. Free bytes unmeasured -> every
+        candidate is evicted (the old behaviour).
+        """
+        device_id = record["device_id"]
+        measured = (world.measured_free or {}).get(device_id)
+        free = int(measured["vram_bytes"]) if measured and "vram_bytes" in measured else None
+        need = int(record["min_free_bytes"])
+
+        def footprint(p):
+            return float((world.units[p.kind].footprint or {}).get("vram_bytes", 0))
+
+        def warm(p):
+            window = world.units[p.kind].keep_warm_s
+            last = max(self._granted_at.get((p.kind, device_id), float("-inf")), p.loaded_at)
+            return window > 0 and now - last < window
+
+        if free is None:
+            chosen = list(candidates)
+        elif free >= need:
+            return []
+        else:
+            deficit = float(need - free)
+            chosen = []
+            for tier in ([p for p in candidates if not warm(p)], [p for p in candidates if warm(p)]):
+                tier = sorted(tier, key=footprint)
+                while tier and deficit > 0:
+                    pick = next((p for p in tier if footprint(p) >= deficit), tier[-1])
+                    tier.remove(pick)
+                    chosen.append(pick)
+                    deficit -= footprint(pick)
+        return [(p, {
+            "reason": (f"lease {record.get('lease_id')} on {device_id} needs {need} B free, "
+                       f"{'unmeasured' if free is None else f'{free} B free'}; "
+                       f"victim {p.kind} footprint {int(footprint(p))} B"
+                       f"{' (keep-warm, no other victim sufficed)' if warm(p) else ''}"),
+            "lease_id": record.get("lease_id"), "device_id": device_id,
+            "needed_bytes": need, "free_bytes": free,
+            "footprint_bytes": int(footprint(p)), "keep_warm": warm(p),
+        }) for p in chosen]
+
+    def _emit_lease_drain_evict(self, record: dict, placement, why: dict) -> None:
+        self._emit(Decision(
+            emitter=self.emitter, emitter_id=self.emitter_id,
+            kind=placement.kind, decision="evict", chosen=placement.kind,
+            reason="lease-drain: " + why["reason"], dispatched=self.dispatch,
+            outcome=dict(why, request_id=record["request_id"])))
+
     def _drive_exclusive(self, record: dict) -> dict:
         if record["state"] in {"released", "failed", "timeout"}:
             return record
@@ -1538,12 +1596,16 @@ class HostBroker:
                     record["request_id"], min(now + record["wait_timeout_s"], window), now)
             return self._exclusive_block(record, blockers)
         if victims:
+            victims = self._exclusive_victims(record, world, victims, now)
+        if victims:
             try:
-                for placement in victims:
+                for placement, why in victims:
                     peer = self._peer_for(placement.kind, device_id)
                     if peer is None:
                         return self._exclusive_block(record, [{"type": "peer_unavailable", "kind": placement.kind}])
+                    self._log(f"[hostbroker] lease-drain evict {placement.kind}@{device_id}: {why['reason']}")
                     peer.evict(placement.kind)
+                    self._emit_lease_drain_evict(record, placement, why)
                     self._in_flight.pop((placement.kind, device_id), None)
                     for remembered in [key for key in self._resident_at
                                        if key[1] == placement.kind and key[2] == device_id]:
@@ -2762,7 +2824,8 @@ class RestPeer:
                 # unit plans exactly as it did.
                 exclusive_device=bool(u.get("exclusive_device")),
                 engine=str(u.get("engine") or ""),
-                engine_rev=str(u.get("engine_rev") or ""))
+                engine_rev=str(u.get("engine_rev") or ""),
+                keep_warm_s=float(u.get("keep_warm_s") or 0.0))
         return out
 
     def placements(self):

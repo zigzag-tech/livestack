@@ -19,6 +19,7 @@ class _Peer:
         self.unit = Unit(kind, {"vram_bytes": 4_000}, priority=20,
                          residency=Residency.UNPINNED, min_residency_s=0)
         self._resident = resident
+        self.siblings = ()      # other tenants of the same card
         self.calls = []
 
     def units(self):
@@ -29,7 +30,10 @@ class _Peer:
                 if self._resident else [])
 
     def device_memory(self):
-        return {"vram_bytes": 24_000}
+        # A resident tenant holds its footprint; an exclusive drain only evicts
+        # what the lease still needs, so the card must not read as empty.
+        held = sum(4_000 for peer in (self, *self.siblings) if peer._resident)
+        return {"vram_bytes": 24_000 - held}
 
     def device_capacity(self):
         return {"vram_bytes": 24_000}
@@ -77,6 +81,7 @@ def test_http_exclusive_lifecycle_drains_fences_heartbeats_and_releases(
     now = [1000.0]
     alpha = _Peer("http://alpha", "alpha")
     beta = _Peer("http://beta", "beta")
+    alpha.siblings, beta.siblings = (beta,), (alpha,)
     broker = _broker([alpha, beta], lambda: now[0])
     app = build_app(broker)
 
