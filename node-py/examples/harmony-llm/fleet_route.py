@@ -55,6 +55,10 @@ ROUTE_CONTRACT = 1
 # The newest contract this build understands (a target's answer to `v=`).
 SUPPORTED_CONTRACT = ROUTE_CONTRACT
 _VIEW_TTL_S = 10.0
+# How long one `GET /fleet` may take. The federated view of a many-node mesh
+# answers in 3-15 s (observed 2026-11-14: the tower's fleetd, cold) -- a 3 s cap
+# read that as "no fleet view" and refused requests a node could serve.
+FLEET_FETCH_TIMEOUT_S = float(os.environ.get("HARMONY_FLEET_FETCH_TIMEOUT_S", "20"))
 # How long the last good view may stand in when the fleet broker cannot be
 # reached. Past it the node serves locally / same-host only: a view that old
 # looks authoritative and is not.
@@ -112,7 +116,7 @@ def wants_fleet_route(prefer, headers, *, no_warm_local: bool = False) -> "str |
     return "no_warm_local" if no_warm_local else None
 
 
-def fleet_view(url: str, timeout: float = 3.0, stale_max_s: "float | None" = None) -> "dict | None":
+def fleet_view(url: str, timeout: float = FLEET_FETCH_TIMEOUT_S, stale_max_s: "float | None" = None) -> "dict | None":
     """`GET <fleet broker>/fleet`, cached briefly. On a failed refresh the last
     good view stands in for up to `stale_max_s` (default STALE_MAX_S); past that
     None -- the caller keeps its local behaviour (a missing view is not a
@@ -136,7 +140,7 @@ def fleet_view(url: str, timeout: float = 3.0, stale_max_s: "float | None" = Non
     return view
 
 
-def start_refresher(url: str, every_s: float = 5.0, timeout_s: float = 10.0):
+def start_refresher(url: str, every_s: float = 5.0, timeout_s: float = FLEET_FETCH_TIMEOUT_S):
     """Keep the cached view for `url` fresh from a background thread, so a request
     never waits on the fleet broker. A router far from its broker (zz-tower2 ->
     the tower's fleetd: 1-6 s over the mesh) otherwise blocks its event loop on

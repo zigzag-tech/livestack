@@ -221,3 +221,16 @@ def test_a_node_gone_past_the_grace_is_dropped(srv, monkeypatch):
     c.post("/v1/embeddings", json={"model": "require:class=embed", "input": ["x"]})   # 502: nothing on :1
     r = c.post("/v1/embeddings", json={"model": "require:class=embed", "input": ["x"]})
     assert r.status_code == 503 and "nothing satisfies" in r.text
+
+
+def test_a_bare_embedder_model_name_is_a_model_requirement():
+    from request_language import derived_requirements
+    want = {"class": "embed", "model": "google/embeddinggemma-2"}
+    assert derived_requirements("embeddings", {"model": "embeddinggemma-2"}) == want
+    assert derived_requirements("embeddings", {"model": "google/embeddinggemma-2"}) == want
+    assert derived_requirements("embeddings", {"model": "something-else"}) == {"class": "embed"}
+
+
+def test_the_fleet_fetch_allows_a_slow_federated_broker():
+    import fleet_route
+    assert fe.FLEET_FETCH_TIMEOUT_S >= 15 and fleet_route.FLEET_FETCH_TIMEOUT_S >= 15

@@ -64,8 +64,9 @@ SELF_BASE = f"router://{ROUTER_ID}"
 ROUTES = demand_log_from_env(f"{ROUTER_ID}-routes", log=lambda m: print(m, flush=True))
 
 app = FastAPI(title="harmony-router", version="1.0.0")
-# Optional: refresh the fleet view off the request path (see fleet_route.start_refresher).
-VIEW_REFRESH_S = float(os.environ.get("HARMONY_ROUTER_VIEW_REFRESH_S", "0") or 0)
+# Refresh the fleet view off the request path (see fleet_route.start_refresher); 0 turns it off.
+# On by default: a slow federated `/fleet` otherwise blocks the loop and, cold, refuses requests.
+VIEW_REFRESH_S = float(os.environ.get("HARMONY_ROUTER_VIEW_REFRESH_S", "5") or 0)
 
 # --- the client-facing error contract (benchday-nodes A.6) ----------------------
 # Whatever answers a phone, directly or through a relay, must not name the fleet:
@@ -182,7 +183,7 @@ async def _unhandled_error(request: Request, exc: Exception):
 async def _start_view_refresher():
     if VIEW_REFRESH_S > 0 and FLEET_URL:
         fr.start_refresher(FLEET_URL, VIEW_REFRESH_S,
-                           float(os.environ.get("HARMONY_ROUTER_VIEW_TIMEOUT_S", "10")))
+                           float(os.environ.get("HARMONY_ROUTER_VIEW_TIMEOUT_S", str(fr.FLEET_FETCH_TIMEOUT_S))))
 
 
 def _revision() -> str:
