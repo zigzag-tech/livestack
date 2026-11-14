@@ -92,8 +92,11 @@ class UploadGrants:
         with self.store.transaction() as db:
             existing = db.execute('SELECT * FROM upload_grants WHERE owner=? AND request_id=?',
                                   (owner, request_id)).fetchone()
-            completed = bool(existing and (existing['state'] == 'uploaded' or
-                                           self._owned(db, owner, digest, size)))
+            # Complete only while the bytes are still held: a grant marked `uploaded` whose blob was later
+            # pruned (capacity pressure, retention) must be re-issued, or every unchanged retry of that digest is
+            # told "uploaded" and then fails reading the object back with 404 content not found (benchday UI
+            # capture on zz-tower0, 2026-11-14; 302 such grants at the time).
+            completed = bool(existing and self._owned(db, owner, digest, size))
         if not completed and not self.blobs._held(digest, size):
             try:
                 self.blobs.admit_headroom(size)
@@ -107,7 +110,7 @@ class UploadGrants:
                              (owner, request_id)).fetchone()
             if row and (row['digest'], row['size']) != (digest, size):
                 refusal = ('refused_binding_changed', 'upload grant binding changed for this request id', 409)
-            elif row and (row['state'] == 'uploaded' or self._owned(db, owner, digest, size)):
+            elif row and self._owned(db, owner, digest, size):
                 self._mark_uploaded(db, row['grant_id'], owner, request_id, digest, size, now, record=row['state'] != 'uploaded')
                 return self._status_row(db.execute('SELECT * FROM upload_grants WHERE grant_id=?',
                                                    (row['grant_id'],)).fetchone())
