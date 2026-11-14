@@ -9,7 +9,9 @@ verified artifact directory. Its `receipt.json` must name that source revision
 in `source` and contain `files.strata` and `files.libstrata_kq.so`, each with
 `bytes` and `sha256`. Keep the existing model files and interpreter available.
 The interpreter argument is the virtualenv's `bin/python`, not its resolved
-system-Python target. The source checkout must be readable by the service user.
+system-Python target. The source checkout must be owned by the service user.
+When the operator runs as root, the private candidate run config inherits that
+checkout's owner/group so the facade can read it without widening mode 0600.
 
 Capture the current declaration file's SHA-256 and the existing unit source
 revision. Start with a read-only plan:
