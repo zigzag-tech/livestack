@@ -333,17 +333,26 @@ def _compilation_refusal(policy, worker, spec, now):
     return None
 
 
-def _release_compatible(report, spec):
+def _matching_release(report, spec):
+    """The descriptor of the job's accepted release set (primary first, then its platform variants) that this
+    worker's inventory advertises exactly, or None."""
     required = spec.get('handler_release')
     if required is None:
-        return True
+        return None
     inventory = report.get('handler_inventory')
     if not isinstance(inventory, dict):
-        return False
-    return any(item.get('handler_id') == required['handler_id'] and
-               item.get('release_digest') == required['release_digest'] and
-               item.get('execution_contract') == required['execution_contract']
-               for item in inventory.get('releases', []))
+        return None
+    for candidate in [required, *spec.get('handler_release_variants', ())]:
+        if any(item.get('handler_id') == candidate['handler_id'] and
+               item.get('release_digest') == candidate['release_digest'] and
+               item.get('execution_contract') == candidate['execution_contract']
+               for item in inventory.get('releases', [])):
+            return candidate
+    return None
+
+
+def _release_compatible(report, spec):
+    return spec.get('handler_release') is None or _matching_release(report, spec) is not None
 
 
 def _avoided(db, row, now):
@@ -774,7 +783,8 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
             if db.execute('SELECT changes()').fetchone()[0] != 1:
                 raise WorkloadError('environment_writer_race', 409)
             active_environment_writers.add(environment_handle)
-        pinned_release = spec.get('handler_release')
+        pinned_release = (_matching_release(reports[chosen['id']], spec) or spec.get('handler_release')
+                          if spec.get('handler_release') else None)
         db.execute("INSERT INTO attempts(id,job,worker,boot,host,fence,state,need,expires,created,compilation,environment_generation,handler_release,decision_id) "
                    "VALUES(?,?,?,?,?,?,'running',?,?,?,?,?,?,?)",
                    (aid, row["id"], chosen["id"], chosen["boot"], chosen["host"], fence,
