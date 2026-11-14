@@ -746,6 +746,12 @@ class WorkloadWorker:
         changed = False
         skipped = {}
         required = set(self.config.get('required_handler_releases', ()))
+        mine = (self.handler_packages.platform, self.handler_packages.architecture)
+        # Handlers that have a release for this platform in this sync: a foreign-platform release of one of them is a
+        # sibling platform default, not a missing required release.
+        served_here = {item.get('handler_id') for item in sync['releases'] if isinstance(item, dict) and
+                       isinstance(item.get('manifest'), dict) and
+                       (item['manifest'].get('platform'), item['manifest'].get('architecture')) == mine}
         for descriptor in sync['releases']:
             if (not isinstance(descriptor, dict) or set(descriptor) != {
                     'handler_id', 'release_digest', 'archive_digest', 'archive_bytes', 'manifest'}):
@@ -761,7 +767,7 @@ class WorkloadWorker:
                 # it, unless the operator declared a release for this handler required here.
                 reason = ('platform_not_supported: release %s/%s, worker %s/%s' % (
                     offered + (self.handler_packages.platform, self.handler_packages.architecture)))
-                if handler in required:
+                if handler in required and handler not in served_here:
                     reason = 'required_release_platform_missing: ' + reason
                     self._record_handler_registry_failure(sync['generation'], digest, reason)
                     logging.error('handler_release_activation_failed: generation=%s digest=%s reason=%s',
@@ -796,6 +802,12 @@ class WorkloadWorker:
         for handler in list(defaults):
             if defaults[handler] in skipped:
                 del defaults[handler]
+        # Platform defaults (`<handler>@<platform>/<arch>`, openspec handler-platform-defaults): the one left after
+        # the skips above is this worker's platform, and becomes its default for that handler. The keys themselves
+        # never reach the pointer or the inventory, which name handler ids only.
+        for key in [key for key in defaults if '@' in key]:
+            digest = defaults.pop(key)
+            defaults[key.split('@', 1)[0]] = digest
         self._record_handler_platform_skips(sync['generation'], skipped)
         if current['generation'] != sync['generation']:
             changed = True

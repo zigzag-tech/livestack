@@ -1,0 +1,7 @@
+- [x] Registry: activation keys a foreign-platform release as a platform variant; `desired()` ships variant descriptors
+- [x] Acceptance: default selection records `handler_release_variants`
+- [x] Placement: compatible on primary or a variant; attempt pins the matched descriptor; result identity from the attempt
+- [x] Worker: a skipped default is replaced by this platform's variant
+- [x] Reference evidence: job variant digests count as referenced
+- [x] Tests: activation keys, acceptance set, placement pin per platform, worker default, retry keeps the set
+- [ ] Deploy authority, then the aarch64 worker; verify one aarch64 job and one x86_64 job on one default generation

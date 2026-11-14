@@ -36,6 +36,17 @@ MAX_EVICTIONS_PER_STAGE = 32
 _DIGEST = re.compile(r'^[0-9a-f]{64}$')
 
 
+def platform_key(handler, manifest):
+    """The defaults-map key of a handler's release for a platform other than its primary default's."""
+    return f"{handler}@{manifest.get('platform')}/{manifest.get('architecture')}"
+
+
+def variant_digests(defaults, handler):
+    """{key: digest} of the platform defaults of one handler (not its primary)."""
+    prefix = handler + '@'
+    return {key: digest for key, digest in defaults.items() if key.startswith(prefix)}
+
+
 def parse_policy(policy, handlers):
     """Validate a handler release policy against the installed handler ids and return
     (revision, retention_seconds, burst_min_age_seconds, per-handler policy). Raises ValueError.
@@ -200,6 +211,8 @@ class HandlerReleaseRegistry:
         "WHERE w.seen>? "
         "UNION SELECT json_extract(spec,'$.handler_release.release_digest') FROM jobs "
         "WHERE state IN ('queued','running') "
+        "UNION SELECT json_extract(v.value,'$.release_digest') FROM jobs j,json_each(j.spec,'$.handler_release_variants') v "
+        "WHERE j.state IN ('queued','running') "
         "UNION SELECT json_extract(handler_release,'$.release_digest') FROM attempts "
         "WHERE state IN ('running','cleanup')) "
         "SELECT r.handler_id,r.release_digest,r.archive_digest,r.archive_bytes,"
@@ -352,6 +365,22 @@ class HandlerReleaseRegistry:
             raise WorkloadError('handler_registry_generation_missing', 503)
         return json.loads(row['defaults'])
 
+    @staticmethod
+    def _default_key(db, defaults, handler, manifest):
+        """Where an activated release goes in the defaults map: the handler's primary entry, or, when a primary
+        exists for another platform/architecture, that platform's own entry `<handler>@<platform>/<arch>`."""
+        primary = defaults.get(handler)
+        if primary is None:
+            return handler
+        row = db.execute('SELECT manifest FROM handler_releases WHERE handler_id=? AND release_digest=?',
+                         (handler, primary)).fetchone()
+        if row is None:
+            return handler
+        current = json.loads(row['manifest'])
+        if (current.get('platform'), current.get('architecture')) == (manifest.get('platform'), manifest.get('architecture')):
+            return handler
+        return platform_key(handler, manifest)
+
     def activate(self, actor, request, *, rollback=False):
         required = {'request_id', 'expected_generation', 'handler_id', 'release_digest'}
         if not isinstance(request, dict) or set(request) != required:
@@ -401,12 +430,13 @@ class HandlerReleaseRegistry:
             if candidate is None:
                 raise WorkloadError('handler_release_not_staged', 404)
             defaults = self._defaults(db, current)
-            previous = defaults.get(handler)
+            key = self._default_key(db, defaults, handler, json.loads(candidate['manifest']))
+            previous = defaults.get(key)
             if previous == digest:
                 # A distinct request for an already effective digest is a durable no-op receipt.
                 generation = current
             else:
-                defaults[handler] = digest
+                defaults[key] = digest
                 generation = current + 1
                 encoded = encode(defaults, MAX_METADATA_BYTES)
                 db.execute('INSERT INTO handler_registry_generations VALUES(?,?,?,?,?)',
@@ -442,13 +472,20 @@ class HandlerReleaseRegistry:
             defaults = self._defaults(db, generation)
             supported = sorted(set(handlers))
             selected = {handler: digest for handler, digest in defaults.items() if handler in supported}
+            # Platform defaults ride along under their own keys. A worker skips every descriptor not built for its
+            # platform and drops that key; a current worker then adopts the variant left for its own platform.
+            for handler in supported:
+                selected.update(variant_digests(defaults, handler))
             digests = set(selected.values())
             if supported:
                 placeholders = ','.join('?' for _ in supported)
                 for row in db.execute("SELECT DISTINCT json_extract(spec,'$.handler_release.release_digest') AS digest "
                     "FROM jobs WHERE state IN ('queued','running') "
                     f"AND json_extract(spec,'$.handler') IN ({placeholders}) "
-                    "AND json_extract(spec,'$.handler_release.release_digest') IS NOT NULL LIMIT 256", supported):
+                    "AND json_extract(spec,'$.handler_release.release_digest') IS NOT NULL "
+                    "UNION SELECT DISTINCT json_extract(v.value,'$.release_digest') FROM jobs j, "
+                    "json_each(j.spec,'$.handler_release_variants') v WHERE j.state IN ('queued','running') "
+                    f"AND json_extract(j.spec,'$.handler') IN ({placeholders}) LIMIT 256", supported + supported):
                     if row['digest']:
                         digests.add(row['digest'])
             items = []
@@ -517,7 +554,8 @@ class HandlerReleaseRegistry:
                                'unreferenced_candidates': MAX_STAGED_CANDIDATES,
                                'releases_per_handler': None}},
                 'releases': [dict(handler_id=r['handler_id'], release_digest=r['release_digest'],
-                    archive_bytes=r['archive_bytes'], is_default=defaults.get(r['handler_id']) == r['release_digest'],
+                    archive_bytes=r['archive_bytes'], is_default=r['release_digest'] in ({defaults.get(r['handler_id'])} |
+                        set(variant_digests(defaults, r['handler_id']).values())),
                     created=r['created']) for r in db.execute('SELECT * FROM handler_releases ORDER BY handler_id,created DESC LIMIT 256')],
                 'recent_receipts': [dict(r) for r in db.execute(
                     'SELECT request_id,actor,expected_generation,generation,handler_id,previous_digest,release_digest,created '
@@ -535,8 +573,11 @@ class HandlerReleaseRegistry:
                 'WHERE s.singleton=1 AND g.generation=s.generation AND r.release_digest=d.value '
                 'AND r.archive_digest=? UNION SELECT 1 FROM handler_releases r JOIN jobs j '
                 "ON r.release_digest=json_extract(j.spec,'$.handler_release.release_digest') "
-                "WHERE r.archive_digest=? AND j.state IN ('queued','running') LIMIT 1",
-                (digest, digest)).fetchone())
+                "WHERE r.archive_digest=? AND j.state IN ('queued','running') "
+                "UNION SELECT 1 FROM handler_releases r, jobs j, json_each(j.spec,'$.handler_release_variants') v "
+                "WHERE r.release_digest=json_extract(v.value,'$.release_digest') AND r.archive_digest=? "
+                "AND j.state IN ('queued','running') LIMIT 1",
+                (digest, digest, digest)).fetchone())
 
     def release_descriptor(self, digest):
         if not isinstance(digest, str) or not _DIGEST.fullmatch(digest):
