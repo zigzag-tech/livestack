@@ -375,6 +375,13 @@ def test_a_busy_speech_node_is_failed_over_to_the_next_provider(speech):
     assert [a["result"].split(":")[0] for a in attempts] == ["busy", "ok"]
 
 
+def test_forced_alignment_is_placed_on_a_polyasr_node(speech):
+    client, (busy, ok), routes = speech(({"busy": True}, {"in_flight": 0}), ({}, {"in_flight": 1}))
+    r = client.post("/v1/align", files=_WAV, data={"language": "English"})
+    assert r.status_code == 200 and ok.got[0]["path"] == "/v1/align"
+    assert [a["result"].split(":")[0] for a in routes.rows[-1]["fleet_route"]["attempts"]] == ["busy", "ok"]
+
+
 def test_a_plain_503_is_also_failed_over_but_not_called_busy(speech):
     client, (dead, ok), routes = speech(({"bare_503": True}, {"in_flight": 0}), ({}, {"in_flight": 1}))
     assert client.post("/v1/audio/transcriptions", files=_WAV).status_code == 200
