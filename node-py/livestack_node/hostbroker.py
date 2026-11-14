@@ -626,7 +626,9 @@ class HostBroker:
             avail = (rep.get("host_mem") or {}).get("available_bytes")
             if not isinstance(avail, (int, float)):
                 continue
-            hid = self._remembered_host(key)
+            # A facade's host label may name a GPU/service, while the
+            # resolved device belongs to the physical host's shared RAM pool.
+            hid = device_hosts.get(self._peer_device.get(key)) or self._remembered_host(key)
             if not hid:
                 continue
             at = float(rep.get("at") or 0.0)
