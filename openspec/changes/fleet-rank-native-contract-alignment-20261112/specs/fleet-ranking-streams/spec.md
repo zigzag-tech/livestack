@@ -24,6 +24,12 @@ named outcomes. Excess pairs SHALL NOT disable or replace the first 32.
 - **WHEN** another registered live authority already holds the contract
 - **THEN** registration is refused by name and the producer does not fall back to HTTP
 
+#### Scenario: Ranking-only startup does not claim daemon-owned fleet publication
+
+- **WHEN** a process attaches a ranking view reader and configured pairs without attaching a fleet publisher
+- **THEN** unchanged runtime startup registers `harmony.fleet.rank/1` and runs its normal ranking task
+- **AND** it does not register or publish `harmony.fleet/1`
+
 ### Requirement: Ranking bodies preserve typed evidence within declared bounds
 
 Every successful ranking body SHALL contain kind, region, vantage, generated_at,

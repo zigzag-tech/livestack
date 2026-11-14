@@ -98,6 +98,28 @@ class FleetRankProjectionTests(unittest.TestCase):
 
 
 class FleetRankShadowAckTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rank_only_reader_uses_real_startup_without_claiming_daemon_fleet(self):
+        # SDK/startup adapter control; the Benchday Rust regression supplies
+        # real daemon catalog/authority enforcement, which this peer cannot.
+        with tempfile.TemporaryDirectory(prefix="rank-start-") as directory:
+            path = os.path.join(directory, "ingress.sock")
+            ingress = FakeIngress(path)
+            await ingress.start()
+            runtime = StreamsRuntime(path, lambda _: None, "tower", fleet_rank_s=0.03)
+            runtime.attach(fleet_rank_reader=lambda: (REAL_FLEET, {}),
+                           fleet_rank_pairs=[("llm", "na", "host:tower")])
+            self.assertEqual(runtime.contracts()[0], [source.CONTRACT])
+            runtime.start()
+            try:
+                self.assertTrue(await ingress.settle(lambda: any(
+                    row["contract"] == source.CONTRACT and row["status"] == "ok"
+                    for row in ingress.publishes)))
+                self.assertEqual(ingress.registers, [source.CONTRACT])
+                self.assertTrue(all(row["contract"] == source.CONTRACT for row in ingress.publishes))
+            finally:
+                await runtime.stop()
+                await ingress.stop()
+
     async def test_state_serving_without_mode_is_active(self):
         # The SDK must decode the actual daemon reply shape; projection-only
         # positives cannot detect its older registered/active wire assumption.

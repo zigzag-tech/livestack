@@ -14,6 +14,15 @@ registration fence; host-account aggregation is transport scope only. A second
 authority is refused, and a disconnected/refused producer cannot fall back to
 HTTP polling. The existing ReconnectingProducer owns reconnect and registration.
 
+Ranking-only startup attaches `fleet_rank_reader` independently of
+`fleet_reader`. The former supplies ranking input without registering or
+publishing the daemon-owned `harmony.fleet/1` contract. Unchanged runtime
+`start()` then registers only the native ranking contract and starts its normal
+background task. Existing combined attachments with only `fleet_reader` retain
+their prior behavior through an explicit fallback. This is a source-input
+attachment choice, not an override of runtime startup, daemon authority or
+registration refusal. Real-daemon qualification remains mandatory.
+
 One configured vantage supplies each (kind, region). The subject contains only
 those two fields; the body repeats them and includes vantage, generated_at,
 ttl_s, decision_id, chosen, reason, targets and prefer. Pair strings are at most

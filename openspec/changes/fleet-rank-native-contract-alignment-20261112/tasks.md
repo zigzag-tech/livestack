@@ -6,6 +6,8 @@
 
 ## Authenticated producer and integration
 
+- [x] Separate ranking input attachment from fleet publication; unchanged rank-only startup does not register the daemon-owned fleet contract. Regular SDK/startup controls pass; real daemon qualification remains task 2.1.
+
 - [ ] 2.1 Verify native ingress registration/refusal, reconnect and failure recovery on the exact source.
 - [x] 2.2 Verify actual-ranker positives, schema/size/configuration negative controls and same-second IDs.
 - [ ] 2.3 Hand off the exact source pin for Benchday's native fleet fixture and legacy poller/frame removal.

@@ -50,6 +50,7 @@ class StreamsRuntime:
         self.modes: Dict[str, str] = {}
         self.host_facts: Any = None
         self.fleet_reader: Optional[Callable[[], Tuple[dict, dict]]] = None
+        self.fleet_rank_reader: Optional[Callable[[], Tuple[dict, dict]]] = None
         self.fleet_rank_pairs: List[Tuple[str, str, str]] = []
         self.jobs_reader: Optional[Callable[[], List[dict]]] = None
         self.identity_reader: Optional[Callable[[], dict]] = None
@@ -115,6 +116,7 @@ class StreamsRuntime:
 
     # -- lifecycle
     def attach(self, *, host_facts: Any = None, fleet_reader: Any = None,
+               fleet_rank_reader: Any = None,
                fleet_rank_pairs: Optional[Sequence[Tuple[str, str, str]]] = None,
                jobs_reader: Any = None,
                identity_reader: Any = None, identity_contract: Optional[str] = None,
@@ -122,6 +124,9 @@ class StreamsRuntime:
                identity_namespace: Optional[str] = None,
                workload: Any = None, request: Any = None) -> "StreamsRuntime":
         self.host_facts, self.fleet_reader, self.jobs_reader = host_facts, fleet_reader, jobs_reader
+        # Ranking can consume a view without claiming the daemon-owned fleet
+        # publication contract. Existing combined attachments retain their API.
+        self.fleet_rank_reader = fleet_rank_reader if fleet_rank_reader is not None else fleet_reader
         self.fleet_rank_pairs = fleet_rank_stream.bounded_pairs(fleet_rank_pairs or [], self.log)
         self.identity_reader = identity_reader
         self.identity_contract = identity_contract
@@ -137,7 +142,7 @@ class StreamsRuntime:
             register.append(HOST)
         if self.fleet_reader is not None:
             register.append(FLEET)
-        if self.fleet_reader is not None and self.fleet_rank_pairs:
+        if self.fleet_rank_reader is not None and self.fleet_rank_pairs:
             register.append(FLEET_RANK)
         if self.identity_reader is not None and self.identity_contract is not None:
             register.append(self.identity_contract)
@@ -158,7 +163,7 @@ class StreamsRuntime:
             self._tasks.append(asyncio.ensure_future(self._loop(self.host_facts.tick, 5.0, "host_facts")))
         if self.fleet_reader is not None:
             self._tasks.append(asyncio.ensure_future(self._loop(self._fleet_tick, self.fleet_s, "fleet")))
-        if self.fleet_reader is not None and self.fleet_rank_pairs:
+        if self.fleet_rank_reader is not None and self.fleet_rank_pairs:
             self._tasks.append(asyncio.ensure_future(self._loop(
                 self._fleet_rank_tick, self.fleet_rank_s, "fleet_rank",
                 failure_every_s=self.fleet_rank_s)))
@@ -308,7 +313,7 @@ class StreamsRuntime:
     async def _fleet_rank_tick(self) -> None:
         loop = asyncio.get_event_loop()
         try:
-            fleet, _status = await loop.run_in_executor(None, self.fleet_reader)
+            fleet, _status = await loop.run_in_executor(None, self.fleet_rank_reader)
         except Exception as error:  # noqa: BLE001 - each configured key gets an explicit failure partial
             for triple in self.fleet_rank_pairs:
                 await self._publish_fleet_rank_failure(
