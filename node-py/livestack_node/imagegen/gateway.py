@@ -145,10 +145,25 @@ def _device_leases(profile, token, wait_deadline, cancel=None):
 
 
 WORKER_IDLE_POLL_S = 2.0
+# How long a cut request may keep its devices exclusive. The facade cuts the worker's
+# call when the caller hangs up (bd05436d), so a worker that is really generating stops
+# within seconds; this only bounds a worker that never says idle.
+CUT_HOLD_MAX_S = 120.0
 
 
-def _await_worker_idle(call, endpoint, deadline, poll_s=None, unreachable_s=30.0):
+def _holds_no_gpu_memory(report):
+    """True when the facade shows no resident unit and no memory held by the worker process."""
+    mem = report.get("process_mem")
+    return (isinstance(mem, dict) and mem.get("allocated_bytes") == 0 and mem.get("reserved_bytes") == 0
+            and not any(unit.get("resident") for unit in report.get("units", [])))
+
+
+def _await_worker_idle(call, endpoint, deadline, poll_s=None, unreachable_s=30.0, max_hold_s=None):
     """Wait until the worker's facade reports every unit idle, or ``deadline`` (monotonic).
+    Returns why the wait ended: "idle", "no resident model" (busy flag stuck on an empty GPU),
+    "unreachable", or "hold cap" (``max_hold_s``, default CUT_HOLD_MAX_S, or ``deadline`` passed).
+    xc-tower-ubuntu, 2026-11-14 12:29-12:53 EST: a stuck busy flag on an empty GPU held a whole
+    GPU exclusive for 24 min (the 1200 s request timeout) after the caller hung up.
 
     A worker call that was cut (the caller hung up) or failed does not stop the
     GPU work behind it at once. Releasing the device leases first left a FLUX job
@@ -158,6 +173,7 @@ def _await_worker_idle(call, endpoint, deadline, poll_s=None, unreachable_s=30.0
     A facade that stops answering for ``unreachable_s`` is taken as gone (its
     process owns the worker), not as busy for the rest of the deadline."""
     unreachable_since = None
+    deadline = min(deadline, time.monotonic() + (CUT_HOLD_MAX_S if max_hold_s is None else max_hold_s))
     while True:
         try:
             report = call(endpoint, "GET", "/livestack/residence", timeout=10)
@@ -168,13 +184,15 @@ def _await_worker_idle(call, endpoint, deadline, poll_s=None, unreachable_s=30.0
             # leases 17 min past the worker's exit, until the facade was restarted.
             if (report.get("worker", {}).get("running") is False
                     or not any(unit.get("busy") for unit in report.get("units", []))):
-                return True
+                return "idle"
+            if _holds_no_gpu_memory(report):
+                return "no resident model"
         except (RuntimeError, OSError, ValueError):
             unreachable_since = unreachable_since or time.monotonic()
             if time.monotonic() - unreachable_since >= unreachable_s:
-                return False
+                return "unreachable"
         if time.monotonic() >= deadline:
-            return False
+            return "hold cap"
         time.sleep(WORKER_IDLE_POLL_S if poll_s is None else poll_s)
 
 
@@ -294,8 +312,9 @@ def create_app(config=None, call=json_call):
                     if lease_ids:
                         print(f"image ingress: worker call to {endpoint} ended early; holding "
                               f"{len(lease_ids)} device lease(s) until it reports idle", flush=True)
-                        idle = _await_worker_idle(call, endpoint, worker_deadline)
-                        print(f"image ingress: {endpoint} {'idle' if idle else 'still busy at request_timeout_s'}; "
+                        why = _await_worker_idle(call, endpoint, worker_deadline,
+                                                 max_hold_s=config.get("cut_hold_max_s"))
+                        print(f"image ingress: {endpoint} released after cut: {why}; "
                               "releasing device leases", flush=True)
                     raise
                 actual = result.get("harmony", {})

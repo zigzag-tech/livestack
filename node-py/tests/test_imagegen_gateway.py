@@ -477,3 +477,66 @@ def test_a_503_names_an_error_that_has_no_message(setup):
     response = TestClient(create_app(config, call=timing_out)).post("/v1/images/generations", json={"prompt": "x", "harmony_requires": {"params_b>=": 20}}, headers={"Authorization": "Bearer worker-secret"})
     assert response.status_code == 503
     assert response.json()["detail"] == "TimeoutError during the image request"
+
+
+# --- a cut request's device-lease hold is bounded and keyed to the worker's real state ---
+def _residence(busy, resident=False, reserved=0, running=True):
+    return {"units": [{"kind": "u", "busy": busy, "resident": resident}], "worker": {"running": running},
+            "process_mem": {"allocated_bytes": reserved, "reserved_bytes": reserved}}
+
+
+def _hold(reports, **kw):
+    import time
+    from livestack_node.imagegen.gateway import _await_worker_idle
+    seen = []
+
+    def call(base, method, path, body=None, token=None, timeout=None, cancel=None):
+        seen.append(path)
+        return reports(len(seen)) if callable(reports) else reports
+    return _await_worker_idle(call, "http://w", time.monotonic() + 1200, poll_s=0.01, **kw), seen
+
+
+def test_a_stuck_busy_flag_on_an_empty_gpu_releases_the_hold_at_once():
+    why, seen = _hold(_residence(busy=True))
+    assert why == "no resident model" and len(seen) == 1
+
+
+def test_a_worker_that_never_says_idle_is_released_at_the_hold_cap():
+    import time
+    start = time.monotonic()
+    why, _ = _hold(_residence(busy=True, resident=True, reserved=9_000_000_000), max_hold_s=0.2)
+    assert why == "hold cap" and time.monotonic() - start < 5
+
+
+def test_a_worker_really_generating_keeps_the_hold_until_it_reports_idle():
+    why, seen = _hold(lambda n: _residence(busy=n < 4, resident=True, reserved=9_000_000_000), max_hold_s=30)
+    assert why == "idle" and len(seen) == 4
+
+
+def test_a_cut_request_releases_its_leases_within_the_cap(setup, monkeypatch):
+    import time
+    config, _, base_call = setup
+    config["cut_hold_max_s"] = 0.2
+    config["exclusive_units"] = {"qwen": {"broker": "http://b", "owner": "o", "device_ids": ["tower/gpu1"],
+                                          "min_free_bytes": 1}}
+    exits = []
+
+    class Lease:
+        def __enter__(self):
+            return {"granted": True, "lease_id": "l1", "device_id": "tower/gpu1"}
+
+        def __exit__(self, *a):
+            exits.append(time.monotonic())
+    monkeypatch.setattr("livestack_node.imagegen.gateway.exclusive_lease", lambda *a, **k: Lease())
+
+    def call(base, method, path, body=None, token=None, timeout=None, lease_id=None, cancel=None):
+        if path == "/v1/images/generations":
+            raise OSError("caller hung up")
+        if path == "/livestack/residence":
+            return _residence(busy=True, resident=True, reserved=9_000_000_000)
+        return base_call(base, method, path, body, token=token)
+    start = time.monotonic()
+    response = TestClient(create_app(config, call=call)).post(
+        "/v1/images/generations", json={"prompt": "x", "harmony_requires": {"params_b>=": 20}},
+        headers={"Authorization": "Bearer worker-secret"})
+    assert response.status_code == 503 and len(exits) == 1 and exits[0] - start < 10
