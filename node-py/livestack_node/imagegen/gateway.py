@@ -216,8 +216,19 @@ def create_app(config=None, call=json_call):
             cancel.cancel()
 
         watcher = asyncio.ensure_future(watch())
+        # Every call inside `serve` has its own socket timeout, but those bound one read each, not the request:
+        # admission, lease queueing, the worker call and the idle wait can add up (histo's icon request sat
+        # on an open socket for 14 h, 2026-11-13/14). The whole request has one wall-clock limit; at it the
+        # request's sockets are cut (so the far ends stop working for nobody) and the caller is answered 504.
+        wait_s = body.get("harmony_wait_s", 0)
+        wait_s = wait_s if type(wait_s) in (int, float) and 0 <= wait_s <= 3600 else 0
+        limit = config.get("total_timeout_s") or wait_s + 2 * request_timeout + 300
         try:
-            return await run_in_threadpool(serve, body, authorization, x_harmony_owner, cancel)
+            return await asyncio.wait_for(
+                run_in_threadpool(serve, body, authorization, x_harmony_owner, cancel), limit)
+        except asyncio.TimeoutError:
+            cancel.cancel()
+            raise HTTPException(504, f"image request exceeded its {limit:g} s limit") from None
         finally:
             watcher.cancel()
 
