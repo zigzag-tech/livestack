@@ -111,8 +111,8 @@ def validate_request(payload: Mapping[str, Any], *, now_ms: Optional[int] = None
             if len(crit) != len(set(crit)):
                 raise ContractError("invalid_input", f"choice {q['id']} has duplicate option ids")
         elif q["type"] == "extraction":
-            from .extraction_contract import PROFILE_ID
-            if payload["profile_id"] != PROFILE_ID or len(ids) != 1 or q["id"] != "ask":
+            from .extraction_contract import EXTRACTION_PROFILE_IDS
+            if payload["profile_id"] not in EXTRACTION_PROFILE_IDS or len(ids) != 1 or q["id"] != "ask":
                 raise ContractError("unsupported_profile", "extraction requires one ask under the pinned pane-ask profile")
         elif q["type"] != "noul":
             raise ContractError("unsupported_profile", f"unsupported question type {q['type']}")
@@ -184,8 +184,8 @@ def validate_result(
                 raise ContractError("invalid_output", f"{qid} choice is not argmax")
             del argmax
         elif ans.get("type") == "extraction":
-            from .extraction_contract import PROFILE_ID, validate_extraction
-            if payload["profile_id"] != PROFILE_ID:
+            from .extraction_contract import EXTRACTION_PROFILE_IDS, validate_extraction
+            if payload["profile_id"] not in EXTRACTION_PROFILE_IDS:
                 raise ContractError("invalid_output", "extraction result has the wrong profile")
             validate_extraction(ans.get("value"))
             execution = payload.get("execution", {})
