@@ -13,6 +13,7 @@ import stat
 import subprocess
 import threading
 import urllib.request
+import urllib.error
 
 MAX_JSON = 4 * 1024 * 1024
 
@@ -23,7 +24,11 @@ def read(path, limit=MAX_JSON, *, private=False):
         info = os.fstat(f.fileno())
         if not stat.S_ISREG(info.st_mode):
             raise ValueError('input must be a regular file')
-        if private and (info.st_uid not in (0, os.getuid()) or info.st_mode & 0o077):
+        owners = {0, os.getuid()}
+        sudo_uid = os.environ.get('SUDO_UID', '')
+        if os.getuid() == 0 and sudo_uid.isdecimal():
+            owners.add(int(sudo_uid))
+        if private and (info.st_uid not in owners or info.st_mode & 0o077):
             raise ValueError('credential must be an owned private file')
         raw = f.read(limit + 1)
     if len(raw) > limit:
@@ -159,8 +164,11 @@ class DeviceLease:
         req = urllib.request.Request(self.args.broker_url.rstrip('/') + path,
             data=encoded(body), headers={'authorization': 'Bearer ' + self.token,
                                         'content-type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            raw = response.read(65537)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                raw = response.read(65537)
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f'broker request refused: HTTP {exc.code}') from None
         if len(raw) > 65536:
             raise ValueError('broker response exceeds 64 KiB')
         result = json.loads(raw)
@@ -308,9 +316,9 @@ def main():
     parser.add_argument('--owner')
     parser.add_argument('--service', default='harmony-llm.service')
     parser.add_argument('--wait-seconds', type=int, default=120)
-    parser.add_argument('--min-free-bytes', type=int, default=0)
+    parser.add_argument('--min-free-bytes', type=int, default=1)
     args = parser.parse_args()
-    if not 1 <= args.wait_seconds <= 480 or not 0 <= args.min_free_bytes <= 1024**4:
+    if not 1 <= args.wait_seconds <= 480 or not 1 <= args.min_free_bytes <= 1024**4:
         parser.error('wait or memory bound is invalid')
     if args.apply and not all((args.operation_dir, args.broker_url, args.token_file, args.device_id, args.owner)):
         parser.error('apply requires operation directory, broker, private token file, device and owner')

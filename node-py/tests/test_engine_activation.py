@@ -229,9 +229,48 @@ def test_operator_lease_uses_real_host_broker_admission_and_release(tmp_path, mo
             assert broker.exclusive_store.get_lease(lease.lease_id)['state'] == 'exclusive'
             assert ('evict', 'flash_next') in peer.calls
         assert broker.exclusive_store.get_lease(lease.lease_id)['state'] == 'released'
+        args.min_free_bytes = 0
+        with pytest.raises(RuntimeError, match='broker request refused: HTTP 400'):
+            with DeviceLease(args):
+                pytest.fail('invalid broker request acquired a lease')
     finally:
         server.should_exit = True
         thread.join(timeout=5)
         sock.close()
         broker.exclusive_store.close()
     assert not thread.is_alive()
+
+
+def test_sudo_reads_original_callers_private_credential(tmp_path, monkeypatch):
+    import livestack_node.engine_activation as activation
+    token = tmp_path / 'credential'
+    token.write_bytes(b'private-value')
+    token.chmod(0o600)
+    monkeypatch.setenv('SUDO_UID', str(token.stat().st_uid))
+    monkeypatch.setattr(activation.os, 'getuid', lambda: 0)
+    assert activation.read(token, 256, private=True) == b'private-value'
+    token.chmod(0o640)
+    with pytest.raises(ValueError, match='owned private'):
+        activation.read(token, 256, private=True)
+
+
+def test_cli_defaults_to_positive_exclusive_memory(setup, monkeypatch):
+    import livestack_node.engine_activation as activation
+    argv = ['activate']
+    for key in ('units_file', 'unit', 'expected_source_rev', 'expected_units_sha256',
+                'source_root', 'source_rev', 'artifacts', 'python'):
+        argv += ['--' + key.replace('_', '-'), getattr(setup, key)]
+    captured = []
+    original = activation.plan
+    def capture(args):
+        captured.append(args.min_free_bytes)
+        return original(args)
+    monkeypatch.setattr(activation, 'plan', capture)
+    monkeypatch.setattr(sys, 'argv', argv)
+    assert activation.main() == 0
+    assert captured == [1]
+    monkeypatch.setattr(sys, 'argv', argv + ['--min-free-bytes', '0'])
+    with pytest.raises(SystemExit) as error:
+        activation.main()
+    assert error.value.code == 2
+    assert captured == [1]
