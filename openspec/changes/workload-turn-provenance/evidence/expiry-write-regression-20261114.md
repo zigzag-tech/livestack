@@ -40,3 +40,16 @@ gate, deployment or E9 acceptance. The normal af73 full suite is independent
 old-head evidence; no current-head full pass is inferred. Operator rollout,
 Jingway authoritative gate/pin, full Hub/runtime and actual same-turn
 job/worker/Flutter proof remain pending.
+
+## Completed native failing-set comparison
+
+The normal predecessoraf73 full run completed exit1:87failed/2990passed/81skipped/1xfailed in2039.97s. Its exact87 failed IDs, not a handwritten discovery list, were replayed in suite order on base0f8d55bf then current38c793ca. Steward supplied the existing public HARMONY_TEST_NATIVE_HOST_ADDRESS=100.64.0.24 test prerequisite; broker/ledger defaults remained unchanged. Each phase had a1500s bound, no automatic retries. Both completed normally:
+
+- Base:81 failed/6 passed in478.08s.
+- Fixed:81 failed/6 passed in486.90s.
+-80 failure IDs match. The sole candidate-only failure is the busy-worker UUID tie assumption already causally reproduced under opposing IDs on BOTH heads (linked above). The sole base-only failure is rootless success delivery; it passes on fixed source. No claim about its cause is inferred.
+- The steady-poll write regression passes on BOTH after the fix; the old implementation negative control still fails.
+- Exact phase receipt: https://benchday.app/s/CGHFH88TQP .
+- Raw normal predecessor full receipt: https://benchday.app/s/5312PNS5MY ; exact87IDs: https://benchday.app/s/TJP30P3TT5 .
+
+These results classify the old failing set; they are NOT a green full repository suite or a completed whole baseline suite. No unclassified candidate-only failure remains in that selected set. Current provenance/ACL/retention/router/steady-write tests passed90/90 separately. Existing native/release/transport/mirror failures remain visible; no policies, deadlines, routes, worker setup or tests were weakened to make this feature pass.
