@@ -116,6 +116,21 @@ def test_apply_selects_under_lease_and_records_completion(setup):
     assert Path(setup.operation_dir, 'previous-units.json').stat().st_mode & 0o077 == 0
 
 
+def test_private_runtime_is_written_for_the_source_service_owner(setup, monkeypatch):
+    import livestack_node.engine_activation as activation
+    real_atomic = activation.atomic
+    ownership = []
+    def capture(path, raw, *args, **kwargs):
+        if Path(path).name == 'operator-runtime.json':
+            ownership.append((kwargs.get('uid'), kwargs.get('gid')))
+        return real_atomic(path, raw, *args, **kwargs)
+    monkeypatch.setattr(activation, 'atomic', capture)
+    apply(setup, lease_factory=Lease, restart_service=lambda _: None)
+    owner = Path(setup.source_root).stat()
+    assert ownership == [(owner.st_uid, owner.st_gid)]
+    assert Path(setup.source_root, 'operator-runtime.json').stat().st_mode & 0o077 == 0
+
+
 def test_failed_restart_restores_exact_original_and_keeps_failure(setup):
     original = Path(setup.units_file).read_bytes()
     calls = []

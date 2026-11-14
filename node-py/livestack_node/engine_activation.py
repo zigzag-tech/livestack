@@ -257,7 +257,11 @@ def apply(args, *, lease_factory=DeviceLease, restart_service=restart):
                 (source / '.venv').symlink_to(current['python'].parent.parent)
             if not (source / 'STRATA_VERSION').exists():
                 atomic(source / 'STRATA_VERSION', (args.source_rev + '\n').encode(), 0o644)
-            atomic(source / 'operator-runtime.json', current['run'])
+            # The operator may be root while the facade runs as the checkout's
+            # service owner. Keep the private runtime readable by that owner.
+            source_owner = source.stat()
+            atomic(source / 'operator-runtime.json', current['run'],
+                   uid=source_owner.st_uid, gid=source_owner.st_gid)
             info = path.stat()
             if read(path) != current['original']:
                 raise RuntimeError('declaration changed before selection')
