@@ -172,6 +172,10 @@ class Unit:
     # require — carried so a ledger record can name what was loaded.
     engine: str = ""
     engine_rev: str = ""
+    # SOFT keep-warm window (seconds) after the unit's last grant/load. Not a
+    # pin: an exclusive-device drain spares a unit inside its window when other
+    # idle tenants free enough room, and still evicts it when they cannot.
+    keep_warm_s: float = 0.0
 
 
 @dataclass(frozen=True)
