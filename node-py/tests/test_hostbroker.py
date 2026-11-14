@@ -1594,7 +1594,8 @@ def test_exclusive_drains_two_managed_peers_reclaims_and_is_idempotent():
 
 
 def test_exclusive_busy_tenant_is_not_evicted_and_release_allows_retry():
-    peer = ExclusivePeer("http://alpha", "alpha", busy=True)
+    peer = ExclusivePeer("http://alpha", "alpha", busy=True, free=20_000,
+                         reclaim_free=24_000)
     broker = _exclusive_broker(peer, clock=time.monotonic)
 
     blocked = broker.acquire_exclusive(
@@ -1620,7 +1621,8 @@ def test_exclusive_busy_tenant_waits_within_the_callers_window():
     refused after the 240 s drain bound because asr was busy. A tenant that is
     finishing its work holds the drain up to the caller's window; only a stuck
     drain is bounded by wait_timeout_s."""
-    peer = ExclusivePeer("http://alpha", "alpha", busy=True)
+    peer = ExclusivePeer("http://alpha", "alpha", busy=True, free=20_000,
+                         reclaim_free=24_000)
     broker = _exclusive_broker(peer, clock=time.monotonic)
     finish = _threading.Timer(0.4, lambda: setattr(peer, "_busy", False))
     finish.start()
@@ -1969,7 +1971,8 @@ def test_exclusive_drain_leaves_a_just_granted_unit_for_the_grant_hold():
     # xc-tower-ubuntu 2026-11-02 14:45:28: drama3 was warmed for a waiting TTS
     # admission and drained by the next FLUX exclusive acquisition 1 s later,
     # before the caller's facade could start the request it was granted for.
-    peer = ExclusivePeer("http://alpha", "alpha", resident=False)
+    peer = ExclusivePeer("http://alpha", "alpha", resident=False, free=20_000,
+                         reclaim_free=24_000)
     broker = _exclusive_broker(peer, clock=time.monotonic)
     broker.grant_hold_s = 0.4
     p = broker.plan_and_apply([Request("tts-1", "alpha", owner="voice",
@@ -1982,3 +1985,82 @@ def test_exclusive_drain_leaves_a_just_granted_unit_for_the_grant_hold():
     assert result["granted"] is True
     assert time.monotonic() - started >= 0.35
     assert _calls(peer, "evict") == [("evict", "alpha")]
+
+
+# --- lease drain evicts only what the lease needs ----------------------------
+
+class _SizedPeer(ExclusivePeer):
+    """Tenants of one card share its free-bytes reading (`card`), as on hardware."""
+
+    def __init__(self, base, kind, vram, card, *, keep_warm_s=0.0, **kw):
+        super().__init__(base, kind, **kw)
+        self.unit = Unit(kind, {"vram_bytes": vram}, priority=20,
+                         residency=Residency.UNPINNED, min_residency_s=15.0,
+                         keep_warm_s=keep_warm_s)
+        self.card = card
+        self.vram = vram
+
+    def device_memory(self):
+        return {"vram_bytes": self.card["free"]}
+
+    def evict(self, kind):
+        super().evict(kind)
+        self.card["free"] += self.vram
+
+
+def _drain(peers, tmp_path, min_free=20_000):
+    from livestack_node.ledger import JsonlLedger
+    ledger = JsonlLedger(str(tmp_path / "ledger.jsonl"))
+    device = Device("gpu0", "tower0", capacity={"vram_bytes": 24_000},
+                    reserved={"vram_bytes": 0})
+    broker = HostBroker([device], list(peers), clock=lambda: 1000.0, ledger=ledger)
+    result = broker.acquire_exclusive(_exclusive_request(), "gpu0", min_free,
+                                      wait_timeout_s=5, ttl_s=60)
+    return result, (tmp_path / "ledger.jsonl").read_text() if (tmp_path / "ledger.jsonl").exists() else ""
+
+
+def test_lease_drain_evicts_nothing_when_free_already_meets_the_minimum(tmp_path):
+    asr = _SizedPeer("http://asr", "asr", 8_000, {"free": 25_000})
+    result, _ = _drain([asr], tmp_path)
+    assert result["granted"] is True
+    assert _calls(asr, "evict") == []
+
+
+def test_lease_drain_evicts_only_the_tenant_that_covers_the_deficit(tmp_path):
+    card = {"free": 15_000}
+    small = _SizedPeer("http://s", "small", 2_000, card)
+    big = _SizedPeer("http://b", "big", 6_000, card)
+    result, _ = _drain([small, big], tmp_path)
+    assert result["granted"] is True
+    assert _calls(big, "evict") == [("evict", "big")]
+    assert _calls(small, "evict") == []
+
+
+def test_lease_drain_spares_a_keep_warm_tenant_when_another_suffices(tmp_path):
+    card = {"free": 15_000}
+    warm = _SizedPeer("http://w", "warm", 6_000, card, keep_warm_s=600.0, loaded_at=900.0)
+    cold = _SizedPeer("http://c", "cold", 6_000, card)
+    result, _ = _drain([warm, cold], tmp_path)
+    assert result["granted"] is True
+    assert _calls(cold, "evict") == [("evict", "cold")]
+    assert _calls(warm, "evict") == []
+
+
+def test_lease_drain_still_evicts_a_keep_warm_tenant_when_it_is_the_only_way(tmp_path):
+    warm = _SizedPeer("http://w", "warm", 6_000, {"free": 15_000}, keep_warm_s=600.0, loaded_at=900.0)
+    result, _ = _drain([warm], tmp_path)
+    assert result["granted"] is True
+    assert _calls(warm, "evict") == [("evict", "warm")]
+
+
+def test_lease_drain_evict_is_written_to_the_decision_ledger(tmp_path):
+    import json
+    victim = _SizedPeer("http://v", "victim", 6_000, {"free": 15_000})
+    result, text = _drain([victim], tmp_path)
+    rows = [json.loads(line) for line in text.splitlines() if line.strip()]
+    row = next(r for r in rows if r.get("decision") == "evict" and r.get("kind") == "victim")
+    assert row["reason"].startswith("lease-drain: lease ")
+    out = row["outcome"]
+    assert (out["device_id"], out["needed_bytes"], out["free_bytes"], out["footprint_bytes"]) == (
+        "gpu0", 20_000, 15_000, 6_000)
+    assert out["lease_id"] == result["lease_id"]
