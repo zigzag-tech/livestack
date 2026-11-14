@@ -40,7 +40,14 @@ To apply that plan, add:
 The operator needs write access to the declaration, candidate checkout and
 receipt directory, and permission to restart the explicitly selected service.
 The receipt parent must already exist as a dedicated private directory. Never
-put a credential value in arguments, shell variables or output.
+put a credential value in arguments, shell variables or output. Under sudo, a
+private credential owned by the original `SUDO_UID` is accepted; its ownership
+and mode stay unchanged. Group/world-readable files still refuse.
+
+`--min-free-bytes` defaults to one byte (strictly positive, as the host broker
+requires). This source-selection operation does not load a model or reduce its
+normal memory claim. Increase the value when the maintenance operation needs
+a larger free-device reserve.
 
 Apply acquires the host broker's exclusive-device lease. Busy speech, training
 or other reservations wait or refuse through the broker; the command never
