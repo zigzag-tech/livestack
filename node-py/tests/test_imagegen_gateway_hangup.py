@@ -237,3 +237,38 @@ def test_a_facade_whose_worker_has_exited_counts_as_idle():
                 "worker": {"running": False, "pid": None, "last_error": "worker_state_unknown"}}
     assert module._await_worker_idle(call, "http://w", time.monotonic() + 60, poll_s=0.01) is True
     assert reports == ["/livestack/residence"]
+
+
+def test_a_stalled_upstream_is_cut_and_answered_504_within_the_total_limit(setup):  # noqa: F811
+    """A fleet that accepts the connection and never answers (the real json_call, a real socket):
+    the request ends 504 at total_timeout_s and its upstream socket is closed, not held."""
+    config, _, _ = setup
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    config.update(fleet="http://127.0.0.1:%d" % server.getsockname()[1], total_timeout_s=1.0)
+    accepted = []
+
+    def accept():
+        conn, _ = server.accept()
+        accepted.append(conn)
+        conn.settimeout(10)
+        try:
+            while conn.recv(65536):
+                pass          # returns b"" only when the gateway closes its end
+            accepted.append("closed")
+        except OSError:
+            pass
+
+    threading.Thread(target=accept, daemon=True).start()
+    from livestack_node.imagegen.gateway import json_call
+    started = time.monotonic()
+    response = _post(create_app(config, call=lambda *a, **kw: json_call(*a, **{**kw, "timeout": 600})),
+                     {"prompt": "x", "width": 512, "height": 512, "harmony_wait_s": 1})
+    assert response.status_code == 504 and "limit" in response.json()["detail"]
+    assert time.monotonic() - started < 5
+    deadline = time.monotonic() + 5
+    while "closed" not in accepted and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert "closed" in accepted
+    server.close()
