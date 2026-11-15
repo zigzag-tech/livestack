@@ -49,14 +49,15 @@ class FakeIngress:
                     writer.write(frame({"type": "published", "key": "k", "epoch": "1", "seq": str(len(self.publishes)),
                                         "leased": True, "delivered": 1,
                                         **({"shadowed": True} if row["contract"] in self.shadow else {})}))
-                elif kind == "register":
+                elif kind in ("register", "serve"):
+                    # The real ingress treats register as an alias for serve.
+                    # Active state replies are serving+epoch, without a mode.
                     self.registers.append(row["contract"])
-                    mode = "shadow" if row["contract"] in self.shadow else "active"
-                    writer.write(frame({"type": "registered", "contract": row["contract"], "mode": mode, "epoch": self.realm_epoch}))
-                elif kind == "serve":
                     self.serves.append(row["contract"])
                     self.serving[row["contract"]] = writer
-                    writer.write(frame({"type": "serving", "contract": row["contract"], "epoch": self.realm_epoch}))
+                    writer.write(frame({"type": "serving", "contract": row["contract"],
+                                        **({"mode": "shadow"} if row["contract"] in self.shadow
+                                           else {"epoch": self.realm_epoch})}))
                 elif kind == "intent_partial":
                     part = row["partial"]
                     self.publishes.append({"type": "publish", "contract": part["contract"], "subject": part["subject"],
