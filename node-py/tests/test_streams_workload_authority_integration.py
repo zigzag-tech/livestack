@@ -156,6 +156,47 @@ class WorkloadAuthorityIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decisions[0]["request"]["owner"], "caller-a")
         self.assertEqual(decisions[0]["request"]["attempt_id"], assignment["attempt_id"])
 
+    async def test_pump_cannot_dispatch_a_submit_while_its_initial_partial_is_in_flight(self):
+        self.blobs.put("caller-a", hashlib.sha256(INPUT).hexdigest(), len(INPUT), io.BytesIO(INPUT))
+        ref = self.reference(json.dumps(self.request()).encode())
+        authority = self.runtime.workload
+        publish = authority.publish
+        entered, release, pumping = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        async def delayed_publish(partial):
+            if partial["subject"]["intent_id"] == "intent-overlap" and partial["body"]["status"] == "submitted":
+                entered.set()
+                await release.wait()
+            return await publish(partial)
+
+        async def overlap_pump():
+            pumping.set()
+            return await authority.pump()
+
+        authority.publish = delayed_publish
+        submit = asyncio.create_task(self.submit("intent-overlap", ref))
+        pump = None
+        try:
+            await asyncio.wait_for(entered.wait(), 2)
+            pump = asyncio.create_task(overlap_pump())
+            await asyncio.wait_for(pumping.wait(), 2)
+            # An unfenced pump can hand off the durable-but-unfinished submit
+            # while its source publication awaits an ingress acknowledgement.
+            await asyncio.wait({pump}, timeout=0.1)
+            release.set()
+            first = await asyncio.wait_for(submit, 3)
+            await asyncio.wait_for(pump, 3)
+            self.assertEqual(first["body"]["status"], "admitted")
+            rows = [p["partial"] for p in self.ingress.publishes
+                    if p["contract"] == CONTRACT and p["subject"].get("intent_id") == "intent-overlap"]
+            self.assertEqual([p["body"]["status"] for p in rows], ["submitted", "admitted"])
+            self.assertEqual([p["seq"] for p in rows], [1, 2])
+            self.assertEqual(self.counts(), (1, 0), "overlapping pump must not duplicate real admission")
+        finally:
+            release.set()
+            await asyncio.gather(submit, *([pump] if pump is not None else []), return_exceptions=True)
+            authority.publish = publish
+
     async def test_strict_reference_and_handler_refusals_are_attributed_without_jobs(self):
         self.blobs.put("caller-a", hashlib.sha256(INPUT).hexdigest(), len(INPUT), io.BytesIO(INPUT))
         cases = []
