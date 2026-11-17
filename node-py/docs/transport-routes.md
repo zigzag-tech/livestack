@@ -14,6 +14,11 @@ a patch for one consumer; keep application, handler, host and region names out o
 2. **General**: any object movement uses a `RouteSet`; `InputTransfer` is just the first user.
 3. **Robust**: if a route fails, try another; resume, never restart; remember what works
    toward which peer (health is per route per peer, with a circuit breaker).
+   Object transfers keep independent read and write health under the peer's
+   `/get` and `/put` keys: an authority refusing new bytes with HTTP 507 can
+   still serve already-admitted inputs. There are at most two health rows per
+   route and authority peer. Successful reads do not reset the write circuit;
+   route slots and same-direction circuit limits remain shared and unchanged.
 4. **Cost-aware**: routes declare `free | metered | expensive`; policy decides whether an
    expensive route is `never`, a `last_resort` (default) or `allow`ed. Budgets are enforced
    where the bytes pass (the relay) and surface as "unavailable", not as failures.
