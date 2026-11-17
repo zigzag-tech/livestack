@@ -62,6 +62,14 @@ def main():
     enable = commands.add_parser('enable', help='let a worker take work again')
     enable.add_argument('worker'); enable.add_argument('--owner'); enable.add_argument('--reason', default='')
     enable.add_argument('--if-generation', type=int); enable.add_argument('--force', action='store_true')
+    host_hold = commands.add_parser('host-hold', help='hold a physical host out of new placements, '
+                                    'with no expiry, until its owner releases it')
+    host_release = commands.add_parser('host-release', help='let a held host take new placements again')
+    for host_command in (host_hold, host_release):
+        host_command.add_argument('host'); host_command.add_argument('--owner')
+        host_command.add_argument('--reason', required=True)
+        host_command.add_argument('--if-generation', type=int); host_command.add_argument('--force', action='store_true')
+    commands.add_parser('host-health', help='which hosts are held, by whom, why')
     claims = commands.add_parser('claims', help='who holds which worker, until when')
     claims.add_argument('--export-authority-json', action='store_true',
                         help='print {worker: claim_enabled} in the authority.json principal field form')
@@ -139,6 +147,14 @@ def main():
                 else:
                     body['until'] = args.until
             result = client.request(f'claims/{args.worker}/{args.operation}', body)
+        elif args.operation in ('host-hold', 'host-release'):
+            body = {k: v for k, v in dict(
+                owner=args.owner or os.environ.get('LIVESTACK_CLAIM_OWNER') or f'cli:{getpass.getuser()}',
+                reason=args.reason, if_generation=args.if_generation, force=args.force or None).items()
+                if v is not None}
+            result = client.request(f"hosts/{args.host}/health/{args.operation.split('-')[1]}", body)
+        elif args.operation == 'host-health':
+            result = client.request('hosts/health')
         elif args.operation == 'claims':
             result = client.request('claims')
             if args.export_authority_json:

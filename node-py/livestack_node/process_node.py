@@ -32,6 +32,35 @@ HOP_HEADERS = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authoriz
 log = logging.getLogger('livestack.process_node')
 
 
+def host_health_hold(path):
+    """This host's durable health gate as a refusal reason, or None when eligible.
+
+    Same file and the same fail-closed rules as livestack_node/host_health.py (kept stdlib and
+    self-contained here because the facade is installed standalone): absent or `"state":
+    "eligible"` admits; `"held"`, unreadable or malformed refuses. Read per call, so writing the
+    file takes the node out of routing (`ready` false) with no restart, and nothing a capacity
+    change or reboot does can clear it."""
+    try:
+        with open(path, 'rb') as handle:
+            raw = handle.read(4097)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        return f'host health file unreadable: {type(error).__name__}'
+    if len(raw) > 4096:
+        return 'host health file exceeds 4 KiB'
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        return 'host health file is not JSON'
+    if not isinstance(doc, dict) or doc.get('state') not in ('held', 'eligible'):
+        return "host health file has no state 'held' or 'eligible'"
+    if doc['state'] == 'eligible':
+        return None
+    reason = doc.get('reason') if isinstance(doc.get('reason'), str) else ''
+    return ('host health held: ' + (reason or 'held (no reason given)'))[:240]
+
+
 class ProcessNode:
     def __init__(self, config):
         self.config = copy.deepcopy(config)
@@ -232,8 +261,15 @@ class ProcessNode:
         return self.active or bool(self.leases) or any(
             r.get('busy') for r in self.last_child_report.get('units', []))
 
+    def hold(self):
+        """Why this node must admit nothing now: the operator's static `admission_hold`, else the
+        host's durable health gate. None admits."""
+        return self.config.get('admission_hold') or host_health_hold(
+            self.config.get('host_health_file') or os.environ.get('LIVESTACK_HOST_HEALTH_FILE')
+            or '/etc/harmony/host-health.json')
+
     async def warm(self, unit, headers=None, budget=None):
-        if self.config.get('admission_hold'):raise HTTPException(503,self.config['admission_hold'])
+        if (hold := self.hold()):raise HTTPException(503,hold)
         if unit not in self.rows:
             raise HTTPException(400, 'unknown managed unit')
         async with self.lock:
@@ -352,7 +388,7 @@ class ProcessNode:
         """Admit one request; returns the hold token to hand to `finish`.
 
         `owner` is the task whose end ends the request (default: the caller's)."""
-        if self.config.get('admission_hold'):raise HTTPException(503,self.config['admission_hold'])
+        if (hold := self.hold()):raise HTTPException(503,hold)
         # Crucially outside self.lock: the broker dispatches /model/warm back
         # to this listener before acknowledging the grant.
         began = time.monotonic()
@@ -467,12 +503,13 @@ class ProcessNode:
     async def capability(self):
         report=await self.residence()
         busy=await self.device_busy()
+        hold=self.hold()
         return dict(kind=self.config['kind'],host_id=self.config['host_id'],node_id=self.config['node_id'],
                     device_id=self.config['device_id'],device_candidates=[self.config['device_id']],
                     region=self.config.get('region'),units=list(self.rows),resident=sorted(self.resident),
                     identity={'state':'present'},
-                    ready=not bool(self.config.get('admission_hold')) and not busy,
-                    detail=self.config.get('admission_hold') or busy or 'Harmony process-managed provider',
+                    ready=not hold and not busy,
+                    detail=hold or busy or 'Harmony process-managed provider',
                     # Explicit, so a ranker never has to parse `detail`: a node
                     # whose device an exclusive lease holds cannot LOAD either,
                     # so it is not a "cold" candidate.
@@ -544,7 +581,7 @@ def create_app(node):
         body={'status':'ok' if not node.last_error else 'degraded','managed':True,
               'manager':{'resident':c['resident'],'idle_seconds':node.config.get('idle_seconds',60)},
               'worker':c['worker']}
-        if not c['ready'] and not node.config.get('admission_hold'):
+        if not c['ready'] and not node.hold():
             # Not 200: a prober that reads /health must not rank a node that
             # would refuse every session ahead of one that would serve it.
             from fastapi.responses import JSONResponse

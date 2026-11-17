@@ -258,10 +258,17 @@ def host_view(value) -> dict:
     """
     keys = {"memory_total_bytes", "memory_available_bytes", "memory_reserve_bytes",
             "swap_in_bytes_per_second", "psi", "attempts", "services"}
-    if not isinstance(value, dict) or set(value) != keys:
+    # `boot_id` (optional): the kernel boot the readings were taken in. Placement treats a report
+    # from an older boot than the host's newest as stale capacity (a reboot invalidates it).
+    if not isinstance(value, dict) or not keys <= set(value) <= keys | {"boot_id"}:
         raise WorkloadError("invalid host report")
+    boot_id = value.get("boot_id")
+    if boot_id is not None and (not isinstance(boot_id, str) or not re.fullmatch(r"[0-9a-f-]{8,64}", boot_id)):
+        raise WorkloadError("invalid host report boot_id")
     out = {k: _number(value[k], k) for k in ("memory_total_bytes", "memory_available_bytes",
                                               "memory_reserve_bytes")}
+    if boot_id is not None:
+        out["boot_id"] = boot_id
     out["swap_in_bytes_per_second"] = _number(value["swap_in_bytes_per_second"], "swap_in", nullable=True)
     psi = value["psi"]
     windows = {"some_avg10", "some_avg60", "full_avg10", "full_avg60"}

@@ -34,6 +34,7 @@ from .planner import (
 from .membership import MIA, MembershipPolicy, PeerRoster, RosterFull, probe_interval
 from .ledger import Candidate, Decision, JsonlLedger
 from .device_leases import DeviceLeaseStore
+from .host_health import HostHealthFile
 
 
 class _UnitTelemetry:
@@ -403,6 +404,11 @@ class HostBroker:
         # special case in the planner.
         self.hosted_available: Dict[str, bool] = {}
         self.device_holds: Dict[str, str] = {}
+        # This HOST's durable health gate (host_health.py): while held, every
+        # local device is held — never a placement, eviction or warm target —
+        # whatever RAM or VRAM it measures. A file, so a restart, a reboot or a
+        # capacity change cannot lift it; read per plan, so no restart applies it.
+        self.host_health = HostHealthFile()
         # Kinds no peer will ever report (e.g. "build" on a peerless BUILD-host
         # broker). Without them, admit() for such a kind defers "unknown kind".
         self.extra_units: Dict[str, Unit] = dict(extra_units or {})
@@ -539,8 +545,10 @@ class HostBroker:
 
     def _resolve_devices(self, discovered: dict,
                          measured_caps: Optional[Mapping[str, Mapping[str, float]]] = None) -> list:
+        host_held = self.host_health.read()["held"]
         if self.devices is not None:
-            return self.devices
+            # Hosted backends are not this host's memory; a held host keeps them.
+            return [d for d in self.devices if d.hosted] if host_held else self.devices
         measured_caps = measured_caps or {}
         out = []
         for did, hid in sorted(discovered.items()):
@@ -548,7 +556,7 @@ class HostBroker:
             # placement, eviction or warm target. Dropped from the world, so
             # nothing else has to know it exists (placements a peer still reports
             # on it are already ignored for an unknown device).
-            if self.device_holds.get(did) or self.device_config.get(did, {}).get("hold"):
+            if host_held or self.device_holds.get(did) or self.device_config.get(did, {}).get("hold"):
                 continue
             # Capacity precedence: explicit device_config (operator intent) > MEASURED
             # (the device's real total / recommended working set) > default guess. So a
@@ -2262,6 +2270,9 @@ class HostBroker:
                                         if k.endswith(":")}}
                       if pol else None),
             "vantage_host": self.host_id,
+            # Only the vantage host's own gate is known here; a peer host's
+            # nodes state theirs (`ready` false, `detail` naming the hold).
+            "vantage_host_health": self.host_health.read(),
             "device_leases": self.exclusive_store.active(),
             "hosts": {
                 h: ({"nodes": sorted(n, key=lambda r: r["peer"])}
