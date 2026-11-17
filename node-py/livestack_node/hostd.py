@@ -676,6 +676,7 @@ def build_app(broker: HostBroker):
         return {"peers": out, "membership": broker.membership_snapshot(),
                 "last_evicted_at": state["last_evicted_at"], "hosted": hosted,
                 "host_id": broker.host_id,
+                "host_health": broker.host_health.read(),
                 "meshlink": meshlink_runtime.probe(),
                 "links": {k: round(v, 1) for k, v in broker.link_ms.items()},
                 "counters": counters}

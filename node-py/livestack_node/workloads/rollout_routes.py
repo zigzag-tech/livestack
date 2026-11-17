@@ -37,10 +37,29 @@ def route(server, principal, method, parts, body):
     if parts == ['workers'] and method == 'GET' and principal.role == 'rollout':
         from . import roster  # the reconciler reads the same roster callers and admins do
         return True, roster.build(server.store, server.principals)
-    if not parts or parts[0] not in ('claims', 'reload', 'rollout'):
+    if not parts or parts[0] not in ('claims', 'reload', 'rollout', 'hosts'):
         return NOT_HANDLED
     operator, writer = principal.role == 'admin', principal.role in ('admin', 'rollout')
     reader = principal.role in ('admin', 'rollout', 'caller')
+    if parts[0] == 'hosts':
+        # Durable host health (host_health.py). Holding is an operator act; the reconciler may HOLD
+        # (taking a host out is always safe) but never release, and never force.
+        if method == 'GET' and reader and parts == ['hosts', 'health']:
+            return True, server.host_health.listing()
+        if method == 'GET' and reader and len(parts) == 3 and parts[2] == 'health':
+            row = server.host_health.get(parts[1])
+            if row is None:
+                raise WorkloadError('no health row for this host', 404)
+            return True, row
+        if method == 'POST' and len(parts) == 4 and parts[2] == 'health' and parts[3] in ('hold', 'release'):
+            if not (operator or (writer and parts[3] == 'hold')):
+                raise WorkloadError('host release requires an admin principal', 403)
+            if body.get('force') and not operator:
+                raise WorkloadError('force requires an admin principal', 403)
+            action = server.host_health.hold if parts[3] == 'hold' else server.host_health.release
+            return True, action(parts[1], owner=body.get('owner') or principal.id, reason=body.get('reason', ''),
+                                if_generation=body.get('if_generation'), force=bool(body.get('force')))
+        raise WorkloadError('unknown hosts route', 404)
     if parts[0] == 'claims':
         if method == 'GET' and reader and parts == ['claims']:
             return True, server.claims.listing()

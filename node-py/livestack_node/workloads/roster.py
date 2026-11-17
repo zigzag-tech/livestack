@@ -14,7 +14,7 @@ named, not inferred from a missing row.
 """
 import json
 
-from . import claims, rollout
+from . import claims, host_health, rollout
 from .placement import _cpu_claim, charged_need
 
 QUEUE_LIMIT = 50
@@ -69,7 +69,9 @@ def _reasons(entry, fresh_seconds):
     reasons = []
     if not entry['connected']:
         return [f"silent_{int(entry['last_seen_age_s'])}s_over_{int(fresh_seconds)}s_freshness"]
-    if entry['claim_enabled'] is False:
+    if entry.get('host_health'):
+        reasons.append(f"host_health_held by {entry['host_health']['owner']}: {entry['host_health']['reason']}")
+    elif entry['claim_enabled'] is False:
         reasons.append('draining: claim_enabled=false')
     if not entry['ready']:
         reasons.append('worker_reports_not_ready')
@@ -349,6 +351,7 @@ def build(store, principals):
                           (store.limits.workers,)).fetchall()
         claim_rows = {r['worker']: r for r in db.execute('SELECT * FROM worker_claims')}
         withheld = claims.draining(db, now, {p.id: p for p in principals})
+        held = host_health.held_hosts(db)
         running = db.execute(
             "SELECT a.worker, a.job, a.created, a.expires, j.spec FROM attempts a JOIN jobs j ON a.job=j.id "
             "WHERE a.state='running' ORDER BY a.created").fetchall()
@@ -377,6 +380,8 @@ def build(store, principals):
             connected=connected, last_seen_age_s=age,
             claim_enabled=(worker not in withheld) if (principal or worker in claim_rows) else None,
             drain=claims.describe(claim_rows.get(worker), now),
+            host_health=held.get(principal.host if principal else row['host']),
+            host_boot_id=(report.get('host') or {}).get('boot_id'),
             ready=bool(row['ready']) if row else False,
             state='offline' if not connected else ('running' if runs.get(worker) else 'idle'),
             running=runs.get(worker, []),

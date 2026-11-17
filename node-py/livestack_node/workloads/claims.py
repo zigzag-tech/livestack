@@ -265,9 +265,16 @@ def draining(db, now, principals=None):
     started through the authority, and tests)."""
     rows = {r['worker']: r for r in db.execute('SELECT worker,enabled,expires_at,needs_operator FROM worker_claims')}
     out = {w for w, r in rows.items() if _live_drain(r, now)}
+    # A held host (host_health.py) withholds every worker on it, registered or not. Its own code is
+    # reported by placement; here it only has to be impossible to miss for every other reader.
+    held = {r['host'] for r in db.execute("SELECT host FROM host_health WHERE state='held'")}
+    if held:
+        out |= {r['id'] for r in db.execute(
+            f"SELECT id FROM workers WHERE host IN ({','.join('?' for _ in held)})", tuple(held))}
     for principal in (principals or {}).values() if isinstance(principals, dict) else (principals or ()):
-        if getattr(principal, 'role', None) == 'worker' and principal.worker not in rows \
-                and not principal.claim_enabled:
+        if getattr(principal, 'role', None) != 'worker':
+            continue
+        if getattr(principal, 'host', None) in held or (principal.worker not in rows and not principal.claim_enabled):
             out.add(principal.worker)
     return out
 

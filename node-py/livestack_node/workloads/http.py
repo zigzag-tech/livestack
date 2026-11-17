@@ -14,7 +14,7 @@ import threading
 from urllib.parse import parse_qs, urlparse
 
 from .model import WorkloadError, encode, name
-from . import claims, reload_status, rollout, roster, rollout_routes, provenance
+from . import claims, host_health, reload_status, rollout, roster, rollout_routes, provenance
 from .blobs import BlobStore
 from .job_changes import job_changes
 from .handler_registry import HandlerReleaseRegistry
@@ -172,6 +172,7 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
         self.claims = claims.Claims(store, claims.ActionLedger(
             __import__('pathlib').Path(store.path).parent/'rollout-actions.jsonl', clock=store.clock))
         self.rollout = rollout.RolloutState(store, self.claims.ledger)
+        self.host_health = host_health.HostHealth(store, self.claims.ledger)
         self.reload_status = reload_status.ReloadStatus()
         # The store enforces per-principal caps in placement and submission.
         store.bind_principals(self.principals)
