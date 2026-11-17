@@ -144,3 +144,34 @@ CREATE TABLE IF NOT EXISTS scopes(
   PRIMARY KEY(owner, key)
 );
 CREATE INDEX IF NOT EXISTS scopes_lease ON scopes(state, lease_expires);
+
+-- record_build enforces 4096 rows and a 30-day age window.
+CREATE TABLE IF NOT EXISTS build_history(
+  id INTEGER PRIMARY KEY,
+  profile TEXT NOT NULL,
+  host TEXT NOT NULL,
+  attempt TEXT NOT NULL UNIQUE,
+  seconds REAL NOT NULL CHECK(seconds > 0),
+  at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS build_history_profile ON build_history(profile, host, id);
+
+-- Registration and sweep enforce 4096 live grants, each expiring within 24 h.
+CREATE TABLE IF NOT EXISTS local_artifacts(
+  handle TEXT PRIMARY KEY,
+  job TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  attempt TEXT NOT NULL REFERENCES attempts(id) ON DELETE CASCADE,
+  digest TEXT NOT NULL,
+  expires REAL NOT NULL,
+  body TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS local_artifacts_job ON local_artifacts(job, digest);
+
+-- Explicit read handoffs: 4096 jobs / 16384 objects, <=24h, enforced on grant.
+CREATE TABLE IF NOT EXISTS shared_jobs(
+ job TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+ recipient TEXT NOT NULL, expires REAL NOT NULL, PRIMARY KEY(job,recipient));
+CREATE TABLE IF NOT EXISTS shared_objects(
+ owner TEXT NOT NULL, recipient TEXT NOT NULL, digest TEXT NOT NULL,
+ expires REAL NOT NULL, PRIMARY KEY(owner,recipient,digest));
+CREATE INDEX IF NOT EXISTS shared_objects_reader ON shared_objects(recipient,digest,expires);

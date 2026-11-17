@@ -77,6 +77,9 @@ class WorkloadClient:
 
     def submit(self, request):
         request = stamp(request)
+        if isinstance(request, dict) and ('delivery' in request or 'resource_profile' in request):
+            if (self.capabilities().get('build_delivery') or {}).get('version') != 1:
+                raise WorkloadError('build_delivery_unsupported: authority capability is unavailable', 409)
         if isinstance(request, dict) and request.get('version') in (3, 4) and request.get('environment') is not None:
             capabilities = self.capabilities()
             environment = capabilities.get('environments') or {}

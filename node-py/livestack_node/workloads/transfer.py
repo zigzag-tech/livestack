@@ -38,12 +38,13 @@ class InputTransfer:
     """
 
     def __init__(self, client, *, max_bytes=2*1024**3, relay=None, relay_key=None, relay_parallel=4,
-                 routes=None, region=None, cross_region=None, doors=None, authority_parallel=1):
+                 routes=None, region=None, cross_region=None, doors=None, authority_parallel=1, local_artifacts=None):
         if (relay is None) != (relay_key is None):
             raise ValueError('relay and relay_key are configured together')
         if doors is not None and relay is not None:
             raise ValueError('configure either relay or doors, not both')
         self.client = client
+        self.local_artifacts = local_artifacts
         self.max_bytes = max_bytes
         self.relay = relay
         self.relay_key = relay_key
@@ -155,7 +156,7 @@ class InputTransfer:
             return route.upload(source, digest, size, ctx)
         return self._run('put', size, attempt)
 
-    def get(self, digest, destination, *, assignment=None):
+    def get(self, digest, destination, *, assignment=None, job_id=None):
         digest = BlobStore.digest(digest)
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -163,6 +164,22 @@ class InputTransfer:
             if file_digest(destination) == digest:
                 return destination
             raise WorkloadError('cached object has wrong digest', 409)
+        if job_id is not None:
+            try:
+                reference = self.client.request('jobs/'+job_id+'/local-artifacts/'+digest)
+            except WorkloadError as error:
+                if error.status != 404:
+                    raise
+            else:
+                if self.local_artifacts is None:
+                    raise WorkloadError('local_artifact_unavailable: consumer cache is not configured', 409)
+                from .local_artifacts import LocalArtifactStore
+                config = self.local_artifacts
+                cache = LocalArtifactStore(config['root'], config['host'], config['store'], create=False)
+                if reference['digest'] != digest or reference['size'] > self.max_bytes:
+                    raise WorkloadError('local artifact exceeds requested identity or transfer bound', 409)
+                logging.info('artifact delivery: verified same-host handoff digest=%s job=%s', digest, job_id)
+                return cache.copy(reference, destination)
         fd, temporary = tempfile.mkstemp(prefix='.download-', dir=destination.parent)
         try:
             with os.fdopen(fd, 'r+b') as out:

@@ -12,6 +12,7 @@ import math
 WINDOW = 50
 MIN_SAMPLES = 5
 MAX_AGE_SECONDS = 30*86400
+MAX_ROWS = 64 * WINDOW * 8  # bounds caller-selected resource-profile cardinality too
 SUGGEST_MARGIN = 1.15  # named in the warning text; never applied automatically
 # dimension -> the `need` key it is audited against (None: no declared counterpart)
 DIMENSIONS = {'memory_nonreclaimable_peak': 'memory_bytes', 'memory_peak': 'memory_bytes',
@@ -60,6 +61,8 @@ def record(db, handler, attempt, result, outcome, need, now, window=WINDOW, max_
                    '(SELECT id FROM resource_history WHERE handler=? AND dimension=? ORDER BY at DESC,id DESC LIMIT ?))',
                    (handler, dimension, now-max_age, handler, dimension, window))
         inserted += 1
+    db.execute('DELETE FROM resource_history WHERE at<? OR id NOT IN '
+               '(SELECT id FROM resource_history ORDER BY id DESC LIMIT ?)', (now-max_age, MAX_ROWS))
     return inserted
 
 

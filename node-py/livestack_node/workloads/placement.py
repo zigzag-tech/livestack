@@ -13,7 +13,7 @@ from ..fleet_scheduler import Admit, FleetState, Job, Sla, Target, Tier, schedul
 from ..ledger import new_decision_id
 from .model import AVOID_LABEL_SIGNATURE, AVOID_LABEL_WORKER, WorkloadError, encode, failure_signature
 from .decision_records import admission_record
-from . import claims, host_health
+from . import claims, host_health, build_delivery
 
 # How long after an infrastructure failure a job refuses the worker that
 # produced it, while some other worker could ever run it. Fixed and short
@@ -265,10 +265,10 @@ def _memory_claim(db, spec, cache):
         return None
     stated = (spec.get("admit") or {}).get(MEMORY)
     if stated is None:
-        learned = _learned_peak(db, spec["handler"], cache, declared=need,
+        learned = _learned_peak(db, build_delivery.history_key(spec['handler'], spec.get('resource_profile')), cache, declared=need,
                                 min_samples=UNSTATED_ADMIT_MIN_SAMPLES)
         return need if learned is None else min(need, math.ceil(learned*UNSTATED_ADMIT_MARGIN))
-    learned = _learned_peak(db, spec["handler"], cache)
+    learned = _learned_peak(db, build_delivery.history_key(spec['handler'], spec.get('resource_profile')), cache)
     return need if learned is None else min(need, max(stated, learned))
 
 
@@ -293,7 +293,7 @@ def _cpu_claim(db, spec, cache):
         return stated
     if spec.get("admit") is not None:
         return None  # an admit that omits cpu charges no cpu at all
-    learned = _learned_peak(db, spec["handler"], cache, declared=need, min_samples=UNSTATED_ADMIT_MIN_SAMPLES,
+    learned = _learned_peak(db, build_delivery.history_key(spec['handler'], spec.get('resource_profile')), cache, declared=need, min_samples=UNSTATED_ADMIT_MIN_SAMPLES,
                             dimensions=("cpu_peak_cores",))
     if learned is None:
         return need
@@ -375,6 +375,7 @@ def _avoided(db, row, now):
 def place(db, now, limits, principals=None, compilation_policy=None, *, only_job_id=None,
           emitter_id=None):
     decision_records = []
+    build_history = build_delivery.read_history(db, now)
     draining = claims.draining(db, now, principals)  # claims store, else the principal's claim_enabled
     held = host_health.held_hosts(db)  # durable; no capacity report or reboot clears it
     workers = db.execute("SELECT * FROM workers WHERE ready=1 AND seen>? ORDER BY id",
@@ -652,6 +653,11 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                 for w, r in fresh)
         for w in compatible:
             report = reports[w["id"]]
+            if any(value > report.get('execution_limit', {}).get(key, float('inf'))
+                   for key, value in spec['need'].items()):
+                rejected.append(dict(worker=w['id'], code='execution_budget_exceeded',
+                                     reason='execution limit exceeds the worker offered budget'))
+                continue
             profile_compatibility = report.get('environment_profiles', {}).get(environment_profile) \
                 if environment_handle else None
             replica_compatibility = next((r['compatibility'] for r in replicas_by_handle.get(environment_handle, [])
@@ -760,6 +766,9 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                   created_at=row["created"], sla=Sla.BATCH, deadline=spec["deadline"],
                   est_duration_s=spec["estimate_seconds"], selector=spec["selector"],
                   locality_host=locality)
+        ranked_targets, delivery_evidence = build_delivery.rank_targets(targets, reports, spec, build_history, now)
+        if delivery_evidence:
+            targets = ranked_targets[:1]
         decision_id = new_decision_id(now)
         plan = schedule(FleetState(targets=tuple(targets), jobs=(job,), now=now),
                         decision_ids={job.id: decision_id})
@@ -844,6 +853,7 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                 locality_host=locality, job_id=row['id'], attempt_id=aid,
                 environment_handle=environment_handle,
                 environment_generation=environment_generation,
+                delivery_evidence=delivery_evidence,
                 filtered_candidates=[
                     {'worker': worker['id'], 'host': worker['host'], 'reason': reason}
                     for worker in workers if (reason := filtered.get(worker['id']))

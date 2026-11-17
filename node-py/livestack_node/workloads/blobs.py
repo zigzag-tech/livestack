@@ -409,6 +409,11 @@ class BlobStore:
             row = db.execute("SELECT b.size FROM blobs b JOIN blob_owners o USING(digest) "
                              "WHERE b.digest=? AND o.owner=? AND b.state='ready'", (digest,owner)).fetchone()
             if not row:
+                row = db.execute('SELECT b.size FROM blobs b JOIN shared_objects s USING(digest) '
+                    'JOIN blob_owners o ON o.digest=s.digest AND o.owner=s.owner '
+                    "WHERE b.digest=? AND s.recipient=? AND s.expires>? AND b.state='ready' LIMIT 1",
+                    (digest, owner, self.store.clock())).fetchone()
+            if not row:
                 raise WorkloadError('content not found', 404)
             # Open before releasing the transaction: a concurrent prune cannot
             # replace the file between permission checking and obtaining a handle.

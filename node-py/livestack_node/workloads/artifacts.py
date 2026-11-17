@@ -3,7 +3,7 @@ from .blobs import BlobStore
 from .model import WorkloadError, name
 
 
-def validate_artifacts(db, owner, result):
+def validate_artifacts(db, owner, result, *, job_id=None, attempt_id=None, now=None):
     if not isinstance(result, dict):
         raise WorkloadError('result must be an object')
     artifacts = result.get('artifacts', [])
@@ -11,7 +11,7 @@ def validate_artifacts(db, owner, result):
         raise WorkloadError('result artifacts must be a list of at most 128 objects')
     names = set()
     for artifact in artifacts:
-        if not isinstance(artifact, dict) or set(artifact) != {'name', 'digest', 'size'}:
+        if not isinstance(artifact, dict) or set(artifact) not in ({'name', 'digest', 'size'}, {'name', 'digest', 'size', 'local'}):
             raise WorkloadError('invalid artifact reference')
         key = name(artifact['name'], 'artifact name')
         digest = BlobStore.digest(artifact['digest'])
@@ -19,6 +19,10 @@ def validate_artifacts(db, owner, result):
         if key in names or isinstance(size, bool) or not isinstance(size, int) or size < 0:
             raise WorkloadError('duplicate artifact name or invalid size')
         names.add(key)
+        if 'local' in artifact:
+            from .local_artifacts import validate_reference
+            validate_reference(db, owner, artifact, job_id, attempt_id, now)
+            continue
         row = db.execute("SELECT b.size FROM blobs b JOIN blob_owners o USING(digest) "
                          "WHERE b.digest=? AND o.owner=? AND b.state='ready'", (digest,owner)).fetchone()
         if not row or row['size'] != size:

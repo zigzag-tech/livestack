@@ -17,7 +17,7 @@ import threading
 import time
 import uuid
 
-from . import causes, metrics_schema, resource_history
+from . import causes, metrics_schema, resource_history, build_delivery
 from .model import (Limits, failure_signature, WorkloadError, encode, host_view, identity, labels, name, resources,
                     RefusedAfterCommit, ScopeClosed, scope_key, scope_lease, submission)
 from .environment_receipts import validate as validate_environment_receipt
@@ -565,6 +565,8 @@ class WorkloadStore:
             lease_max_seconds=self.limits.scope_lease_max_seconds, jobs_per_scope=self.limits.scope_jobs,
             scopes_per_owner=self.limits.scopes_per_owner), environments=dict(version=1, handlers=enrolled,
                                                              forbidden_handlers=forbidden))
+        result['principal'] = owner
+        result['build_delivery'] = dict(version=1, resource_profiles=1, local_artifacts=1, read_handoff=1)
         encode(result, 8192)
         return result
 
@@ -849,9 +851,10 @@ class WorkloadStore:
             return self._job(db, jid)
 
     def get(self, owner, job_id):
+        from .shared_access import read_job
         with self.transaction() as db:
             self._expire(db, self.clock())
-            return self._job(db, job_id, owner)
+            return read_job(self, db, owner, job_id)
 
     def list_jobs(self, owner, limit=100):
         limit = max(1, min(int(limit), 20))
@@ -899,7 +902,8 @@ class WorkloadStore:
                                                           "environment_profiles", "environment_replicas", "handler_inventory",
                                                           "handler_activation_failures", "handler_gc_receipts",
                                                           "handler_platform_skips",
-                                                          "disk_unavailable", "cpu_signal", "unit"}:
+                                                          "disk_unavailable", "cpu_signal", "unit",
+                                                          "local_artifacts", "execution_limit"}:
             raise WorkloadError("invalid worker report")
         capacity, available = resources(report.get("capacity")), resources(report.get("available"))
         tags = labels(report.get("labels", {}))
@@ -913,6 +917,15 @@ class WorkloadStore:
             raise WorkloadError("invalid readiness or cleanup report")
         body = dict(capacity=capacity, available=available, labels=tags, handlers=sorted(set(handlers)),
                     ready=report["ready"])
+        if 'local_artifacts' in report:
+            if type(report['local_artifacts']) is not bool:
+                raise WorkloadError('invalid local artifact capability')
+            body['local_artifacts'] = report['local_artifacts']
+        if 'execution_limit' in report:
+            limit = resources(report['execution_limit'])
+            if any(value > capacity.get(key, 0) for key, value in limit.items()):
+                raise WorkloadError('worker execution limit exceeds offered capacity')
+            body['execution_limit'] = limit
         if 'disk_unavailable' in report:
             body['disk_unavailable'] = validate_disk_unavailable(report['disk_unavailable'])
         if 'cpu_signal' in report:
@@ -1387,7 +1400,7 @@ class WorkloadStore:
                                     env['generation'] != a['environment_generation']):
                 raise WorkloadError('environment_writer_fenced', 409)
             from .artifacts import validate_artifacts
-            validate_artifacts(db, job['owner'], result)
+            validate_artifacts(db, job['owner'], result, job_id=job['id'], attempt_id=attempt_id, now=now)
             # complete is sent only AFTER owned processes/containers are stopped.
             db.execute("UPDATE attempts SET state='ended',result=? WHERE id=?", (raw, attempt_id))
             if env is not None:
@@ -1415,9 +1428,10 @@ class WorkloadStore:
             reason = success_terminal["reason"] if success_terminal is not None else None
             job_raw, cause = raw, None
             # a["need"] is the ADMIT vector (placement charge); the enforced caps are the job's own need.
-            resource_history.record(db, job["spec"]["handler"], attempt_id, result,
+            resource_history.record(db, build_delivery.history_key(job["spec"]["handler"], job["spec"].get('resource_profile')), attempt_id, result,
                                     "resource_limit" if outcome == "infrastructure" and breach else outcome,
                                     job["spec"]["need"], now, max_age=self.resource_history_max_age, admit=a["need"])
+            build_delivery.record_build(db, job['spec'], a['host'], attempt_id, result, outcome, now)
             if outcome == "infrastructure" and breach:
                 # The attempt hit a limit the JOB declared (its own need is the
                 # execution cap). A retry runs the same spec into the same cap,
@@ -1816,6 +1830,10 @@ class WorkloadStore:
         return doomed
 
     def _prune(self, db, now):
+        db.execute('DELETE FROM shared_jobs WHERE expires<=?', (now,))
+        db.execute('DELETE FROM shared_objects WHERE expires<=?', (now,))
+        db.execute('DELETE FROM local_artifacts WHERE expires<=?', (now,))
+        db.execute('DELETE FROM build_history WHERE at<?', (now-build_delivery.HISTORY_AGE,))
         if self.limits.terminal_seconds is None and self.retention_tiers is None:
             return  # Missing destructive window fails closed; submission still enforces a hard cap.
         for row in self._prune_candidates(db, now):

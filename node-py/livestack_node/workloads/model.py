@@ -508,7 +508,8 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     allowed = {"version", "key", "handler", "input_digest", "input_objects", "payload", "need",
                "admit", "selector", "labels", "estimate_seconds", "deadline", "priority",
                "locality_host", "retain", "environment", "handler_release", "scope",
-               "max_queue_seconds", "progress_deadline_seconds", "max_attempt_seconds"}
+               "max_queue_seconds", "progress_deadline_seconds", "max_attempt_seconds",
+               "resource_profile", "delivery"}
     version = value.get("version")
     # Version 4 is version 3 plus work scopes and the opt-in deadlines; an authority that predates it
     # refuses a scoped submission loudly instead of ignoring the scope.
@@ -564,6 +565,13 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
                   selector=labels(value.get("selector", {})), estimate_seconds=estimate,
                   deadline=deadline, locality_host=value.get("locality_host"),
                   retain=value.get("retain", False))
+    if 'resource_profile' in value:
+        result['resource_profile'] = name(value['resource_profile'], 'resource profile')
+    if 'delivery' in value:
+        from .build_delivery import validate_delivery
+        result['delivery'] = validate_delivery(value['delivery'])
+        if 'resource_profile' not in result:
+            raise WorkloadError('build delivery requires a resource profile')
     if "handler_release" in value:
         release = value['handler_release']
         if not isinstance(release, dict) or release.get('selection') not in ('default', 'exact'):
