@@ -115,6 +115,16 @@ CREATE TABLE IF NOT EXISTS worker_claims(
   file_value INTEGER,
   updated_at REAL NOT NULL
 );
+-- Durable host health (host_health.py): a physical host held out of NEW placements until its
+-- owner releases it. No expiry by design; register/boot/capacity changes never touch it.
+CREATE TABLE IF NOT EXISTS host_health(
+  host TEXT PRIMARY KEY,
+  state TEXT NOT NULL CHECK(state IN ('held','eligible')),
+  generation INTEGER NOT NULL,
+  owner TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  updated_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS rollout_state(
   key TEXT PRIMARY KEY,
   generation INTEGER NOT NULL,

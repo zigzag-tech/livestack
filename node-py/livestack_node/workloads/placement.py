@@ -13,7 +13,7 @@ from ..fleet_scheduler import Admit, FleetState, Job, Sla, Target, Tier, schedul
 from ..ledger import new_decision_id
 from .model import AVOID_LABEL_SIGNATURE, AVOID_LABEL_WORKER, WorkloadError, encode, failure_signature
 from .decision_records import admission_record
-from . import claims
+from . import claims, host_health
 
 # How long after an infrastructure failure a job refuses the worker that
 # produced it, while some other worker could ever run it. Fixed and short
@@ -192,7 +192,8 @@ BLOCKER_CODES = frozenset((
     "capability_absent", "memory_insufficient", "host_pressure", "principal_cap", "avoiding_failure_signature",
     "worker_busy", "environment_busy", "environment_affinity_wait", "environment_not_found",
     "environment_profile_not_installed", "compilation_refused", "disk_reserve", "disk_insufficient",
-    "resources_insufficient", "held_for_higher_priority", "deadline_unfit", "no_workers"))
+    "resources_insufficient", "held_for_higher_priority", "deadline_unfit", "no_workers",
+    "host_health_held", "host_capacity_stale"))
 PLACEMENT_BYTES = 4096
 PLACEMENT_REFRESH_SECONDS = 60
 
@@ -375,9 +376,22 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
           emitter_id=None):
     decision_records = []
     draining = claims.draining(db, now, principals)  # claims store, else the principal's claim_enabled
+    held = host_health.held_hosts(db)  # durable; no capacity report or reboot clears it
     workers = db.execute("SELECT * FROM workers WHERE ready=1 AND seen>? ORDER BY id",
                          (now-limits.fresh_seconds,)).fetchall()
     reports = {w["id"]: json.loads(w["report"]) for w in workers}
+    # A host that rebooted invalidates every report measured before it: a sibling identity that has
+    # not re-registered yet still offers the old boot's RAM inside the freshness window. The newest
+    # host block names the current kernel boot; a report from another boot is stale capacity.
+    newest_boot, newest_seen = {}, {}
+    for w in workers:
+        boot_id = (reports[w["id"]].get("host") or {}).get("boot_id")
+        if boot_id is not None and w["seen"] >= newest_seen.get(w["host"], float("-inf")):
+            newest_boot[w["host"]], newest_seen[w["host"]] = boot_id, w["seen"]
+    # Only a report that NAMES another boot is judged: one without `boot_id` (an older worker
+    # release, mid-roll) cannot be, and refusing it would stall every rolling worker upgrade.
+    stale_capacity = {w["id"] for w in workers if w["host"] in newest_boot
+                      and (reports[w["id"]].get("host") or {}).get("boot_id") not in (None, newest_boot[w["host"]])}
     # A cleanup hold keeps charging its host until the worker acknowledges it,
     # deliberately: the attempt's containers may still be consuming that host
     # (see the store module docstring). But a worker that is GONE never
@@ -490,6 +504,8 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
     views, seen = {}, {}
     for w in workers:
         view = reports[w["id"]].get("host")
+        if w["id"] in stale_capacity:
+            continue
         if view is not None and w["seen"] >= seen.get(w["host"], float("-inf")):
             views[w["host"]], seen[w["host"]] = view, w["seen"]
     learned = {}
@@ -649,6 +665,15 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                     all(report['capacity'].get(k, 0) >= n for k, n in admit.items()) and
                     not avoided.get(w['id'])):
                 warm_wait_hosts.add(w['host'])
+            if w['host'] in held:
+                rejected.append({'worker': w['id'], 'host': w['host'], 'code': 'host_health_held',
+                                 'reason': f"host_health_held by {held[w['host']]['owner']}: "
+                                           f"{held[w['host']]['reason']}"[:240]})
+                continue
+            if w['id'] in stale_capacity:
+                rejected.append({'worker': w['id'], 'host': w['host'], 'code': 'host_capacity_stale',
+                                 'reason': 'host_capacity_stale: report predates the host\'s current boot'})
+                continue
             if w['id'] in draining:
                 rejected.append({'worker': w['id'], 'reason': 'worker_draining', 'code': 'worker_draining'})
                 continue
@@ -799,7 +824,11 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
             if worker['id'] in scheduler_candidates or worker['id'] in filtered:
                 continue
             report = reports[worker['id']]
-            if worker['id'] in draining:
+            if worker['host'] in held:
+                reason = 'host health held'
+            elif worker['id'] in stale_capacity:
+                reason = 'host capacity stale'
+            elif worker['id'] in draining:
                 reason = 'worker draining'
             elif spec['handler'] not in report['handlers']:
                 reason = 'handler not advertised'
