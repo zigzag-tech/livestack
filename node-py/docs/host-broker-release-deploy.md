@@ -69,6 +69,7 @@ releases get it by backport, each on its own base, as with the hold-leak roll:
 |---|---|---|---|
 | node-a `polyasr` | device-busy-dd5e748c (= main's file at dd5e748c) | 49879c50917cbe01 | main's diff applied |
 | node-d `polyasr` | e2fb4bbace24e144 | 4d15a23c331a22bd (installed, NOT switched) | `scripts/backport-process-node-read-while-admitting.py` |
+| node-b `io.zigzag.polyasr` (launchd agent) | stale-resident-6f5f19fe | 2eab98b6829a011c | same script |
 
 - node-a was switched 2026-11-17 07:54 UTC, idle (`in_flight 0`). Drop-in backup
   `polyasr.service.d/zz-harmony-process-node.conf.bak-before-read-while-admitting-20261117T075406Z`.
@@ -80,7 +81,16 @@ releases get it by backport, each on its own base, as with the hold-leak roll:
   `/etc/systemd/system/zz-harmony-process-node.conf.polyasr.before-read-while-admitting-20261117T075148Z`.
   To switch it once authorized, change `ExecStart` in `polyasr.service.d/zz-harmony-process-node.conf` to
   `releases/4d15a23c331a22bd/process_node.py`, then `daemon-reload` and restart `polyasr` while idle.
-- Roll back one unit: restore its backup drop-in, `daemon-reload`, restart it.
+- node-b was switched 2026-11-17 08:31 UTC, idle, by editing `ProgramArguments` in
+  `~/Library/LaunchAgents/io.zigzag.polyasr.plist` and reloading it with `launchctl bootout` + `bootstrap gui/<uid>`.
+  Backup: `~/Library/LaunchAgents/backups/io.zigzag.polyasr.plist.before-read-while-admitting-20261117T083128Z`.
+  Live check from node-e, cold worker, 10 s clip: first ack at 70 ms, all 126 chunks acked, stop at 10.26 s,
+  final 1.1 s after the stop. The router still places China sessions on the Mac. (The Mac's MLX Qwen drops the
+  last ~1.5 s of this artificial four-times-repeated clip on WARM runs too, so that is the engine, not this change.)
+- node-d: 管家 authorized the restart (sweep 16:22 CST) but kept the sudo guard, so the admin commands are
+  in `/home/ubuntu/handoffs/polyasr-zt0-restart-20261117.md` on node-d and node-a.
+- Roll back one unit: restore its backup drop-in, `daemon-reload`, restart it. On the Mac: restore the plist,
+  then `launchctl bootout gui/$(id -u)/io.zigzag.polyasr` and `launchctl bootstrap gui/$(id -u) <plist>`.
 
 ## Deployed: process-node holds cannot leak (commit 91b49f4b), 2026-11-03
 
