@@ -58,6 +58,30 @@ no boot id and are released at the first start, so deploy while `GET /status` sh
 **Not yet deployed: xc-tower-ubuntu needs a hostd deploy** (only `device_leases.py` changed; cherry-pick onto the
 pinned release as above and run `tests/test_device_leases.py`).
 
+## Deployed: a door that said `started` keeps reading while it admits (PR #35), 2026-11-17
+
+Fault (2026-11-17 14:05 CST, owner dictation in Nanjing via `hto-histo-na`). The facade answered `started`,
+then blocked in admission while a cold worker loaded and read nothing. The client's 25-chunk unacked window
+filled, 25 of 134 chunks left the phone, and the session fell back to batch. The fix is main `c56be04c`. Deployed
+releases get it by backport, each on its own base, as with the hold-leak roll:
+
+| host / unit | base release | new release | how |
+|---|---|---|---|
+| xc-tower-ubuntu `polyasr` | device-busy-dd5e748c (= main's file at dd5e748c) | 49879c50917cbe01 | main's diff applied |
+| zz-tower0 `polyasr` | e2fb4bbace24e144 | 4d15a23c331a22bd (installed, NOT switched) | `scripts/backport-process-node-read-while-admitting.py` |
+
+- xc-tower-ubuntu was switched 2026-11-17 07:54 UTC, idle (`in_flight 0`). Drop-in backup
+  `polyasr.service.d/zz-harmony-process-node.conf.bak-before-read-while-admitting-20261117T075406Z`.
+  Live check, cold worker, 10 s clip at real-time pace: all 126 chunks acked during the load and the stop
+  was sent at 10.6 s with `ack_seq` 125. The same test on the unpatched zz-tower0 got its first ack at
+  10.8 s (worker up) and could only finish sending at 19.4 s.
+- zz-tower0 is NOT switched. `/etc/sudoers.d/zzzz-shutdown-loop-guard` (2026-11-16, "remove only when 管家
+  authorizes") denies `systemctl`. The release dir is in place, and the drop-in edit was reverted from
+  `/etc/systemd/system/zz-harmony-process-node.conf.polyasr.before-read-while-admitting-20261117T075148Z`.
+  To switch it once authorized, change `ExecStart` in `polyasr.service.d/zz-harmony-process-node.conf` to
+  `releases/4d15a23c331a22bd/process_node.py`, then `daemon-reload` and restart `polyasr` while idle.
+- Roll back one unit: restore its backup drop-in, `daemon-reload`, restart it.
+
 ## Deployed: process-node holds cannot leak (commit 91b49f4b), 2026-11-03
 
 Not a hostd change: the fix is in the process-node facade, `process_node.py`. Facade releases live in
