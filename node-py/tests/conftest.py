@@ -25,6 +25,12 @@ os.environ.setdefault("LIVESTACK_HOST_LEDGER_DIR",
 os.environ.setdefault("HARMONY_UNIT_LOADS_FILE", os.path.join(
     _tempfile.mkdtemp(prefix="livestack-test-unit-loads-"), "unit-loads.jsonl"))
 
+# And for the host health gate (host_health.py): on a held host (zz-leaky, 2026-11-17) the real
+# /etc/harmony/host-health.json would hold every test broker's devices. A path that does not exist
+# is "eligible"; tests of the gate point it at their own file.
+os.environ.setdefault("LIVESTACK_HOST_HEALTH_FILE", os.path.join(
+    _tempfile.mkdtemp(prefix="livestack-test-host-health-"), "host-health.json"))
+
 # And for hostd's ledger dir (decision ledgers and the exclusive-device lease
 # store, device-exclusivity.sqlite3): seven test files build the hostd app
 # without setting it, so on a production host they opened the LIVE lease store.

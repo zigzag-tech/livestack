@@ -60,6 +60,18 @@ def meminfo(proc='/proc'):
     return {'total': fields['MemTotal'], 'available': fields['MemAvailable']}
 
 
+def boot_id(proc='/proc'):
+    """The kernel's boot id, or None where there is none (not Linux, unreadable).
+
+    A report carries it so a reader can tell readings of THIS boot from ones taken before a
+    reboot. RAM size can change across one (a DIMM swap), and capacity must be re-measured."""
+    try:
+        value = Path(proc, 'sys', 'kernel', 'random', 'boot_id').read_text().strip()
+    except OSError:
+        return None
+    return value if re.fullmatch(r'[0-9a-f-]{8,64}', value) else None
+
+
 def psi(resource, proc='/proc'):
     """{'some_avg10', 'some_avg60', 'full_avg10', 'full_avg60'} or None without PSI.
 
@@ -245,7 +257,7 @@ class HostView:
 
     def sample(self):
         memory = meminfo(self.proc)
-        return {
+        sample = {
             'memory_total_bytes': memory['total'],
             'memory_available_bytes': memory['available'],
             'memory_reserve_bytes': self.reserve_bytes,
@@ -254,3 +266,7 @@ class HostView:
             'attempts': self._attempts(),
             'services': self._services(),
         }
+        boot = boot_id(self.proc)
+        if boot is not None:
+            sample['boot_id'] = boot
+        return sample
