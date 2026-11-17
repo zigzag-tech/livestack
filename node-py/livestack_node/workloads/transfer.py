@@ -31,6 +31,10 @@ class InputTransfer:
     already on disk, an upload at the offset the authority already holds, so a route
     failure never restarts the object and never stores a byte twice. The route trail
     of the latest transfer is `last_trail`; counters are `routes.counters`.
+
+    Health is independent for reads and writes. A full authority may refuse new
+    artifacts while still serving already-admitted input objects. At most two
+    health rows are retained per route and authority peer.
     """
 
     def __init__(self, client, *, max_bytes=2*1024**3, relay=None, relay_key=None, relay_parallel=4,
@@ -103,24 +107,25 @@ class InputTransfer:
     def _run(self, direction, size, attempt, on_failure=None):
         """Try routes best-first until one completes; `attempt(route, ctx)` moves bytes."""
         trail, last = Trail(), None
-        for route in self.routes.candidates(direction, size, trail, peer=self.peer, region=self.region):
+        peer = f'{self.peer}/{direction}'
+        for route in self.routes.candidates(direction, size, trail, peer=peer, region=self.region):
             ctx, started = {}, time.monotonic()
             fell_through = any(e['outcome'] in ('failed', 'skipped') for e in trail.events)
             if not route.slots.acquire(timeout=self.routes.policy.slot_wait_seconds):
                 last = WorkloadError('route %s saturated' % route.name, 429)
-                self.routes.record(route, self.peer, False, trail, error=last)
+                self.routes.record(route, peer, False, trail, error=last)
                 continue
             try:
                 result = attempt(route, ctx)
             except (OSError, ValueError, WorkloadError) as error:
                 last = error
-                self.routes.record(route, self.peer, False, trail, nbytes=ctx.get('moved', 0),
+                self.routes.record(route, peer, False, trail, nbytes=ctx.get('moved', 0),
                                    seconds=time.monotonic()-started, error=error,
                                    detail=self._detail(route, ctx, fell_through))
                 if on_failure:
                     on_failure(route, error)
             else:
-                self.routes.record(route, self.peer, True, trail, nbytes=ctx.get('moved', 0),
+                self.routes.record(route, peer, True, trail, nbytes=ctx.get('moved', 0),
                                    seconds=time.monotonic()-started, detail=self._detail(route, ctx, fell_through))
                 self._finish(trail)
                 return result
