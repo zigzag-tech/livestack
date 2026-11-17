@@ -363,6 +363,91 @@ uvicorn.run(app,host='127.0.0.1',port=int(sys.argv[1]),log_level='error')
                     self.assertEqual(frames(ws),{'type':'final','text':'private context','frames':1})
         await asyncio.to_thread(request)
 
+    async def test_audio_sent_during_a_cold_admission_is_acked_held_and_replayed(self):
+        """2026-11-17 14:05 CST via hto-histo-na: the door said `started`, then
+        stopped reading while zz-tower0 cold-loaded for 12 s. The client's unacked
+        window filled at 25 chunks and most of the utterance never left the phone.
+        The door must keep accepting what it said it would: ack each frame into the
+        resume cache, hold `stop`, and replay both once the worker attaches."""
+        script=Path(self.cfg['argv'][1])
+        script.write_text("""
+import json,sys
+from fastapi import FastAPI,WebSocket
+import uvicorn
+app=FastAPI();resident=[]
+@app.get('/livestack/residence')
+def residence():return {'units':[{'kind':'asr','resident':'asr'in resident}]}
+@app.post('/livestack/model/warm')
+def warm():resident.append('asr');return {'resident':resident}
+@app.post('/livestack/model/evict')
+def evict():resident.clear();return {'resident':resident}
+@app.websocket('/ws/transcribe')
+async def ws(w:WebSocket):
+ await w.accept();setup=await w.receive_json();await w.send_json({'type':'started'})
+ frames={}
+ try:
+  while True:
+   message=await w.receive()
+   if message['type']=='websocket.disconnect':return
+   if message.get('bytes'):
+    frame=message['bytes'];frames[int.from_bytes(frame[8:16],'big')]=frame
+   elif json.loads(message['text'])['type']=='stop':
+    await w.send_json({'type':'final','text':'ok','frames':len(frames),'last':max(frames)});return
+ except Exception:pass
+uvicorn.run(app,host='127.0.0.1',port=int(sys.argv[1]),log_level='error')
+""")
+        attached={}
+        async def admit(unit):
+            await asyncio.sleep(1.0)          # a cold load: the person is already talking
+            await self.node.warm(unit)
+            attached['at']=__import__('time').monotonic()
+            return {'granted':True,'device_id':self.cfg['device_id']}
+        self.node.admit=admit
+        def frame(seq):return b'BASR'+bytes([1,1,0,0])+seq.to_bytes(8,'big')+b'audio'
+        got={'acks':[],'final':None,'ack_times':[]}
+        def request():
+            import time as _t
+            with TestClient(create_app(self.node)) as c:
+                with c.websocket_connect('/ws/transcribe') as ws:
+                    ws.send_json({'type':'start','protocol':1,'sessionId':'cold','control':2})
+                    self.assertEqual(ws.receive_json()['type'],'started')
+                    for seq in range(30):ws.send_bytes(frame(seq))
+                    ws.send_json({'type':'stop','stopId':'s1'})
+                    while True:
+                        m=ws.receive_json()
+                        if m['type']=='ack':got['acks'].append(m['ackSeq']);got['ack_times'].append(_t.monotonic())
+                        elif m['type']=='final':got['final']=m;return
+        await asyncio.to_thread(request)
+        self.assertEqual(got['final'],{'type':'final','text':'ok','frames':30,'last':29},
+                         'every frame sent during the load reached the worker, then the stop')
+        self.assertEqual(max(got['acks']),29)
+        self.assertEqual(got['acks'],sorted(got['acks']),'acks only move forward')
+        self.assertLess(got['ack_times'][0],attached['at'],'acks arrive while the worker is still loading')
+        self.assertEqual(self.node.active,0)
+
+    async def test_a_disconnect_during_a_cold_admission_releases_the_grant(self):
+        async def admit(unit):
+            await asyncio.sleep(.8)
+            await self.node.warm(unit)
+            return {'granted':True,'device_id':self.cfg['device_id']}
+        self.node.admit=admit
+        frame=b'BASR'+bytes([1,1,0,0])+(0).to_bytes(8,'big')+b'audio'
+        def request():
+            with TestClient(create_app(self.node)) as c:
+                with c.websocket_connect('/ws/transcribe') as ws:
+                    ws.send_json({'type':'start','protocol':1,'sessionId':'gone'})
+                    ws.receive_json()
+                    ws.send_bytes(frame)
+                    self.assertEqual(ws.receive_json()['ackSeq'],0)
+                    # Close from the client side and let the handler see it:
+                    # TestClient (unlike uvicorn) cancels a handler still running
+                    # when the context exits, which would hide the path under test.
+                    ws.close()
+                    import time as _t;_t.sleep(.5)
+        await asyncio.to_thread(request)
+        await asyncio.sleep(1.2)
+        self.assertEqual(self.node.active,0,'a socket that left during the load must not pin the device')
+
     # --- warm admission: the load overlaps with the person starting to speak ---
 
     async def test_admission_starts_at_session_start_and_reports_warming(self):

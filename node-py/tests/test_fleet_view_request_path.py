@@ -28,8 +28,11 @@ def slow_broker(monkeypatch):
     calls = []
 
     def slow_get(url, timeout=None):
-        calls.append(url)
-        time.sleep(2.0)
+        # Count only this test's broker: refresher threads left running by other
+        # router tests also call httpx.get, for their own URLs.
+        if url.startswith(URL):
+            calls.append(url)
+            time.sleep(2.0)
         raise RuntimeError("broker timed out")
 
     monkeypatch.setattr(fleet_route.httpx, "get", slow_get)

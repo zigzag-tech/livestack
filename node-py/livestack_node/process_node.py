@@ -783,8 +783,53 @@ def create_app(node):
                 first=message
             if admission is None:
                 admission=asyncio.create_task(admit_and_report())
+            # While admission (and a cold worker's load) runs, the door KEEPS
+            # READING. `started` above told the client to stream; a door that then
+            # stops reading accepts a session it does not serve -- the client fills
+            # its unacked window (25 chunks, ~2 s), stalls, and gives up with most
+            # of the utterance never sent (2026-11-17 14:05 CST, via hto-histo-na:
+            # 25 of 134 chunks left the phone, zz-tower0 attached 12 s later).
+            # Audio frames go into the session's bounded resume cache and are
+            # acked through the highest contiguous seq; anything else is held and
+            # forwarded in order once the worker is attached.
+            held=[]
+            acked=-1
+            pending=None
+
+            async def take(message):
+                nonlocal acked
+                frame=message.get('bytes')
+                if (session is not None and frame is not None and frame[:4]==b'BASR'
+                        and len(frame)>=16):
+                    node.cache_frame(session,frame)
+                    while acked+1 in session['frames']:acked+=1
+                    if acked>=0:
+                        await send_json({'type':'ack','protocol':1,'sessionId':start_id,'ackSeq':acked})
+                    return
+                if len(held)>=256:raise RuntimeError('ASR held control capacity exceeded')
+                held.append(message)
+
+            await take(first)
+            while not admission.done():
+                if pending is None:pending=asyncio.create_task(ws.receive())
+                done,_=await asyncio.wait({admission,pending},return_when=asyncio.FIRST_COMPLETED)
+                if pending in done:
+                    message=pending.result();pending=None
+                    if message['type']=='websocket.disconnect':
+                        admission.cancel()
+                        try:await admission
+                        except asyncio.CancelledError:
+                            # Ours, from the cancel above; re-raise only if this
+                            # handler itself is being cancelled.
+                            if asyncio.current_task().cancelling():raise
+                        except Exception:pass
+                        await release()
+                        return
+                    await take(message)
             await admission
-            if not hold:return
+            if not hold:
+                if pending is not None:pending.cancel()
+                return
             try:
                 backend_url=node.worker_url.replace('http://','ws://')+'/'+path
                 if ws.url.query:backend_url+='?'+ws.url.query
@@ -805,8 +850,11 @@ def create_app(node):
                             await backend.send(message['bytes'])
                         elif message.get('text') is not None:await backend.send(message['text'])
                     async def upstream():
+                        nonlocal pending
                         while True:
-                            message=await ws.receive()
+                            if pending is not None:
+                                message=await pending;pending=None
+                            else:message=await ws.receive()
                             if message['type']=='websocket.disconnect':return
                             await send(message)
                     async def downstream():
@@ -825,7 +873,9 @@ def create_app(node):
                     try:
                         if session is not None:
                             for seq,frame in sorted(tuple(session['frames'].items())):await backend.send(frame)
-                        await send(first)
+                        # `first` and every frame read during admission are in the
+                        # replay above; the held control messages follow in order.
+                        for message in held:await send(message)
                         tasks.append(asyncio.create_task(upstream()))
                         done,_=await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
                         for task in done:task.result()
