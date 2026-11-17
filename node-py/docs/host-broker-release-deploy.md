@@ -68,7 +68,7 @@ releases get it by backport, each on its own base, as with the hold-leak roll:
 | host / unit | base release | new release | how |
 |---|---|---|---|
 | xc-tower-ubuntu `polyasr` | device-busy-dd5e748c (= main's file at dd5e748c) | 49879c50917cbe01 | main's diff applied |
-| zz-tower0 `polyasr` | e2fb4bbace24e144 | 4d15a23c331a22bd (installed, NOT switched) | `scripts/backport-process-node-read-while-admitting.py` |
+| zz-tower0 `polyasr` | e2fb4bbace24e144 | 4d15a23c331a22bd | `scripts/backport-process-node-read-while-admitting.py` |
 | xc-mac-studio `io.zigzag.polyasr` (launchd agent) | stale-resident-6f5f19fe | 2eab98b6829a011c | same script |
 
 - xc-tower-ubuntu was switched 2026-11-17 07:54 UTC, idle (`in_flight 0`). Drop-in backup
@@ -76,19 +76,20 @@ releases get it by backport, each on its own base, as with the hold-leak roll:
   Live check, cold worker, 10 s clip at real-time pace: all 126 chunks acked during the load and the stop
   was sent at 10.6 s with `ack_seq` 125. The same test on the unpatched zz-tower0 got its first ack at
   10.8 s (worker up) and could only finish sending at 19.4 s.
-- zz-tower0 is NOT switched. `/etc/sudoers.d/zzzz-shutdown-loop-guard` (2026-11-16, "remove only when 管家
-  authorizes") denies `systemctl`. The release dir is in place, and the drop-in edit was reverted from
-  `/etc/systemd/system/zz-harmony-process-node.conf.polyasr.before-read-while-admitting-20261117T075148Z`.
-  To switch it once authorized, change `ExecStart` in `polyasr.service.d/zz-harmony-process-node.conf` to
-  `releases/4d15a23c331a22bd/process_node.py`, then `daemon-reload` and restart `polyasr` while idle.
+- zz-tower0 was switched 2026-11-17 09:07 UTC by 管家 from an admin hop.
+  `/etc/sudoers.d/zzzz-shutdown-loop-guard` denies the agent `systemctl` and was left in place. It was idle
+  (`in_flight 0`, no client on :8766). Drop-in backup
+  `/etc/systemd/system/zz-harmony-process-node.conf.polyasr.before-read-while-admitting-20261117T090708Z`.
+  Commands: `/home/ubuntu/handoffs/polyasr-zt0-restart-20261117.md`.
+  Live check from zz-tower2, cold worker, same 10 s clip: first ack at 102 ms, all 126 chunks acked, stop at
+  10.29 s (`ack_seq` 125), final at 10.73 s with the full text. Before, on the unpatched release: first ack at
+  10.78 s, stop at 19.44 s, final at 19.89 s.
 - xc-mac-studio was switched 2026-11-17 08:31 UTC, idle, by editing `ProgramArguments` in
   `~/Library/LaunchAgents/io.zigzag.polyasr.plist` and reloading it with `launchctl bootout` + `bootstrap gui/<uid>`.
   Backup: `~/Library/LaunchAgents/backups/io.zigzag.polyasr.plist.before-read-while-admitting-20261117T083128Z`.
   Live check from zz-tower2, cold worker, 10 s clip: first ack at 70 ms, all 126 chunks acked, stop at 10.26 s,
   final 1.1 s after the stop. The router still places China sessions on the Mac. (The Mac's MLX Qwen drops the
   last ~1.5 s of this artificial four-times-repeated clip on WARM runs too, so that is the engine, not this change.)
-- zz-tower0: 管家 authorized the restart (sweep 16:22 CST) but kept the sudo guard, so the admin commands are
-  in `/home/ubuntu/handoffs/polyasr-zt0-restart-20261117.md` on zz-tower0 and xc-tower-ubuntu.
 - Roll back one unit: restore its backup drop-in, `daemon-reload`, restart it. On the Mac: restore the plist,
   then `launchctl bootout gui/$(id -u)/io.zigzag.polyasr` and `launchctl bootstrap gui/$(id -u) <plist>`.
 
