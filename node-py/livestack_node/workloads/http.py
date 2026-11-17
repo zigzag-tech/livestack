@@ -520,6 +520,23 @@ class Handler(BaseHTTPRequestHandler):
             return self.server.handler_registry.activate(principal.id, body,
                 rollback=parts[-1] == 'rollback')
         if principal.role in ('caller', 'admin'):
+            if ((parts == ['shares', 'objects'] or
+                    len(parts) == 3 and parts[0] == 'jobs' and parts[2] == 'share') and method == 'POST'):
+                from . import shared_access
+                object_grant = parts == ['shares', 'objects']
+                allowed = {'recipient', 'ttl_seconds'} | ({'digests'} if object_grant else set())
+                if set(body)-allowed or 'recipient' not in body or not any(
+                        p.id == body['recipient'] and p.role in ('caller', 'admin')
+                        for p in self.server.principals):
+                    raise WorkloadError('invalid read handoff recipient or fields')
+                if object_grant:
+                    return shared_access.grant_objects(store, principal.id, body['recipient'],
+                        body.get('digests'), body.get('ttl_seconds', 3600))
+                return shared_access.grant_job(store, principal.id, parts[1],
+                    body['recipient'], body.get('ttl_seconds', 3600))
+            if len(parts) == 4 and parts[0] == 'jobs' and parts[2] == 'local-artifacts' and method == 'GET':
+                from .local_artifacts import read_reference
+                return read_reference(store, principal.id, parts[1], parts[3])
             if parts == ['workers'] and method == 'GET':
                 # Read-only roster: the fleet as this authority sees it (roster.py).
                 return dict(roster.build(store, self.server.principals),
@@ -576,6 +593,11 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 3 and parts[0] == 'scopes' and parts[2] == 'renew' and method == 'POST':
                 return store.renew_scope(principal.id, parts[1], (body or {}).get('lease_seconds'))
         if principal.role == 'worker' and method == 'POST':
+            if parts == ['worker', 'local-artifacts']:
+                self._remote_boot(principal, body)
+                from .local_artifacts import register
+                return register(store, principal.worker, body['boot'], body['attempt_id'],
+                                body['fence'], body['artifact'])
             if parts == ['worker', 'status'] and principal.remote_job is not None:
                 return store.remote_job_status(principal.remote_provider, principal.remote_job)
             if parts == ['worker', 'report']:

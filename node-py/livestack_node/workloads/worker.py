@@ -118,6 +118,16 @@ class WorkloadWorker:
         self.config = config
         self.watchdog = None  # set by worker_service.main; tests and one-shot callers run without
         self.client = WorkloadClient(config['authority'], config['token'], edge_key=config.get('edge_key'))
+        self.local_artifacts = None
+        if config.get('local_artifacts') is not None:
+            from .local_artifacts import LocalArtifactStore
+            local = config['local_artifacts']
+            if not isinstance(local, dict) or set(local) - {'root', 'host', 'store', 'max_bytes', 'max_handles', 'ttl_seconds'}:
+                raise WorkloadError('invalid local artifact worker configuration')
+            if (self.client.capabilities().get('build_delivery') or {}).get('local_artifacts') != 1:
+                raise WorkloadError('local_artifact_unsupported: authority capability is unavailable', 409)
+            self.local_artifacts = LocalArtifactStore(local['root'], local['host'], local['store'],
+                **{k: v for k, v in local.items() if k in ('max_bytes', 'max_handles', 'ttl_seconds')})
         self.journal = WorkerJournal(config['state_dir'])
         # macOS has no cgroups: launchd jobs plus wrapper-enforced limits
         # (openspec/changes/apple-host-compilation).
@@ -665,6 +675,11 @@ class WorkloadWorker:
         unavailable = self._disk_unavailable(capacity, filesystem_free)
         report = dict(capacity=capacity, available=available, labels=self.config.get('labels', {}),
                       handlers=list(self.handlers), ready=not self.config.get('observe_only', False))
+        if getattr(self, 'local_artifacts', None) is not None:
+            self.local_artifacts.sweep()
+            report['local_artifacts'] = True
+        if self.config.get('execution_limit') is not None:
+            report['execution_limit'] = self.config['execution_limit']
         report['handler_inventory'] = self.handler_inventory
         if unavailable is not None:
             report['disk_unavailable'] = unavailable
@@ -1099,7 +1114,19 @@ class WorkloadWorker:
             output_transfer = (self.output_transfers[assignment['spec']['handler']]
                               if item in declared else self.transfer)
             try:
-                artifact = output_transfer.put(path, assignment=assignment)
+                if path.stat().st_size > output_transfer.max_bytes:
+                    raise ArtifactTooLarge(path.stat().st_size, output_transfer.max_bytes)
+                if (getattr(self, 'local_artifacts', None) is not None and path.stat().st_size >= 1024**2 and
+                        (assignment['spec'].get('delivery') or {}).get('consumer_host') == self.local_artifacts.host):
+                    reference = self.local_artifacts.put(path, assignment)
+                    bound = self.client.request('worker/local-artifacts', dict(boot=self.boot,
+                        attempt_id=assignment['attempt_id'], fence=assignment['fence'], artifact=dict(name=item,
+                        digest=reference['digest'], size=reference['size'], store=reference['store'],
+                        handle=reference['handle'], ttl_seconds=self.local_artifacts.ttl_seconds)))
+                    self.local_artifacts.bind(bound)
+                    artifact = dict(digest=bound['digest'], size=bound['size'], local=bound)
+                else:
+                    artifact = output_transfer.put(path, assignment=assignment)
             except ArtifactTooLarge as error:
                 if completion['outcome'] != 'infrastructure':
                     raise
@@ -1107,7 +1134,7 @@ class WorkloadWorker:
                 # let its size turn the report itself into a failure.
                 logging.warning('infrastructure output %s not shipped: %s', item, error)
                 continue
-            if self.output_mirror:
+            if self.output_mirror and 'local' not in artifact:
                 try:
                     self.output_mirror.put(artifact['digest'], path, output_transfer.max_bytes)
                 except WorkloadError as error:

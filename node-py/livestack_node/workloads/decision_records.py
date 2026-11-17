@@ -4,7 +4,7 @@ from ..ledger import Candidate, Decision, new_decision_id
 
 def admission_record(decision, *, now, emitter_id, kind, owner, selector, locality_host,
                     job_id, attempt_id, environment_handle, environment_generation,
-                    filtered_candidates=()):
+                    filtered_candidates=(), delivery_evidence=None):
     """Build the audit row from the exact scheduler snapshot used for admission."""
     policy_rows = {row['id']: row for row in decision['rows']}
     policy_candidates = decision['candidates']
@@ -32,6 +32,17 @@ def admission_record(decision, *, now, emitter_id, kind, owner, selector, locali
             inputs_at=now,
             detail={**features, 'score': row.get('score'), 'eligible': row['eligible']},
         ))
+    for rank, evidence in enumerate(delivery_evidence or (), 1):
+        candidate_id = evidence['worker']
+        if candidate_id in seen:
+            for candidate in candidates:
+                if candidate.id == candidate_id:
+                    candidate.detail['delivery'] = evidence
+            continue
+        candidates.append(Candidate(id=candidate_id, host_id=evidence['host'], state='fresh', ready=True,
+                                    outcome='ranked', reason='usable-result estimate', rank=rank,
+                                    inputs_at=now, detail={'delivery': evidence}))
+        seen.add(candidate_id)
     for candidate in filtered_candidates:
         candidate_id = candidate['worker']
         if candidate_id in seen:
