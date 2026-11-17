@@ -70,6 +70,7 @@ DEFAULT_EXPECTED_TOKENS = 512
 
 _lock = threading.Lock()
 _cache: "dict[str, tuple[float, dict]]" = {}
+_refreshed: "set[str]" = set()   # URLs a start_refresher thread keeps fresh
 
 
 class Routed(NamedTuple):
@@ -127,6 +128,17 @@ def fleet_view(url: str, timeout: float = FLEET_FETCH_TIMEOUT_S, stale_max_s: "f
         hit = _cache.get(url)
         if hit and now - hit[0] < _VIEW_TTL_S:
             return hit[1]
+        refreshed = url in _refreshed
+    if refreshed:
+        # A background refresher owns this URL: the request path NEVER fetches.
+        # A synchronous GET here runs on the router's event loop and stalls
+        # every session on it -- 2026-11-17 14:05 CST, a China dictation waited
+        # 6 s between WS accept and engine choice while the zz-tower2 router
+        # fetched Vaughan's /fleet (2-9 s), and the client's 6 s handshake
+        # timeout fired. Serve the last good view, bounded by stale_max.
+        if hit and now - hit[0] <= stale_max:
+            return hit[1]
+        return None
     try:
         view = httpx.get(f"{url.rstrip('/')}/fleet", timeout=timeout).json()
         if not isinstance(view, dict) or not isinstance(view.get("hosts"), dict):
@@ -148,6 +160,8 @@ def start_refresher(url: str, every_s: float = 5.0, timeout_s: float = FLEET_FET
     audio stream. A failed refresh keeps the last good view (bounded by
     STALE_MAX_S, exactly as `fleet_view` does)."""
     stop = threading.Event()
+    with _lock:
+        _refreshed.add(url)
 
     def loop():
         while not stop.is_set():
@@ -159,6 +173,9 @@ def start_refresher(url: str, every_s: float = 5.0, timeout_s: float = FLEET_FET
             except Exception:
                 pass
             stop.wait(every_s)
+
+        with _lock:
+            _refreshed.discard(url)
 
     t = threading.Thread(target=loop, name="fleet-view-refresher", daemon=True)
     t.start()
