@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import uuid
+from types import SimpleNamespace
 
 from ..fleet_scheduler import Admit, FleetState, Job, Sla, Target, Tier, schedule
 from ..ledger import new_decision_id
@@ -372,10 +373,10 @@ def _avoided(db, row, now):
     return out
 
 
-def place(db, now, limits, principals=None, compilation_policy=None, *, only_job_id=None,
-          emitter_id=None):
-    decision_records = []
-    build_history = build_delivery.read_history(db, now)
+def _ledger(db, now, limits, principals):
+    """The fleet as placement sees it: fresh ready workers, what active attempts charge each host, and
+    each host's and worker's free figures. Shared by `place` and the capacity answer (capacity.py), so
+    both judge admission by the same model."""
     draining = claims.draining(db, now, principals)  # claims store, else the principal's claim_enabled
     held = host_health.held_hosts(db)  # durable; no capacity report or reboot clears it
     workers = db.execute("SELECT * FROM workers WHERE ready=1 AND seen>? ORDER BY id",
@@ -537,6 +538,83 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                 # per-identity ceiling; the measured host decides the rest.
                 worker_free[w["id"]][MEMORY] = reports[w["id"]]["capacity"].get(MEMORY, 0)
                 worker_room[w["id"]][MEMORY] = worker_free[w["id"]][MEMORY]
+    return SimpleNamespace(draining=draining, held=held, workers=workers, reports=reports,
+                           stale_capacity=stale_capacity, active=active, busy=busy, running=running, caps=caps,
+                           cpu_learned=cpu_learned, learned=learned, worker_free=worker_free,
+                           worker_room=worker_room, host_free=host_free, views=views, pressure=pressure,
+                           memory_terms=memory_terms)
+
+
+def admission_charge(db, spec, ledger):
+    """(stored_admit, admit, claim) for a job: the admission vector it stores, the vector every fit test,
+    hold and reservation uses (cpu replaced by the measured claim), and its memory claim on measured hosts
+    (None when no host is measured or the job declares no memory).
+
+    Admission and execution are separate quantities. `admit` is both the fit test and the reservation, so
+    admitted vectors on a host always sum within its capacity; `need` never enters placement and only caps
+    the attempt's cgroup. Omitting `admit` submits need as both, which is exactly the behavior every
+    existing caller already has."""
+    admit = spec.get("admit") or spec["need"]
+    stored_admit = admit
+    cpu_claim = _cpu_claim(db, spec, ledger.cpu_learned)
+    if cpu_claim is not None and CPU in admit:
+        admit = dict(admit, **{CPU: cpu_claim})
+    claim = _memory_claim(db, spec, ledger.learned) if ledger.views else None
+    return stored_admit, admit, claim
+
+
+def resource_refusal(w, report, admit, claim, ledger):
+    """The rejection (dict with worker/reason/code) when worker `w`'s host or own room cannot take a job
+    charged `admit`/`claim` now: memory pressure, measured memory, disk, then every other dimension.
+    None when it fits."""
+    host_free, worker_room, views = ledger.host_free, ledger.worker_room, ledger.views
+    memory_terms, pressure = ledger.memory_terms, ledger.pressure
+    reason = code = None
+    if w["host"] in pressure:
+        reason, code = pressure[w["host"]], "host_pressure"
+    elif (w["host"] in views and claim is not None and
+          min(host_free[w["host"]][MEMORY], worker_room[w["id"]].get(MEMORY, 0)) < claim):
+        t = memory_terms[w["host"]]
+        reason = (f"insufficient host memory: claim {_gib(claim)} GiB > free "
+                  f"{_gib(min(host_free[w['host']][MEMORY], worker_room[w['id']].get(MEMORY, 0)))} GiB "
+                  f"(available {_gib(t['available'])}, reserve {_gib(t['reserve'])}, "
+                  f"running attempts {_gib(t['attempts'])}, model servers {_gib(t['services'])}, "
+                  f"admitted now {_gib(t['admitted'])})")
+        code = "memory_insufficient"
+    elif (disk := _disk_refusal(w["id"], report, host_free[w["host"]].get("disk_bytes", 0),
+                                worker_room[w["id"]].get("disk_bytes", 0), admit.get("disk_bytes"))):
+        code, reason, figures = disk
+        return {"worker": w["id"], "reason": reason, "reason_code": code, "figures": figures,
+                "code": "disk_reserve" if code == "disk_reserve" else "disk_insufficient"}
+    elif any(min(host_free[w["host"]].get(k, 0), worker_room[w["id"]].get(k, 0)) < n
+             for k, n in admit.items() if not (k == MEMORY and w["host"] in views and claim is not None)):
+        # One reason for both bounds: a caller can act on neither
+        # differently, and the distinct figures are already in the
+        # worker report the refusal is recorded against.
+        reason, code = "insufficient shared host resources", "resources_insufficient"
+    return None if reason is None else {"worker": w["id"], "reason": reason, "code": code}
+
+
+def debit(host, admit, claim, ledger):
+    """Charge one admitted job to its host's free figures, so the next fit test on that host sees it."""
+    measured = host in ledger.views and claim is not None
+    for k, n in admit.items():
+        if not (k == MEMORY and measured):
+            ledger.host_free[host][k] -= n
+    if measured:
+        ledger.host_free[host][MEMORY] -= claim
+        ledger.memory_terms[host]["admitted"] += claim
+
+
+def place(db, now, limits, principals=None, compilation_policy=None, *, only_job_id=None,
+          emitter_id=None):
+    decision_records = []
+    build_history = build_delivery.read_history(db, now)
+    ledger = _ledger(db, now, limits, principals)
+    draining, held, workers, reports = ledger.draining, ledger.held, ledger.workers, ledger.reports
+    stale_capacity, busy, running, caps = ledger.stale_capacity, ledger.busy, ledger.running, ledger.caps
+    worker_free, worker_room = ledger.worker_free, ledger.worker_room
+    host_free, views, memory_terms = ledger.host_free, ledger.views, ledger.memory_terms
     # Priority is caller intent, while Harmony still owns capability/resource
     # admission and the final worker choice. Legacy persisted specs omit the
     # field and retain their original priority-zero FIFO behavior.
@@ -607,19 +685,8 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
             _wait(db, row, now, f"principal at max_running ({cap})",
                   [dict(code='principal_cap', detail=f"principal at max_running ({cap})")])
             continue
-        # Admission and execution are separate quantities. `admit` is both the
-        # fit test and the reservation, so admitted vectors on a host always sum
-        # within its capacity; `need` never enters placement and only caps the
-        # attempt's cgroup. Omitting `admit` submits need as both, which is
-        # exactly the behavior every existing caller already has.
-        admit = spec.get("admit") or spec["need"]
-        # Charged cores: the stored admission vector keeps the declaration (`stored_admit`); every
-        # fit test, hold and reservation below uses the measured claim.
-        stored_admit = admit
-        cpu_claim = _cpu_claim(db, spec, cpu_learned)
-        if cpu_claim is not None and CPU in admit:
-            admit = dict(admit, **{CPU: cpu_claim})
-        claim = _memory_claim(db, spec, learned) if views else None
+        # `admit` is the fit test and reservation; `stored_admit` the declaration the attempt stores.
+        stored_admit, admit, claim = admission_charge(db, spec, ledger)
         targets = []
         rejected = []
         handler_workers = [w for w in workers if spec["handler"] in reports[w["id"]]["handlers"]]
@@ -699,29 +766,9 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                 reason, code = "worker holds an active attempt or cleanup", "worker_busy"
             elif any(report["labels"].get(k) != v for k, v in spec["selector"].items()):
                 reason, code = "required capability absent", "capability_absent"
-            elif w["host"] in pressure:
-                reason, code = pressure[w["host"]], "host_pressure"
-            elif (w["host"] in views and claim is not None and
-                  min(host_free[w["host"]][MEMORY], worker_room[w["id"]].get(MEMORY, 0)) < claim):
-                t = memory_terms[w["host"]]
-                reason = (f"insufficient host memory: claim {_gib(claim)} GiB > free "
-                          f"{_gib(min(host_free[w['host']][MEMORY], worker_room[w['id']].get(MEMORY, 0)))} GiB "
-                          f"(available {_gib(t['available'])}, reserve {_gib(t['reserve'])}, "
-                          f"running attempts {_gib(t['attempts'])}, model servers {_gib(t['services'])}, "
-                          f"admitted now {_gib(t['admitted'])})")
-                code = "memory_insufficient"
-            elif (disk := _disk_refusal(w["id"], report, host_free[w["host"]].get("disk_bytes", 0),
-                                        worker_room[w["id"]].get("disk_bytes", 0), admit.get("disk_bytes"))):
-                code, reason, figures = disk
-                rejected.append({"worker": w["id"], "reason": reason, "reason_code": code, "figures": figures,
-                                 "code": "disk_reserve" if code == "disk_reserve" else "disk_insufficient"})
+            elif (refusal := resource_refusal(w, report, admit, claim, ledger)):
+                rejected.append(refusal)
                 continue
-            elif any(min(host_free[w["host"]].get(k, 0), worker_room[w["id"]].get(k, 0)) < n
-                     for k, n in admit.items() if not (k == MEMORY and w["host"] in views and claim is not None)):
-                # One reason for both bounds: a caller can act on neither
-                # differently, and the distinct figures are already in the
-                # worker report the refusal is recorded against.
-                reason, code = "insufficient shared host resources", "resources_insufficient"
             if reason:
                 rejected.append({"worker": w["id"], "reason": reason, "code": code})
                 continue
@@ -861,11 +908,5 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
             ))
         busy.add(chosen["id"])
         running[row["owner"]] = running.get(row["owner"], 0) + 1
-        measured = chosen["host"] in views and claim is not None
-        for k, n in admit.items():
-            if not (k == MEMORY and measured):
-                host_free[chosen["host"]][k] -= n
-        if measured:
-            host_free[chosen["host"]][MEMORY] -= claim
-            memory_terms[chosen["host"]]["admitted"] += claim
+        debit(chosen["host"], admit, claim, ledger)
     return decision_records
