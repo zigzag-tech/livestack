@@ -35,6 +35,37 @@ Both rules below are therefore enforced in `workloads/placement.py`, and ZZOPS n
 - A shrink stops new placements (`memory_insufficient`). Running attempts are never killed by a
   report.
 
+### Handler capacity (`GET /v1/workloads/handlers/<handler>/capacity`)
+
+A caller sizing its in-flight work (ZZOPS's dispatch cap) asks this route. It returns:
+
+- `ready_workers`: **seats**. Ready, fresh (`fresh_seconds`), undrained workers that serve the
+  handler. Unchanged meaning, kept for compatibility.
+- `admissible`: **jobs those seats could run at once now**. Callers should prefer it. It is the
+  handler's running attempts plus the jobs admissible now, summed over physical hosts, and never
+  more than `ready_workers`.
+- `hosts`: per host `seats`, `running`, `admissible_now`, `admissible` and `refused` (`{code: count}`,
+  the same codes placement records, e.g. `memory_insufficient`, `host_pressure`, `worker_busy`).
+- `charge`: the `admit` vector and `memory_claim_bytes` that were used. `basis` says where they came from.
+
+`workloads/capacity.py` computes `admissible` by replaying admission over the ledger `place` builds
+(`placement._ledger`). It uses the same charge (`admission_charge`), the same fit test
+(`resource_refusal`: pressure, measured memory less reserve, running claims and model-server peaks,
+disk, then the other dimensions), and the same per-host debit after each simulated admission. A second
+seat on a host therefore sees the first one's claim. Nothing is written.
+
+- The charge comes from the handler's **latest job**, through `need`/`admit` and the learned peaks.
+  With no job on record there is no declared need. Placement charges an undeclared dimension nothing
+  (it has no default vector), so each idle eligible seat counts as one job, and `basis` says so.
+- It does not model queued jobs' priority holds, release pins, environment affinity or failure
+  avoidance. Those belong to a particular job, not to capacity.
+- An error is an error (an HTTP failure). The route never answers "unlimited".
+
+This was built because of zz-whitby on 2026-11-19. It offered 7 idle `benchday.e2e.full.v1` seats
+while `harmony-llm` held about 57 of 60 GB at peak, and it took none of an 8-shard run. Its
+`admissible` is 0. Test: `tests/test_workload_admissible_capacity.py`, where the positive control
+places real jobs and checks that exactly `admissible` of them start.
+
 ### Durable host hold (`host_health` table)
 
 ```bash

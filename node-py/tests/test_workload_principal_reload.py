@@ -190,6 +190,8 @@ def test_handler_capacity_follows_ready_fresh_undrained_workers(authority):
     assert cap() == 0  # registered principal, no report yet
     authority.client(W).request('worker/report', REPORT)
     assert cap() == 1
+    answer = authority.client(A).request('handlers/test.v1/capacity')
+    assert answer['admissible'] == 1 and 'no declared need' in answer['basis']  # over real HTTP
     authority.write([caller('alice', A), worker('w1', W), worker('w2', W2, 'h2')])
     assert authority.reload()
     authority.client(W2).request('worker/report', REPORT)

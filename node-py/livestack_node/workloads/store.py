@@ -879,14 +879,22 @@ class WorkloadStore:
 
         A caller sizing its own outstanding work reads this instead of keeping a
         number in its config that goes stale whenever a worker is added or retired.
+
+        `ready_workers` counts SEATS; `admissible` (capacity.py) counts the jobs those seats could
+        run at once under placement's ledger, with a per-host breakdown and its `basis`. Callers
+        sizing concurrency should prefer `admissible`; `ready_workers` keeps its meaning.
         """
+        from .capacity import admissible
         name(handler, 'handler')
         with self.transaction() as db:
+            now = self.clock()
             rows = db.execute("SELECT id, report FROM workers WHERE ready=1 AND seen>? ORDER BY id",
-                              (self.clock()-self.limits.fresh_seconds,)).fetchall()
+                              (now-self.limits.fresh_seconds,)).fetchall()
+            answer = admissible(db, now, self.limits, self.principals, self.compilation_policy, handler,
+                                draining=draining)
         workers = sum(1 for row in rows if row['id'] not in draining
                       and handler in json.loads(row['report']).get('handlers', ()))
-        return dict(handler=handler, ready_workers=workers, fresh_seconds=self.limits.fresh_seconds)
+        return dict(answer, handler=handler, ready_workers=workers, fresh_seconds=self.limits.fresh_seconds)
 
     def register(self, worker_id, host_id, boot, report, *, cleaned=()):
         """Worker credential binds worker+host at the HTTP boundary.
