@@ -82,20 +82,31 @@ def rank_targets(targets, reports, spec, history, now):
     delivery, so the caller admits the best feasible target from this ranking.
     """
     delivery = spec.get('delivery')
-    if delivery is None:
+    if delivery is None and not spec.get('resource_profile'):
         return targets, None
     profile = history_key(spec['handler'], spec.get('resource_profile'))
-    routes = {r['host']: r for r in delivery['routes'] if 0 <= now-r['measured_at'] <= ROUTE_AGE}
     known = [v for (p, _), values in history.items() if p == profile for v in values]
     fallback = max(known) if known else spec['estimate_seconds']
+    if delivery is None:
+        # A profile without delivery intent (a release compile whose result goes to the
+        # shared store either way) ranks by measured build time alone. Until some candidate
+        # host has been measured there is nothing to rank: the scheduler decides as before.
+        # An unmeasured host is charged the slowest known build, so it is used when the
+        # measured hosts cannot take the job, and is measured from then on.
+        if not any(history.get((profile, t.host_id)) for t in targets):
+            return targets, None
+        delivery = dict(consumer_host=None, expected_output_bytes=None, routes=[])
+    routes = {r['host']: r for r in delivery['routes'] if 0 <= now-r['measured_at'] <= ROUTE_AGE}
     ranked = []
     for target in targets:
         samples = history.get((profile, target.host_id), [])
         build = statistics.median(samples) if samples else fallback
-        local = (target.host_id == delivery['consumer_host'] and
+        local = (delivery['consumer_host'] is not None and target.host_id == delivery['consumer_host'] and
                  reports[target.id].get('local_artifacts') is True)
         route = routes.get(target.host_id)
-        if local:
+        if delivery['expected_output_bytes'] is None:
+            transfer, basis = 0, 'no-delivery-intent'
+        elif local:
             transfer, basis = 0, 'same-host-verified-handoff'
         elif delivery['expected_output_bytes'] == 0:
             transfer, basis = 0, 'no-output-bytes'

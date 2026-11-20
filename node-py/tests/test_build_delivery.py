@@ -85,3 +85,59 @@ def test_invalid_delivery_and_profile_identity_changes_are_explicit(tmp_path):
     value['resource_profile'] = 'android-apk-x64'
     with pytest.raises(WorkloadError, match='different inputs'):
         store.submit('owner', value)
+
+
+def _history(store, host, seconds, attempt):
+    from livestack_node.workloads.build_delivery import history_key
+    with store.transaction() as db:
+        db.execute('INSERT INTO build_history(profile,host,attempt,seconds,at) VALUES(?,?,?,?,?)',
+                   (history_key('compile.v1', 'linux-release-arm64'), host, attempt, seconds, 999))
+
+
+def release(key):
+    # A release compile: a resource profile, no delivery intent (its result goes to the shared store).
+    return dict(version=1, key=key, handler='compile.v1', input_digest='a'*64,
+                need={'cpu': 2}, estimate_seconds=600, resource_profile='linux-release-arm64')
+
+
+def test_profile_without_delivery_prefers_the_host_with_the_faster_measured_build(tmp_path):
+    store = store_at(tmp_path)
+    worker(store, 'a-slow', 'old-box')
+    worker(store, 'z-fast', 'new-box')
+    _history(store, 'old-box', 900, 'old-1')
+    _history(store, 'new-box', 400, 'new-1')
+    job = store.submit('owner', release('one'))
+    assert store.claim('a-slow', 'boot') is None
+    assert store.claim('z-fast', 'boot')['job_id'] == job['id']
+
+
+def test_profile_without_delivery_falls_back_when_the_faster_host_is_full(tmp_path):
+    store = store_at(tmp_path)
+    worker(store, 'a-slow', 'old-box')
+    worker(store, 'z-fast', 'new-box', available=0)
+    _history(store, 'old-box', 900, 'old-1')
+    _history(store, 'new-box', 400, 'new-1')
+    job = store.submit('owner', release('one'))
+    assert store.claim('a-slow', 'boot')['job_id'] == job['id']
+
+
+def test_unmeasured_host_is_charged_the_slowest_known_build(tmp_path):
+    store = store_at(tmp_path)
+    worker(store, 'a-unmeasured', 'spare-box')
+    worker(store, 'm-slow', 'old-box')
+    worker(store, 'z-fast', 'new-box')
+    _history(store, 'old-box', 900, 'old-1')
+    _history(store, 'new-box', 400, 'new-1')
+    job = store.submit('owner', release('one'))
+    assert store.claim('a-unmeasured', 'boot') is None
+    assert store.claim('z-fast', 'boot')['job_id'] == job['id']
+
+
+def test_profile_without_any_history_keeps_scheduler_order(tmp_path):
+    store = store_at(tmp_path)
+    worker(store, 'a-first', 'box-a')
+    worker(store, 'z-second', 'box-b')
+    job = store.submit('owner', release('one'))
+    # Nothing measured: the scheduler's own choice stands, exactly as for a job with no profile.
+    assert store.claim('z-second', 'boot') is None
+    assert store.claim('a-first', 'boot')['job_id'] == job['id']
