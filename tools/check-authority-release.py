@@ -245,7 +245,10 @@ def live_checks(node_py, python, timeout):
             return result('job', False, f'claim_http_{status}_assignment_{"missing" if not assignment else "wrong_job"}')
         status, done = api.call('worker/complete', tokens['worker'], dict(
             boot='check-boot', attempt_id=assignment['attempt_id'], fence=assignment['fence'],
-            input_digest=digest, outcome='succeeded', result={'ok': True}))
+            input_digest=digest, outcome='succeeded',
+            # A success needs the worker's clean-exit receipt (store.complete -> causes.success_metadata,
+            # since #17); without it the authority answers 409 successful_completion_receipt_invalid.
+            result={'exit_code': 0, 'resources': {'oom_kill': 0, 'pids_max_events': 0}}))
         status2, final = api.call('jobs/' + job['id'], tokens['caller'])
         ok = status == 200 and status2 == 200 and final.get('state') == 'succeeded'
         return result('job', ok, None if ok else f'complete_http_{status}_readback_http_{status2}_state_{final.get("state")}')
