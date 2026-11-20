@@ -195,10 +195,10 @@ fi
 # (macOS scans a freshly built venv on its first launch; 60+ s is not unusual)
 for _ in $(seq 1 120); do
   h="$(curl -fsS --max-time 3 http://127.0.0.1:8188/health 2>/dev/null || true)"
-  [[ "$h" == *"\"revision\":\"$REV\""* ]] && break
+  [[ "$h" == *"\"revision\":\"$REV"* ]] && break
   sleep 1
 done
-[[ "$h" == *"\"revision\":\"$REV\""* ]] || { echo "FAILED: router not healthy at $REV: $h" >&2; exit 1; }
+[[ "$h" == *"\"revision\":\"$REV"* ]] || { echo "FAILED: router not healthy at $REV: $h" >&2; exit 1; }
 echo "${changed[*]:-no changes}" > "$SHARE/.last-run"
 echo "CHANGED: ${changed[*]:-no changes}"
 REMOTE
@@ -208,10 +208,11 @@ dry_run() { cat <<'REMOTE'
 # A freshly started regional fleet broker needs a few seconds to learn its nodes.
 for _ in 1 2 3 4 5 6 7 8; do
   r="$(curl -fsS --max-time 15 -X POST http://127.0.0.1:8188/harmony/route -H 'content-type: application/json' \
-    -d '{"model":"require:class=llm","messages":[{"role":"user","content":"x"}]}')" || { echo "dry run: router unreachable"; exit 1; }
+    -d '{"model":"require:class=llm","messages":[{"role":"user","content":"x"}]}')" || r=""   # a just-started router answers 503 until its fleet view loads
   printf '%s' "$r" | grep -q '"chosen":"http' && break
   sleep 3
 done
+[ -n "$r" ] || { echo "dry run: router unreachable"; exit 1; }
 printf '%s' "$r" | python3 -c '
 import json,sys
 d=json.load(sys.stdin); f=d["fleet"]

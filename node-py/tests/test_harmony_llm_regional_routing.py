@@ -71,6 +71,16 @@ def test_expect_says_whether_the_chosen_target_was_warm_in_the_ranking():
     assert fleet_route.choose(cold, {"class": "llm"}, [], "http://x:1")[1]["expect"] == "cold"
 
 
+def test_a_preference_does_not_turn_a_cold_target_warm():
+    # The ranker prefixes "preference=…; " to a reason when the caller sent a
+    # prefer clause; a cold target routed warm is refused route_stale everywhere.
+    speed = [{"metric": "llm.decode_tok_s", "direction": "max"}]
+    cold = _view(_node("g", "na", False))
+    assert fleet_route.choose(cold, {"class": "llm"}, speed, "http://x:1")[1]["expect"] == "cold"
+    warm = _view(_node("g", "na", True))
+    assert fleet_route.choose(warm, {"class": "llm"}, speed, "http://x:1")[1]["expect"] == "warm"
+
+
 def test_the_record_names_regions_and_filters_a_forbidden_warm_node():
     view = _view(_node("na-gpu", "na", True), _node("cn-gpu", "cn", False))
     tgt, rec = fleet_route.choose(view, {"class": "llm"}, [], "http://x:1", regions=["cn"])

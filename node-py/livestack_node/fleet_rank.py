@@ -634,7 +634,9 @@ def rank(view: dict, kind: str, vantage: str = "direct",
         receipt = preference_receipts.get(t.target_id, [])
         if receipt:
             decisive = next((p for p in receipt if p.get("matched") or p.get("comparable")), None)
-            why = f"preference={decisive or 'no opinion'}; " + why
+            # Appended, not prefixed: a cold target's reason must keep starting
+            # with "cold" — fleet_route.choose reads that to set expect=cold.
+            why += f"; preference={decisive or 'no opinion'}"
         out.append(RankedTarget(**{**t.__dict__, "preferences": receipt,
                                    "finish_s": est["finish_s"] if est else None,
                                    "rank": i + 1,
