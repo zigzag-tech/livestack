@@ -43,3 +43,8 @@ Workloads SHALL declare bounded resource profiles and optional result-delivery i
 #### Scenario: Operations share a handler
 - **WHEN** two build operations have different resource profiles
 - **THEN** observations from one do not teach the other's admission claim
+
+#### Scenario: A profile without delivery intent ranks by measured build time
+- **WHEN** a job declares a resource profile but no delivery intent, and at least one feasible candidate host has succeeded builds recorded for that profile
+- **THEN** placement admits the feasible candidate with the lowest median recorded build time, charges an unmeasured host the slowest recorded build for the profile, and records the ranking as decision evidence
+- **AND** when no feasible candidate has a recorded build for the profile, the scheduler's choice is unchanged
