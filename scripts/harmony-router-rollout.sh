@@ -253,7 +253,11 @@ ship_archive() {
 }
 
 rc=0
-[ "$STATUS" = 1 ] || { [ -n "$REV" ] || REV="$(serving_rev)"; echo "pinned revision: $REV"; }
+[ "$STATUS" = 1 ] || { [ -n "$REV" ] || REV="$(serving_rev)"
+  # Hosts fetch the pin by name, and `git fetch <remote> <short-sha>` fails
+  # ("couldn't find remote ref"): expand to the full sha when this repo has it.
+  REV="$(git -C "$REPO" rev-parse --verify -q "$REV^{commit}" 2>/dev/null || echo "$REV")"
+  echo "pinned revision: $REV"; }
 for row in "${HOSTS[@]}"; do
   IFS='|' read -r name target region fleet fleetd archive <<<"$row"
   if [ ${#WANT[@]} -gt 0 ]; then
