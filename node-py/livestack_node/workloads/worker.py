@@ -24,6 +24,7 @@ from ..host_ledger import HostLedger
 from ..hostview import HostView, cgroup_nonreclaimable
 from .archive import relative_path, unpack
 from . import docker_cache
+from . import probed_labels
 from . import causes
 from . import log_excerpt
 from . import dependency_cache
@@ -116,6 +117,7 @@ class WorkloadWorker:
 
     def __init__(self, config):
         self.config = config
+        self.probed_labels = probed_labels.ProbedLabels(config.get('label_tools'))
         self.watchdog = None  # set by worker_service.main; tests and one-shot callers run without
         self.client = WorkloadClient(config['authority'], config['token'], edge_key=config.get('edge_key'))
         self.local_artifacts = None
@@ -673,7 +675,8 @@ class WorkloadWorker:
             available['disk_bytes'] = max(0, min(available['disk_bytes'], headroom))
         available['cpu'] = self._available_cpu(capacity)
         unavailable = self._disk_unavailable(capacity, filesystem_free)
-        report = dict(capacity=capacity, available=available, labels=self.config.get('labels', {}),
+        report = dict(capacity=capacity, available=available,
+                      labels=probed_labels.merged(self.config.get('labels', {}), self.probed_labels.labels()),
                       handlers=list(self.handlers), ready=not self.config.get('observe_only', False))
         if getattr(self, 'local_artifacts', None) is not None:
             self.local_artifacts.sweep()
