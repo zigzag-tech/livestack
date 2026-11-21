@@ -27,7 +27,7 @@ UNIT_DIR="$REPO/node-py/examples/harmony-llm/systemd/router"
 # fleetd=1: this host also runs the region's fleet broker (observe-only), `cn` on
 # node-e. The `na` broker is livestack-fleetd on node-a, not ours.
 HOSTS=(
-  "node-l|local|na|http://100.64.215.1:8801|0"
+  "node-l|local|cn|http://100.64.202.1:8801|0"
   "node-b|ubuntu@100.64.219.1|na|http://100.64.215.1:8801|0"
   "node-d|ubuntu@100.64.241.1|cn|http://100.64.202.1:8801|0"
   "node-e|ubuntu@100.64.202.1|cn|http://100.64.202.1:8801|1"
