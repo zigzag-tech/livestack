@@ -2701,7 +2701,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         return StreamingResponse(
             replay_400(), status_code=400,
             headers={k: v for k, v in resp.headers.items()
-                     if k.lower() not in {"content-length", "transfer-encoding"}},
+                     if k.lower() not in {"content-length", "transfer-encoding", "connection", "keep-alive"}},
         )
 
     async def body_iter():
@@ -2724,7 +2724,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     return StreamingResponse(
         body_iter(), status_code=resp.status_code,
         headers={k: v for k, v in resp.headers.items()
-                 if k.lower() not in {"content-length", "transfer-encoding"}},
+                 if k.lower() not in {"content-length", "transfer-encoding", "connection", "keep-alive"}},
     )
 
 
