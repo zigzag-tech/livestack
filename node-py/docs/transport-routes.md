@@ -95,3 +95,18 @@ Each door is its own `edge_relay` route (own key, own status check, own budget);
 and the transfer resumes on the next door, then the authority. Names and URLs must be distinct; unknown fields
 and URLs with credentials, a query or a fragment are refused. Fewer than two doors on a cross-region worker is
 reported as `single_route`. A worker picks the change up on its next restart.
+
+## In-region package sources (`region` label)
+
+Object transfers ride doors (above); package installs ride the region policy in
+`livestack_node/workloads/region_mirrors.py`. A worker labelled `region=<r>` starts its handler
+environment from `REGION_POLICIES[r]`, and anything in the worker config's `environment` overrides it,
+so no worker needs hand-set mirror variables. `region=cn` sets npm (`registry.npmmirror.com` plus the
+better-sqlite3/nodejieba/sharp/electron/playwright binary hosts and `disturl`), PyPI and uv
+(`mirrors.aliyun.com`), Hugging Face (`hf-mirror.com`, Xet off), rustup and crates.io sparse
+(`rsproxy.cn`), Go (`goproxy.cn`, `sum.golang.google.cn`) and Flutter/pub (`flutter-io.cn`).
+Measured from node-h 2026-11-21: registry.npmjs.org and pypi.org timed out at 20 s; the mirrors
+answered in 0.3-0.8 s, and `pip download cryptography==48.0.1` took 2.9 s through the mirror.
+Registries are verified by their clients (npm integrity, pip hashes, cargo checksums), so a mirror
+cannot change a pinned dependency's bytes. Docker's registry mirror is host daemon configuration
+(`/etc/docker/daemon.json` `registry-mirrors`), not handler environment.
