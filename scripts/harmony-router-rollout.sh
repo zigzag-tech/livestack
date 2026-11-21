@@ -25,15 +25,23 @@ UNIT_DIR="$REPO/node-py/examples/harmony-llm/systemd/router"
 # archive: the host cannot reach GitHub or a peer repo, so the pinned source is
 # shipped as a `git archive` over ssh and the revision is declared, not read.
 # fleetd=1: this host also runs the region's fleet broker (observe-only), `cn` on
-# node-e. The `na` broker is livestack-fleetd on node-a, not ours.
+# relay-a (moved from node-e 2026-11-21). A host with fleetd=0 that still has
+# a harmony-fleetd unit gets it stopped and removed. The `na` broker is
+# livestack-fleetd on node-a, not ours.
 HOSTS=(
-  "node-l|local|cn|http://100.64.202.1:8801|0"
+  "node-l|local|cn|http://100.64.220.1:8801|0"
   "node-b|ubuntu@100.64.219.1|na|http://100.64.215.1:8801|0"
-  "node-d|ubuntu@100.64.241.1|cn|http://100.64.202.1:8801|0"
-  "node-e|ubuntu@100.64.202.1|cn|http://100.64.202.1:8801|1"
+  "node-d|ubuntu@100.64.241.1|cn|http://100.64.220.1:8801|0"
+  "node-e|ubuntu@100.64.202.1|cn|http://100.64.220.1:8801|0"
+  # relay-a: the Nanjing Lighthouse box (DERP + Benchday relay + exit node), cn
+  # fleet broker only; its router is just the rollout's health/dry-run harness. It
+  # reaches neither GitHub nor a peer repo, so archive; and it authorizes only a few
+  # operator keys (node-a, node-b), so run its row from one of those:
+  #   ssh 100.64.215.1 'cd <livestack> && scripts/harmony-router-rollout.sh relay-a --rev <sha>'
+  "relay-a|ubuntu@100.64.220.1|cn|http://100.64.220.1:8801|1|archive"
   # WSL2 in mirrored-network mode shares loopback with Windows, so this one router
   # also answers 127.0.0.1:8188 for Windows-native callers. `#2222` is the ssh port.
-  "node-c|ubuntu@100.64.200.1#2222|cn|http://100.64.202.1:8801|0"
+  "node-c|ubuntu@100.64.200.1#2222|cn|http://100.64.220.1:8801|0"
   # The public hub box (Tokyo): neither na nor cn, so no region (vantage = the fleet
   # broker's own probe). Installing the router is additive; pointing the hub at it
   # is a hub env change and a hub restart, which goes through the fenced deploy.
@@ -41,7 +49,7 @@ HOSTS=(
   # node-i: a MacBook (macOS, user `yy`, launchd agent) in China. It has no livestack
   # checkout, and non-interactive ssh there gets no proxy (GitHub unreachable), so
   # its source is shipped as an archive.
-  "node-i|yy@100.64.201.1|cn|http://100.64.202.1:8801|0|archive"
+  "node-i|yy@100.64.201.1|cn|http://100.64.220.1:8801|0|archive"
 )
 # What a regional fleet broker watches: every llm node, every embed node, and the cn hosts.
 FLEETD_PEERS="http://100.64.230.1:8230/livestack,http://100.64.215.1:8188/livestack,http://100.64.239.1:8188/livestack,http://100.64.241.1:8100/livestack,http://100.64.241.1:8766/livestack,http://100.64.241.1:8844/livestack,http://100.64.251.1:8188/livestack"
@@ -196,6 +204,10 @@ v=json.load(sys.stdin)
 rows=[(h,n.get("peer"),n.get("region"),n.get("state")) for h,row in v["hosts"].items() for n in row.get("nodes",[])]
 print("fleetd: %d node(s): %s" % (len(rows), "; ".join("%s %s %s" % (h,r,s) for h,_p,r,s in rows)))' \
     || { echo "FAILED: regional fleet broker not answering on :8801" >&2; exit 1; }
+elif [ "$OS" != Darwin ] && [ -f "$UD/harmony-fleetd.service" ]; then
+  # The region's broker moved off this host: retire the old copy.
+  systemctl --user disable --now harmony-fleetd >/dev/null 2>&1 || true
+  rm -f "$UD/harmony-fleetd.service" "$CONF/fleetd.env"; systemctl --user daemon-reload; changed+=(fleetd-retired)
 fi
 
 # 5. it must come up at the pinned revision and name a target.
