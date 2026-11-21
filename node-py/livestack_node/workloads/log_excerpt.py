@@ -43,7 +43,10 @@ EXIT_LINE = re.compile(r"(?i:\bexit(?:ed)?(?: with)?(?: code| status)?[ :=]+[1-9
 NOISE = re.compile(
     r"(?i:\blevel=(?:warn(?:ing)?|info|debug|trace)\b|^\W*warn(?:ing)?\b|fsverity|deprecat|skip loading plugin|"
     r"pulling fs layer|pull complete|download complete|verifying checksum|status: (?:downloaded|image is up)|"
-    r"digest: sha256:|^\W*waiting$|\beta\b)|\bWARN(?:ING)?\b|#{5,}|\[=+>\s*\]|(?:^|\s)\d{1,3}(?:\.\d+)?%(?:\s|$|\|)")
+    r"digest: sha256:|^\W*waiting$|\beta\b)|\bWARN(?:ING)?\b|#{5,}|\[=+>\s*\]|(?:^|\s)\d{1,3}(?:\.\d+)?%(?:\s|$|\|)|"
+    # The wrapper's own telemetry printed after the command ends (docker_cache.py): never what broke. As the last
+    # quiet line it hid the handler's own last line ("exit 75: docker_cache: {...}" on every benchday gate, 2026-11-21).
+    r"^\s*(?:docker_cache|dependency_cache): \{")
 BLOCK_GAP = 2   # quiet lines tolerated inside one failure block (a source frame, a `-->` pointer)
 # node prints `file:///path/x.mjs:LINE` before a SyntaxError's source excerpt
 LOCATION = re.compile(r"^(?:file://)?(\S+\.[cm]?[jt]sx?):(\d+)\s*$")

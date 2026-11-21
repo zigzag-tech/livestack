@@ -105,3 +105,11 @@ def test_authority_recleans_what_a_worker_sent_and_derives_the_reason():
     assert 'hunter2' not in str(withheld)
     bare = causes.derive('product_failure', {'exit_code': 1})
     assert 'excerpt' not in bare['evidence'] and causes.reason_of(bare) is None
+
+
+def test_the_wrappers_trailing_telemetry_never_hides_the_handlers_last_line(tmp_path):
+    # 2026-11-21, every benchday gate: the handler's own message was followed by docker_cache.py's JSON line, which won
+    # as "the last quiet line", so the cause read "exit 75: docker_cache: {...}" and named nothing.
+    path = log_of(tmp_path, 'harmony-e2e: proxy acceptance runtime: meshlink-egress immutable source pin differs\n'
+                  'docker_cache: {"outcome": "hit", "namespace": "zzops-benchday-test-train-e96ae875066e"}\n')
+    assert excerpt(path, 75) == 'exit 75: harmony-e2e: proxy acceptance runtime: meshlink-egress immutable source pin differs'
