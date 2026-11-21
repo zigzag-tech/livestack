@@ -83,6 +83,9 @@ OS="$(uname -s)"
 if [ "${ARCHIVE:-}" = archive ]; then
   [ "$(cat "$SRC/.archive-rev" 2>/dev/null)" = "$REV" ] || { echo "FAILED: archive not shipped" >&2; exit 1; }
 elif [ ! -e "$SRC/.git" ]; then
+  # A hand-installed source (a symlink or copied tree, seen on the cn hosts
+  # 2026-10-19) is not ours to update: keep it beside, then install the worktree.
+  if [ -e "$SRC" ] || [ -L "$SRC" ]; then mv "$SRC" "$SRC.replaced-$(date +%Y%m%d-%H%M%S)"; changed+=(replaced-unmanaged-source); fi
   if [ -d "$HOME/livestack/.git" ]; then
     git -C "$HOME/livestack" fetch -q origin 2>/dev/null || true
     git -C "$HOME/livestack" worktree add -q --detach "$SRC" HEAD
