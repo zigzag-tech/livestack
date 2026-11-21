@@ -78,8 +78,16 @@ def test_plan_hard_pin_blocks_and_exclusive_note():
 def test_plan_warns_when_generic_demand_would_reach_the_new_unit():
     r = m.plan_unit(VIEW, {"kind": "tiny", "host": "leaky", "footprint": {"vram_gb": 4},
                            "attributes": {"class": "llm", "params_b": 4}})
-    assert r["callers"]["selects_new_unit"] and r["callers"]["also_matches"]
+    assert r["callers"]["generic"]["reaches_new_unit"] and r["callers"]["generic"]["existing_matches"]
     assert any("generic demand `require:class=llm`" in w for w in r["warnings"])
+    # A caller_need does not hide the generic check, and a need that misses the new unit is an error.
+    r = m.plan_unit(VIEW, {"kind": "tiny", "host": "leaky", "footprint": {"vram_gb": 4},
+                           "attributes": {"class": "llm", "params_b": 4}, "caller_need": "class=llm,params_b=4"})
+    assert r["ok"] and r["callers"]["selects_new_unit"] and r["callers"]["generic"]["reaches_new_unit"]
+    assert any("generic demand" in w for w in r["warnings"])
+    r = m.plan_unit(VIEW, {"kind": "tiny", "host": "leaky", "footprint": {"vram_gb": 4},
+                           "attributes": {"class": "llm", "params_b": 4}, "caller_need": "class=llm,params_b=9"})
+    assert not r["ok"] and any("does not select the new unit" in e for e in r["errors"])
 
 
 def test_match_interval_specialist_and_inexpressible():
