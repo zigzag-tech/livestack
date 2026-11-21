@@ -27,6 +27,7 @@ from .runtime import (GenerationCancelled, CONTROLNET_CLASSES, FLUX2_IMAGE_MODEL
                       validate_offload)
 from .sdxl import SDXLImageRuntime
 from .flux2 import Flux2ImageRuntime
+from .upscale import UPSCALE_MODELS, RealEsrganRuntime
 
 
 _FULL_REVISION = re.compile(r"[0-9a-f]{40}")
@@ -174,6 +175,13 @@ def create_app(config: dict | None = None, runtime_factory=ImageRuntime):
              "model": config["model"], "license": "apache-2.0", "quantization": config.get("quantization", "nf4")}
     if config.get("revision") is not None:
         attrs["revision"] = config["revision"]
+    upscale = config["model"] in UPSCALE_MODELS
+    if upscale:
+        # A fidelity upscaler answers only upscale demand: `upscale=true` is a specialist attribute in
+        # planner._SPECIALIST_ONLY_ATTRS, so ordinary `class=imagegen` generation never lands on it.
+        attrs.update(task="upscale", upscale=True, scale=config.get("scale", 4),
+                     license=config.get("license", "bsd-3-clause"))
+        attrs.pop("quantization", None)
     if config["model"] == QWEN_IMAGE_MODEL:
         attrs.update(steps=config["steps"],
                      true_cfg_scale=config.get("true_cfg_scale", 4.0),
@@ -201,6 +209,7 @@ def create_app(config: dict | None = None, runtime_factory=ImageRuntime):
     holder, busy = {}, counting()
     request_lock = threading.Lock()
     runtime_classes = {SDXL_IMAGE_MODEL: SDXLImageRuntime, FLUX2_IMAGE_MODEL: Flux2ImageRuntime}
+    runtime_classes.update({model: RealEsrganRuntime for model in UPSCALE_MODELS})
     selected_runtime = (runtime_classes.get(config["model"], runtime_factory)
                         if runtime_factory is ImageRuntime else runtime_factory)
 
@@ -209,6 +218,16 @@ def create_app(config: dict | None = None, runtime_factory=ImageRuntime):
 
     def load():
         started = time.monotonic()
+        if upscale:
+            options = dict(scale=config.get("scale", 4), tile=config.get("tile", 512),
+                           threads=config.get("cpu_threads", 8),
+                           precision=config.get("precision", "fp16"),
+                           weight_sha256=config.get("weight_sha256"),
+                           weight_bytes=config.get("weight_bytes"))
+            runtime = selected_runtime(config["snapshot"], config["model"], **options)
+            holder["runtime"] = runtime
+            holder["load_s"] = round(time.monotonic()-started, 3)
+            return runtime
         options = dict(steps=config["steps"], threads=config.get("cpu_threads", 8),
                        quantization=config.get("quantization", "nf4"))
         if config["model"] == QWEN_IMAGE_MODEL:
@@ -293,7 +312,7 @@ def create_app(config: dict | None = None, runtime_factory=ImageRuntime):
         if not satisfies(attrs, request["harmony_requires"]):
             raise HTTPException(422, "worker does not satisfy the model requirements")
         max_dimension = config.get("max_dimension", 1024)
-        if max(request["width"], request["height"]) > max_dimension:
+        if not upscale and max(request["width"], request["height"]) > max_dimension:
             raise HTTPException(422, f"this worker is qualified for dimensions up to {max_dimension}px")
         # No lock on the GPU executor while admission may dispatch a warm to us.
         with request_lock, busy:
@@ -320,7 +339,8 @@ def create_app(config: dict | None = None, runtime_factory=ImageRuntime):
             harmony = {"model": config["model"], "revision": config.get("revision"),
                        "unit": unit_name, "host": config["host_id"], "device_id": config["device_id"],
                        "device_ids": device_ids,
-                       "prompt": request["prompt"], "seed": request["seed"],
+                       "task": request["harmony_requires"].get("task"),
+                       "prompt": request.get("prompt"), "seed": request.get("seed"),
                        "requirements": request["harmony_requires"], "local_grant": grant,
                        "total_s": round(time.monotonic()-started, 3),
                        "load_s": holder.get("load_s"), **metrics}

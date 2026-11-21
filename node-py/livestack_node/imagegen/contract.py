@@ -12,6 +12,14 @@ from livestack_node.planner import Unit, _unit_satisfies
 
 
 MAX_CONTROL_IMAGE_BYTES = 8 * 1024 * 1024
+#: Upscale input: a PNG photo, not a 1024px control image. 16 MiB covers a 4096px side.
+MAX_UPSCALE_IMAGE_BYTES = 16 * 1024 * 1024
+MAX_UPSCALE_SIDE = 4096
+#: Output bound: the gateway and the worker both refuse more than this, so a request cannot ask a
+#: 24 GB card to render a 100 MP image (8k sides and 40 MP keep a 3090's tiled pass in minutes).
+MAX_UPSCALE_OUTPUT_SIDE = 8192
+MAX_UPSCALE_OUTPUT_PIXELS = 40_000_000
+UPSCALE_FACTORS = (2, 3, 4)
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _REVISION = re.compile(r"[0-9a-f]{40}")
 _GUIDED_REQUIREMENTS = (
@@ -20,7 +28,8 @@ _GUIDED_REQUIREMENTS = (
 )
 
 
-def _validate_png(image_field, width: int, height: int, name: str = "control_image") -> None:
+def _decode_png(image_field, name: str = "control_image", max_bytes: int = MAX_CONTROL_IMAGE_BYTES):
+    """Validate one strict-base64, SHA-256-pinned, single-frame RGB PNG; return its (width, height)."""
     if not isinstance(image_field, dict):
         raise ValueError(f"{name} must be a JSON object")
     if image_field.get("media_type") != "image/png":
@@ -28,16 +37,16 @@ def _validate_png(image_field, width: int, height: int, name: str = "control_ima
     encoded = image_field.get("b64_json")
     if not isinstance(encoded, str):
         raise ValueError(f"{name}.b64_json must be a base64 string")
-    if len(encoded) > 4 * ((MAX_CONTROL_IMAGE_BYTES + 2) // 3):
-        raise ValueError(f"{name} exceeds the 8 MiB decoded limit")
+    if len(encoded) > 4 * ((max_bytes + 2) // 3):
+        raise ValueError(f"{name} exceeds the {max_bytes // (1024 * 1024)} MiB decoded limit")
     try:
         decoded = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise ValueError(f"{name}.b64_json must be strict base64") from exc
     if base64.b64encode(decoded).decode("ascii") != encoded:
         raise ValueError(f"{name}.b64_json must be strict base64")
-    if len(decoded) > MAX_CONTROL_IMAGE_BYTES:
-        raise ValueError(f"{name} exceeds the 8 MiB decoded limit")
+    if len(decoded) > max_bytes:
+        raise ValueError(f"{name} exceeds the {max_bytes // (1024 * 1024)} MiB decoded limit")
     digest = image_field.get("sha256")
     if not isinstance(digest, str) or _SHA256.fullmatch(digest) is None:
         raise ValueError(f"{name}.sha256 must be 64 lowercase hexadecimal characters")
@@ -52,14 +61,19 @@ def _validate_png(image_field, width: int, height: int, name: str = "control_ima
     with image:
         if image.format != "PNG" or getattr(image, "n_frames", 1) != 1:
             raise ValueError(f"{name} must contain exactly one PNG image")
-        if image.size != (width, height):
-            raise ValueError(f"{name} dimensions must equal the requested width and height")
+        size = image.size
         try:
             image.load()
             with image.convert("RGB") as rgb:
                 rgb.load()
         except (OSError, SyntaxError, ValueError, Image.DecompressionBombError) as exc:
             raise ValueError(f"{name} must be one RGB-readable PNG") from exc
+    return size
+
+
+def _validate_png(image_field, width: int, height: int, name: str = "control_image") -> None:
+    if _decode_png(image_field, name) != (width, height):
+        raise ValueError(f"{name} dimensions must equal the requested width and height")
 
 
 def _validate_guided_requirements(req: dict) -> None:
@@ -77,7 +91,65 @@ def _validate_guided_requirements(req: dict) -> None:
         raise ValueError("guided harmony_requires.controlnet_config_sha256 must be lowercase SHA-256")
 
 
+def _validate_upscale_request(body: dict, req: dict, wait) -> dict:
+    req = dict(req)
+    if req.get("task", "upscale") != "upscale":
+        raise ValueError("harmony_requires must describe task=upscale")
+    if "upscale" in req and req["upscale"] is not True:
+        raise ValueError("harmony_requires.upscale is derived from an init_image and a scale; do not state it otherwise")
+    forbidden = [key for key in ("prompt", "control_image", "mask_image") if key in body]
+    if forbidden:
+        raise ValueError(f"an upscale request takes no {' or '.join(forbidden)}")
+    if "depth_guide" in req:
+        raise ValueError("an upscale request cannot be depth-guided")
+    factor = body.get("scale", 4)
+    if type(factor) is not int or factor not in UPSCALE_FACTORS:
+        raise ValueError("scale must be an integer 2, 3 or 4")
+    size = _decode_png(body["init_image"], "init_image", MAX_UPSCALE_IMAGE_BYTES)
+    if not (16 <= size[0] <= MAX_UPSCALE_SIDE and 16 <= size[1] <= MAX_UPSCALE_SIDE):
+        raise ValueError(f"init_image sides must be between 16 and {MAX_UPSCALE_SIDE} pixels")
+    width, height = size[0] * factor, size[1] * factor
+    if max(width, height) > MAX_UPSCALE_OUTPUT_SIDE or width * height > MAX_UPSCALE_OUTPUT_PIXELS:
+        raise ValueError(
+            f"scale={factor} would produce {width}x{height}: beyond the {MAX_UPSCALE_OUTPUT_SIDE} px "
+            f"and {MAX_UPSCALE_OUTPUT_PIXELS // 1_000_000} MP output limit")
+    for key, value in (("width", width), ("height", height)):
+        if key in body and body[key] != value:
+            raise ValueError(f"{key} is derived from init_image and scale; send either the image or the size, not both")
+    out = dict(body)
+    out.update(width=width, height=height, scale=factor, seed=0, init_size=list(size))
+    out["harmony_wait_s"] = wait
+    #: Derived like `inpaint`: an init image and a scale make the task, and the specialist attribute
+    #: keeps ordinary `class=imagegen` generation demand off a unit that cannot do it.
+    out["harmony_requires"] = {"class": "imagegen", **req, "task": "upscale", "upscale": True}
+    return out
+
+
 def validate_request(body: dict) -> dict:
+    # How long the caller can wait for Harmony to find room (seconds): a busy or just-restarted fleet is not a refusal.
+    wait = body.get("harmony_wait_s", 0)
+    if type(wait) not in (int, float) or not 0 <= wait <= 3600:
+        raise ValueError("harmony_wait_s must be a number of seconds between 0 and 3600")
+    req = body.get("harmony_requires", {})
+    if not isinstance(req, dict) or req.get("class", "imagegen") != "imagegen":
+        raise ValueError("harmony_requires must describe class=imagegen")
+    # The task is derived from what is sent, never declared: an init image and a mask are inpainting
+    # (white in the mask is repainted, black kept; outpainting is a blank canvas under a white mask),
+    # an init image with a scale is upscaling, and everything else is text to image.
+    has_init, has_mask = "init_image" in body, "mask_image" in body
+    if has_init and has_mask:
+        task = "inpaint"
+    elif has_init and ("scale" in body or req.get("task") == "upscale" or "prompt" not in body):
+        # An init image with no mask, no prompt and no size is an upscale; a prompt beside a lone
+        # init image is an inpaint that lost its mask, and stays a pairing error below.
+        task = "upscale"
+    elif has_init or has_mask:
+        raise ValueError("init_image and mask_image must be paired (an init_image alone needs a scale to upscale)")
+    else:
+        task = "text_to_image"
+    if task == "upscale":
+        return _validate_upscale_request(body, req, wait)
+
     prompt = body.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 12000:
         raise ValueError("prompt must be a nonempty string of at most 12000 characters")
@@ -90,20 +162,6 @@ def validate_request(body: dict) -> dict:
     seed = body.get("seed", 42)
     if type(seed) is not int or not 0 <= seed < 2**63:
         raise ValueError("seed must be an integer between 0 and 2**63-1")
-    # How long the caller can wait for Harmony to find room (seconds): a busy or just-restarted fleet is not a refusal.
-    wait = body.get("harmony_wait_s", 0)
-    if type(wait) not in (int, float) or not 0 <= wait <= 3600:
-        raise ValueError("harmony_wait_s must be a number of seconds between 0 and 3600")
-    req = body.get("harmony_requires", {})
-    if not isinstance(req, dict) or req.get("class", "imagegen") != "imagegen":
-        raise ValueError("harmony_requires must describe class=imagegen")
-    # Inpainting is derived from the request, not declared: an `init_image` and a `mask_image` (PNGs of the requested
-    # size; white in the mask is repainted, black kept) make it task=inpaint, served only by units declaring `inpaint`.
-    # Outpainting is the same request with blank canvas under a white mask.
-    inpaint_keys = ("init_image" in body, "mask_image" in body)
-    if any(inpaint_keys) and not all(inpaint_keys):
-        raise ValueError("init_image and mask_image must be paired")
-    task = "inpaint" if all(inpaint_keys) else "text_to_image"
     if req.get("task", task) != task:
         raise ValueError(f"harmony_requires must describe task={task}" + (" (send init_image and mask_image to inpaint)" if req.get("task") == "inpaint" else ""))
     if "inpaint" in req and req["inpaint"] is not (task == "inpaint"):

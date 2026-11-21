@@ -82,6 +82,18 @@ def _verify_guided_result(request, actual, target):
             raise RuntimeError(f"worker generation setting mismatch: {key}")
 
 
+def _verify_upscale_result(request, actual):
+    """An upscale must come back at exactly init_image × scale; anything else is a substituted unit."""
+    if (actual.get("width"), actual.get("height")) != (request["width"], request["height"]):
+        raise RuntimeError("worker result dimensions do not match the requested upscale")
+    evidence = actual.get("upscale")
+    if not isinstance(evidence, dict) or evidence.get("scale") != request["scale"]:
+        raise RuntimeError("worker result is missing upscale evidence")
+    if (evidence.get("input_size") is not None
+            and tuple(evidence["input_size"]) != tuple(request["init_size"])):
+        raise RuntimeError("worker upscale evidence does not match the supplied init_image")
+
+
 def _exclusive_units(config):
     """Per-unit whole-device lease profiles: {unit kind: {broker, owner, device_ids,
     min_free_bytes, wait_timeout_s, ttl_seconds}}. Units not listed run without leases."""
@@ -326,6 +338,8 @@ def create_app(config=None, call=json_call):
                     raise RuntimeError("worker result does not match every device lease")
                 if request["harmony_requires"].get("depth_guide") is True:
                     _verify_guided_result(request, actual, target)
+                if request["harmony_requires"].get("upscale") is True:
+                    _verify_upscale_result(request, actual)
                 actual["fleet_grant"] = grant
                 actual["owner"] = owner
                 if principal:

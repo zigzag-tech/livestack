@@ -700,9 +700,12 @@ def _unit_satisfies(u: Unit, requires: Mapping[str, object]) -> bool:
 # where a Qwen text-to-image was meant.
 # `inpaint`: an image unit that repaints a masked area of a supplied image; only demand that sends an image and a mask
 # (the contract derives `inpaint` from them) is inpainting work.
+# `upscale`: a fidelity upscaler (Real-ESRGAN) that enlarges a supplied image; only demand that sends an init image
+# and a scale (the contract derives `upscale` from them) is upscale work. Generic `class=imagegen` generation demand
+# would otherwise be able to land on a unit that cannot generate at all.
 # A unit may hold several specialist capabilities (FLUX.2 Fun Union does depth guidance and inpainting with one
 # controller): demand naming ANY of them may use it, demand naming none may not.
-_SPECIALIST_ONLY_ATTRS = ("ocr", "depth_guide", "inpaint")
+_SPECIALIST_ONLY_ATTRS = ("ocr", "depth_guide", "inpaint", "upscale")
 
 
 def _specialist_only(u: Unit, requires: Mapping[str, object]) -> bool:

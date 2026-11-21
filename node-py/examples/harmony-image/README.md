@@ -111,3 +111,27 @@ klein-1 reports the declared prior with `learned.state: "unmeasured"` until Harm
 first places the unit on GPU 1: while klein-0 holds it resident, admission grants that
 copy, and a request sent straight to 8214 is refused ("no concrete local Harmony
 grant"), as designed.
+
+## Upscaling (Real-ESRGAN, `task=upscale`)
+
+A fidelity upscaler serves document and conference photos, where a generative restorer would be free to
+invent the Chinese signage the photos are of. It is derived from the request like inpainting: an
+`init_image` (strict base64 PNG plus its SHA-256, at most 16 MiB) and no mask make `task=upscale`, and a
+`scale` of 2, 3 or 4 (default 4) sets the output size. The derived output is `init_image × scale`, bounded
+at 8192 px per side and 40 MP; the input is bounded at 4096 px per side. A request may not also carry
+`prompt`, `control_image` or `mask_image`, and a stated `width`/`height` must equal the derived size.
+
+`upscale` is a specialist-only planner attribute (`_SPECIALIST_ONLY_ATTRS`): only demand that names it
+(the contract sets `harmony_requires: {"class": "imagegen", "task": "upscale", "upscale": true}`) reaches
+the unit, so generic `class=imagegen` generation demand keeps landing on Qwen, Z-Image and klein.
+
+The runtime (`livestack_node/imagegen/upscale.py`) vendors BasicSR's RRDBNet so the image worker does not
+add `basicsr` or `spandrel`. The pinned checkpoint is `RealESRGAN_x4plus.pth` (67040989 bytes, SHA-256
+`4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1`), verified before the unit advertises
+itself, and inference is tiled (512 px patches, 16 px context) in FP16. Scale 2 and 3 run the 4x network
+and resample with a bicubic antialiased pass.
+
+Measured on node-a (RTX 3090, `tile=512`, FP16, synthetic noise, 2026-11-22): 1440x650 at 2x —
+1.85 s, 6 tiles, peak 2.5 GiB allocated / 4.8 GiB reserved; at 4x — 1.76 s; 1440x3197 at 2x (2880x6394) —
+8.3 s, 21 tiles, peak 2.9 GiB allocated / 6.3 GiB reserved. The caching allocator is emptied after every
+request (258 MiB reserved once idle), so the unit does not hold the card's memory between requests.
