@@ -2119,3 +2119,18 @@ exact turn is refused; another producer's jobs are excluded even under the same
 delegated owner/turn. Fixed-owner readers remain fixed and cannot add an owner
 query. This lets an application reuse its producer credential without minting a
 reader credential per account; it does not enable arbitrary history queries.
+
+## Adding a model: ask the broker (MCP)
+
+Any agent adding a model or job type starts at the broker's MCP server, `POST /mcp`
+on the cn fleet broker (registered fleet-wide as `harmony` by xc-setup
+`scripts/harmony-mcp-register.sh`). Its tools are `harmony_runbook`,
+`harmony_vocabulary`, `harmony_plan_unit` and `harmony_match_need`, and the same
+reads are plain HTTP: `GET /runbooks/add-model`, `GET /fleet/units/vocabulary`,
+`POST /fleet/units/plan`, `POST /fleet/units/match`. All of them are reads; the
+change itself lands as tracked host config. The runbook is
+`node-py/livestack_node/runbooks/add-model.md`, served from the broker's own
+revision, so editing it and redeploying the broker updates every agent.
+`HARMONY_MCP_VIEWS` merges other brokers' `/fleet` (the cn broker seeds only
+LLM/embed nodes; image, OCR and speech nodes announce to na). Code:
+`node-py/livestack_node/fleet_mcp.py`.

@@ -281,19 +281,28 @@ def plan_unit(view: Mapping, proposal: Mapping) -> dict:
     proposed = {"host": host, "node": "(proposed)", "device_id": device_id, "kind": kind, "attributes": attrs,
                 "vram_bytes": vram, "resident": False, "proposed": True}
     callers = {}
-    need = proposal.get("caller_need") or ("require:class=" + str(attrs["class"]) if "class" in attrs else None)
+    need = proposal.get("caller_need")
     if need:
         try:
             m = match(view, need, extra_unit=proposed)
-            others = [h["unit"] for h in m["matches"] if not h["proposed"]]
             callers = {"need": need, "selects_new_unit": any(h["proposed"] for h in m["matches"]),
-                       "also_matches": others}
-            if others and not _specialist_blocked(attrs, {}) and not proposal.get("caller_need"):
-                warnings.append(f"generic demand `{need}` will now also be able to land on `{kind}` (it shares "
-                                f"the class with {', '.join(others[:4])}). If it is a specialist, give it a "
-                                "distinguishing attribute and tell callers to require it.")
+                       "also_matches": [h["unit"] for h in m["matches"] if not h["proposed"]]}
+            if not callers["selects_new_unit"]:
+                errors.append(f"caller_need `{need}` does not select the new unit: "
+                              + next((x["why"] for x in m["non_matches"] if x["proposed"]), "?"))
         except ValueError as exc:
             errors.append(f"caller_need does not parse: {exc}")
+    # Always: does GENERIC demand for this class (what existing callers already send) now reach it?
+    if "class" in attrs:
+        generic = f"require:class={attrs['class']}"
+        m = match(view, generic, extra_unit=proposed)
+        others = [h["unit"] for h in m["matches"] if not h["proposed"]]
+        reached = any(h["proposed"] for h in m["matches"])
+        callers["generic"] = {"need": generic, "reaches_new_unit": reached, "existing_matches": others}
+        if reached and others:
+            warnings.append(f"generic demand `{generic}` (what callers of {', '.join(others[:3])} send) will now "
+                            f"also be able to land on `{kind}`. If it should not answer that demand, declare a "
+                            "specialist-only attribute (planner._SPECIALIST_ONLY_ATTRS) and have callers require it.")
     return {"ok": not errors, "errors": errors, "warnings": warnings, "fit": fit, "callers": callers,
             "next": "Write the unit into the host's tracked config, deploy at idle, then verify with "
                     "`match_need` and one real request (runbook steps 5-7)."}
