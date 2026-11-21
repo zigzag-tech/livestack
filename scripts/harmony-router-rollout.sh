@@ -173,8 +173,14 @@ if [ "$OS" = Darwin ]; then
   if [ "$(cat "$PLIST" 2>/dev/null)" != "$rendered" ]; then
     printf '%s\n' "$rendered" > "$PLIST"; plutil -lint "$PLIST" >/dev/null; changed+=(plist); restart=1
   fi
-  launchctl print "gui/$(id -u)/io.zztech.harmony-router" >/dev/null 2>&1 || { launchctl bootstrap "gui/$(id -u)" "$PLIST"; changed+=(started); }
-  if [ "$restart" = 1 ] || [[ " ${changed[*]} " == *" rev="* ]] || [[ " ${changed[*]} " == *" env "* ]]; then
+  # launchd keeps the definition it loaded: `kickstart -k` after a plist change
+  # restarts the OLD env (seen 2026-11-21: yy-1 kept its old fleet URL). Reload it.
+  if [ "$restart" = 1 ] && launchctl print "gui/$(id -u)/io.zztech.harmony-router" >/dev/null 2>&1; then
+    launchctl bootout "gui/$(id -u)/io.zztech.harmony-router" 2>/dev/null || true
+    for _ in $(seq 1 20); do launchctl print "gui/$(id -u)/io.zztech.harmony-router" >/dev/null 2>&1 || break; sleep 0.5; done
+  fi
+  launchctl print "gui/$(id -u)/io.zztech.harmony-router" >/dev/null 2>&1 || { launchctl bootstrap "gui/$(id -u)" "$PLIST"; changed+=(started); restart=0; }
+  if [ "$restart" = 1 ] || [[ " ${changed[*]:-} " == *" rev="* ]] || [[ " ${changed[*]:-} " == *" env "* ]]; then
     launchctl kickstart -k "gui/$(id -u)/io.zztech.harmony-router"
   fi
 else
@@ -186,7 +192,7 @@ else
   systemctl --user is-enabled harmony-router >/dev/null 2>&1 || { systemctl --user enable harmony-router >/dev/null 2>&1; changed+=(enabled); }
   if ! systemctl --user is-active harmony-router >/dev/null; then
     systemctl --user start harmony-router; changed+=(started)
-  elif [ "$restart" = 1 ] || [[ " ${changed[*]} " == *" rev="* ]] || [[ " ${changed[*]} " == *" env "* ]]; then
+  elif [ "$restart" = 1 ] || [[ " ${changed[*]:-} " == *" rev="* ]] || [[ " ${changed[*]:-} " == *" env "* ]]; then
     systemctl --user restart harmony-router
   fi
 fi
@@ -209,7 +215,7 @@ HARMONY_FLEETD_REV=$FLEETD_REV"
   fi
   systemctl --user is-enabled harmony-fleetd >/dev/null 2>&1 || { systemctl --user enable harmony-fleetd >/dev/null 2>&1; changed+=(fleetd-enabled); }
   if ! systemctl --user is-active harmony-fleetd >/dev/null; then systemctl --user start harmony-fleetd; changed+=(fleetd-started)
-  elif [ "$frestart" = 1 ] || [[ " ${changed[*]} " == *" venv "* ]]; then systemctl --user restart harmony-fleetd; fi
+  elif [ "$frestart" = 1 ] || [[ " ${changed[*]:-} " == *" venv "* ]]; then systemctl --user restart harmony-fleetd; fi
   for _ in $(seq 1 30); do curl -fsS --max-time 3 http://127.0.0.1:8801/fleet >/dev/null 2>&1 && break; sleep 1; done
   curl -fsS --max-time 5 http://127.0.0.1:8801/fleet | python3 -c '
 import json,sys
