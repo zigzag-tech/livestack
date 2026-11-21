@@ -339,8 +339,10 @@ async def send_routed(*, first: "tuple[str, str]", rechoose: "Callable[[list], t
     byte reaches the caller (nothing here streams), so a retry cannot replay a
     half-delivered answer.
 
-    `max_attempts` bounds the tries (default 2). `retry_unavailable` (speech)
-    also treats a pre-byte `503` as a refusal to fail over from: `busy: <reason>`
+    `max_attempts` bounds the tries (default 2). A pre-byte `503` from a
+    COLD-routed attempt (the target's admission declined to load) is always a
+    refusal to fail over from; a warm target's 503 is its answer.
+    `retry_unavailable` (speech) also treats a warm pre-byte `503` that way: `busy: <reason>`
     when it carries busy advice (`busy_advice`), `unavailable` otherwise. A busy
     target is dropped from the cached view via `on_busy`. `RouteFailed.retry_after_s`
     is the shortest advertised busy window, for the caller's `Retry-After`.
@@ -385,7 +387,12 @@ async def send_routed(*, first: "tuple[str, str]", rechoose: "Callable[[list], t
                     # answer, not a stale view: hand it back untouched.
                     attempts.append({"target": target, "expect": expect, "result": "409"})
                     return _Replay(resp.status_code, resp.headers, raw), client
-            elif retry_unavailable and resp.status_code == 503:
+            # A COLD-routed 503 is the target's admission refusing to load (no
+            # byte sent, nothing loaded): the next cold target may load and
+            # serve. Handing it to the caller 503'd every chat completion for
+            # two minutes on 2026-11-21 while zz-whitby's planner refused and
+            # zz-leaky, ranked second, could have loaded in ~28 s.
+            elif (retry_unavailable or expect == "cold") and resp.status_code == 503:
                 raw = await resp.aread()
                 busy, why, ra = busy_advice(503, resp.headers, raw)
                 refused, status = (f"busy: {why}" if busy else f"unavailable: {why}"), 503
