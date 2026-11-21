@@ -1613,7 +1613,8 @@ principal (`regions` in the principal table).
 
 Installed (2026-10-18, revision `bde0f54e`, plus public-tokyo from a source archive; node-a's fleetd also runs main since then, with `mesh_route_py` on its PYTHONPATH): node-l, node-b (na);
 node-d, node-e, node-c WSL (cn; WSL2's mirrored loopback means the same
-router answers Windows-native callers). Regional fleet brokers: `na` is
+router answers Windows-native callers); node-i (cn, macOS launchd agent, source archive, added
+2026-11-21 at `52345e05`). Regional fleet brokers: `na` is
 livestack-fleetd on node-a:8801; `cn` is `harmony-fleetd` on
 node-e:8801 (installed by the same rollout; node-d's `livestack-fleetd-cn` is a
 separate token-rollout rehearsal). There is no cn LLM node yet, so cn routers rank na

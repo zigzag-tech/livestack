@@ -38,6 +38,10 @@ HOSTS=(
   # broker's own probe). Installing the router is additive; pointing the hub at it
   # is a hub env change and a hub restart, which goes through the fenced deploy.
   "public-tokyo|ubuntu@100.64.211.1||http://100.64.215.1:8801|0|archive"
+  # node-i: a MacBook (macOS, user `yy`, launchd agent) in China. It has no livestack
+  # checkout, and non-interactive ssh there gets no proxy (GitHub unreachable), so
+  # its source is shipped as an archive.
+  "node-i|yy@100.64.201.1|cn|http://100.64.202.1:8801|0|archive"
 )
 # What a regional fleet broker watches: every llm node, every embed node, and the cn hosts.
 FLEETD_PEERS="http://100.64.230.1:8230/livestack,http://100.64.215.1:8188/livestack,http://100.64.239.1:8188/livestack,http://100.64.241.1:8100/livestack,http://100.64.241.1:8766/livestack,http://100.64.241.1:8844/livestack,http://100.64.251.1:8188/livestack"
