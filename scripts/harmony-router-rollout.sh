@@ -40,8 +40,8 @@ HOSTS=(
   "public-tokyo|ubuntu@100.64.0.17||http://100.64.0.18:8801|0|archive"
 )
 # What a regional fleet broker watches: every llm node, every embed node, and the cn hosts.
-FLEETD_PEERS="http://100.64.0.24:8230/livestack,http://100.64.0.18:8188/livestack,http://100.64.0.27:8188/livestack,http://100.64.0.3:8100/livestack,http://100.64.0.3:8766/livestack,http://100.64.0.3:8844/livestack"
-FLEETD_LINK_PEERS="zz-tower0=http://100.64.0.3:8799,xc-tower-ubuntu=http://100.64.0.18:8799,zz-whitby=http://100.64.0.27:8799"
+FLEETD_PEERS="http://100.64.0.24:8230/livestack,http://100.64.0.18:8188/livestack,http://100.64.0.27:8188/livestack,http://100.64.0.3:8100/livestack,http://100.64.0.3:8766/livestack,http://100.64.0.3:8844/livestack,http://100.64.0.8:8188/livestack"
+FLEETD_LINK_PEERS="zz-tower0=http://100.64.0.3:8799,xc-tower-ubuntu=http://100.64.0.18:8799,zz-whitby=http://100.64.0.27:8799,zz-leaky=http://100.64.0.8:8799"
 # The serving nodes whose /health says which revision routers must run.
 SERVING=(http://100.64.0.18:8188 http://100.64.0.27:8188)
 # Where a host that cannot reach GitHub fetches the pinned revision from.
