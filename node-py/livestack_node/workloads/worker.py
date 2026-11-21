@@ -22,6 +22,7 @@ from urllib.error import HTTPError
 
 from ..host_ledger import HostLedger
 from ..hostview import HostView, cgroup_nonreclaimable
+from .region_mirrors import region_environment
 from .archive import relative_path, unpack
 from . import docker_cache
 from . import probed_labels
@@ -1230,7 +1231,9 @@ class WorkloadWorker:
         """The handler's environment. Ownership metadata travels with the job:
         HARMONY_OWNER is the end user's owner string (labels.owner) when the
         submitter named one, else the submitting principal itself."""
-        env = dict(self.config.get('environment', {}))
+        # Region package sources first (region_mirrors.py), the worker's own environment overrides them.
+        env = region_environment(self.config)
+        env.update(self.config.get('environment', {}))
         if self.store_guard is not None:
             env.update(self.store_guard.job_env())
         spec = assignment['spec']

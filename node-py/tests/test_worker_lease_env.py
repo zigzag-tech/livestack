@@ -242,3 +242,18 @@ def test_grant_names_label_owner_and_killed_handler_leaves_no_live_lease(authori
     result = caller.get(job['id'])
     assert result['state'] in ('queued', 'failed'), \
         'a handler killed without an exit receipt is an infrastructure retry'
+
+
+def test_attempt_env_takes_region_sources_and_the_config_overrides_them(tmp_path):
+    config = worker_config(tmp_path, 'http://127.0.0.1:1', labels={'os': 'linux', 'region': 'cn'})
+    config['environment'] = {'PATH': '/usr/bin:/bin', 'PIP_INDEX_URL': 'https://example.invalid/simple/'}
+    worker = WorkloadWorker(config)
+    root, output, objects = (tmp_path/p for p in ('root', 'output', 'objects'))
+    for path in (root, output, objects):
+        path.mkdir()
+    assignment = {'owner': 'o', 'attempt_id': 'a'*32, 'spec': {'input_digest': 'd'*64, 'payload': {}}}
+    env = worker._attempt_env(assignment, root, output, objects, 'attempt1')
+    assert env['npm_config_registry'] == 'https://registry.npmmirror.com'
+    assert env['PIP_INDEX_URL'] == 'https://example.invalid/simple/'
+    ca = worker_config(tmp_path/'ca', 'http://127.0.0.1:1', labels={'os': 'linux', 'region': 'ca'})
+    assert 'npm_config_registry' not in WorkloadWorker(ca)._attempt_env(assignment, root, output, objects, 'attempt1')
