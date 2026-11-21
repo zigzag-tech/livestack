@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install / update / inspect the Harmony router on requester machines.
 #
-#   scripts/harmony-router-rollout.sh [host…] [--status] [--rev <sha>]
+#   scripts/harmony-router-rollout.sh [host…] [--status] [--rev <sha>] [--fleetd-rev <sha>]
 #
 # With no host: every machine in HOSTS below. A router is a facade with zero units
 # (node-py/examples/harmony-llm/router.py) bound to 127.0.0.1:8188; GPU hosts get
@@ -12,6 +12,11 @@
 # Idempotent: a second run against an up-to-date host reports "no changes" and
 # restarts nothing. After installing, the router must answer a /harmony/route
 # dry run that NAMES a target, or the host is reported failed.
+#
+# A fleetd=1 host's fleet broker runs its OWN source (--fleetd-rev, default
+# --rev), shipped as an archive to ~/.local/share/harmony-fleetd/src: the broker
+# may need a newer revision than the serving nodes (the MCP endpoint), and the
+# router must stay at the serving one. It shares the router's venv.
 #
 #   HARMONY_ROUTER_PIP_INDEX   pip index for hosts that cannot reach pypi.org
 #                              (cn hosts default to a CN mirror)
@@ -54,18 +59,22 @@ HOSTS=(
 # What a regional fleet broker watches: every llm node, every embed node, and the cn hosts.
 FLEETD_PEERS="http://100.64.0.24:8230/livestack,http://100.64.0.18:8188/livestack,http://100.64.0.27:8188/livestack,http://100.64.0.3:8100/livestack,http://100.64.0.3:8766/livestack,http://100.64.0.3:8844/livestack,http://100.64.0.8:8188/livestack"
 FLEETD_LINK_PEERS="zz-tower0=http://100.64.0.3:8799,xc-tower-ubuntu=http://100.64.0.18:8799,zz-whitby=http://100.64.0.27:8799,zz-leaky=http://100.64.0.8:8799"
+# What the cn broker's MCP vocabulary merges beyond its own seeds (the na broker's
+# full view, fetched in the background).
+FLEETD_MCP_VIEWS="http://100.64.0.18:8801/fleet"
 # The serving nodes whose /health says which revision routers must run.
 SERVING=(http://100.64.0.18:8188 http://100.64.0.27:8188)
 # Where a host that cannot reach GitHub fetches the pinned revision from.
 PEER_REPO="ubuntu@100.64.0.18:livestack"
 ORIGIN_URL="$(git -C "$REPO" remote get-url origin 2>/dev/null || echo git@github.com:zigzag-tech/livestack.git)"
 
-STATUS=0; REV=""; WANT=()
+STATUS=0; REV=""; FLEETD_REV=""; WANT=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --status) STATUS=1 ;;
     --rev) REV="$2"; shift ;;
-    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    --fleetd-rev) FLEETD_REV="$2"; shift ;;
+    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
     *) WANT+=("$1") ;;
   esac
   shift
@@ -186,7 +195,11 @@ fi
 if [ "${FLEETD:-0}" = 1 ] && [ "$OS" != Darwin ]; then
   want_fenv="LIVESTACK_HOST_ID=$NAME
 LIVESTACK_PEERS=$FLEETD_PEERS
-LIVESTACK_LINK_PEERS=$FLEETD_LINK_PEERS"
+LIVESTACK_LINK_PEERS=$FLEETD_LINK_PEERS
+HARMONY_MCP_VIEWS=$FLEETD_MCP_VIEWS
+HARMONY_FLEETD_REV=$FLEETD_REV"
+  [ "$(cat "$HOME/.local/share/harmony-fleetd/src/.archive-rev" 2>/dev/null)" = "$FLEETD_REV" ] \
+    || { echo "FAILED: fleetd archive not shipped" >&2; exit 1; }
   frestart=0
   if [ "$(cat "$CONF/fleetd.env" 2>/dev/null)" != "$want_fenv" ]; then
     printf '%s\n' "$want_fenv" > "$CONF/fleetd.env"; changed+=(fleetd-env); frestart=1
@@ -196,7 +209,7 @@ LIVESTACK_LINK_PEERS=$FLEETD_LINK_PEERS"
   fi
   systemctl --user is-enabled harmony-fleetd >/dev/null 2>&1 || { systemctl --user enable harmony-fleetd >/dev/null 2>&1; changed+=(fleetd-enabled); }
   if ! systemctl --user is-active harmony-fleetd >/dev/null; then systemctl --user start harmony-fleetd; changed+=(fleetd-started)
-  elif [ "$frestart" = 1 ] || [[ " ${changed[*]} " == *" rev="* ]]; then systemctl --user restart harmony-fleetd; fi
+  elif [ "$frestart" = 1 ] || [[ " ${changed[*]} " == *" venv "* ]]; then systemctl --user restart harmony-fleetd; fi
   for _ in $(seq 1 30); do curl -fsS --max-time 3 http://127.0.0.1:8801/fleet >/dev/null 2>&1 && break; sleep 1; done
   curl -fsS --max-time 5 http://127.0.0.1:8801/fleet | python3 -c '
 import json,sys
@@ -207,7 +220,7 @@ print("fleetd: %d node(s): %s" % (len(rows), "; ".join("%s %s %s" % (h,r,s) for 
 elif [ "$OS" != Darwin ] && [ -f "$UD/harmony-fleetd.service" ]; then
   # The region's broker moved off this host: retire the old copy.
   systemctl --user disable --now harmony-fleetd >/dev/null 2>&1 || true
-  rm -f "$UD/harmony-fleetd.service" "$CONF/fleetd.env"; systemctl --user daemon-reload; changed+=(fleetd-retired)
+  rm -rf "$UD/harmony-fleetd.service" "$CONF/fleetd.env" "$HOME/.local/share/harmony-fleetd"; systemctl --user daemon-reload; changed+=(fleetd-retired)
 fi
 
 # 5. it must come up at the pinned revision and name a target.
@@ -256,12 +269,13 @@ run_on() {  # run_on <ssh-target|local> <script-text> [VAR=value…]
   fi
 }
 
-# Ship node-py at $REV as a tarball (no git on the far side needed).
+# Ship node-py at $REV as a tarball (no git on the far side needed), into
+# ~/.local/share/<dir>/src (harmony-router by default).
 ship_archive() {
-  local target="$1" rev="$2" port=22
+  local target="$1" rev="$2" dir="${3:-harmony-router}" port=22
   [[ "$target" == *"#"* ]] && { port="${target#*#}"; target="${target%%#*}"; }
   git -C "$REPO" archive --format=tar "$rev" node-py | ssh -p "$port" -o BatchMode=yes "$target" \
-    'set -e; d="$HOME/.local/share/harmony-router/src"; rm -rf "$d"; mkdir -p "$d"; tar -x -C "$d"; echo '"$rev"' > "$d/.archive-rev"'
+    'set -e; d="$HOME/.local/share/'"$dir"'/src"; rm -rf "$d"; mkdir -p "$d"; tar -x -C "$d"; echo '"$rev"' > "$d/.archive-rev"'
 }
 
 rc=0
@@ -269,7 +283,9 @@ rc=0
   # Hosts fetch the pin by name, and `git fetch <remote> <short-sha>` fails
   # ("couldn't find remote ref"): expand to the full sha when this repo has it.
   REV="$(git -C "$REPO" rev-parse --verify -q "$REV^{commit}" 2>/dev/null || echo "$REV")"
-  echo "pinned revision: $REV"; }
+  echo "pinned revision: $REV"
+  FLEETD_REV="$(git -C "$REPO" rev-parse --verify -q "${FLEETD_REV:-$REV}^{commit}" 2>/dev/null || echo "${FLEETD_REV:-$REV}")"
+  echo "fleetd revision: $FLEETD_REV"; }
 for row in "${HOSTS[@]}"; do
   IFS='|' read -r name target region fleet fleetd archive <<<"$row"
   if [ ${#WANT[@]} -gt 0 ]; then
@@ -282,11 +298,15 @@ for row in "${HOSTS[@]}"; do
     if [ "${archive:-}" = archive ]; then
       ship_archive "$target" "$REV" || { rc=1; continue; }
     fi
+    if [ "$fleetd" = 1 ]; then
+      ship_archive "$target" "$FLEETD_REV" harmony-fleetd || { rc=1; continue; }
+    fi
     run_on "$target" "$(remote_install)" \
       "ARCHIVE=${archive:-}" \
       "REV=$REV" "NAME=$name" "REGION=$region" "FLEET_URL=$fleet" "PIP_INDEX=$pip_index" \
       "ORIGIN_URL=$ORIGIN_URL" "PEER_REPO=$PEER_REPO" \
-      "FLEETD=$fleetd" "FLEETD_PEERS=$FLEETD_PEERS" "FLEETD_LINK_PEERS=$FLEETD_LINK_PEERS" \
+      "FLEETD=$fleetd" "FLEETD_REV=$FLEETD_REV" "FLEETD_PEERS=$FLEETD_PEERS" "FLEETD_LINK_PEERS=$FLEETD_LINK_PEERS" \
+      "FLEETD_MCP_VIEWS=$FLEETD_MCP_VIEWS" \
       "FLEETD_UNIT=$(cat "$UNIT_DIR/harmony-fleetd.service")" \
       "UNIT=$(cat "$UNIT_DIR/harmony-router.service")" \
       "PLIST_TEMPLATE=$(cat "$UNIT_DIR/io.zztech.harmony-router.plist")" || { rc=1; continue; }
