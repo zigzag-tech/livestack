@@ -1797,7 +1797,7 @@ def _outcome_for(status: int, detail: str = "") -> str:
 async def proxy(path: str, request: Request):
     """Serve the request and leave one demand record for it, whatever happens."""
     routed = _parse_routed(request.headers.get(_ROUTED_HEADER))
-    ctx = {"t0": time.time(), "path": path,
+    ctx = {"t0": time.time(), "t0_mono": time.monotonic(), "path": path,
            # Minted by the first node that routes it, then carried unchanged so a
            # router's route record and the target's demand record join on it.
            "request_id": (request.headers.get("x-request-id") or "").strip() or _new_request_id(),
@@ -1977,6 +1977,60 @@ async def _off_loop(fn):
     """Run a blocking call (broker HTTP, peer probes) on a worker thread, so the
     loop keeps relaying the streams already in flight while it waits."""
     return await asyncio.get_running_loop().run_in_executor(None, fn)
+
+
+class SseStamper:
+    """Adds `"harmony": {"t_ms": N}` to every `data:` JSON chunk of an SSE stream.
+
+    N is integer milliseconds from when this node received the request to when
+    it received the chunk's bytes from the engine. A lossy link between this
+    node and the caller delivers a smooth stream in bursts; with the generation
+    time on each chunk a client can re-pace it (an RTP-style playout buffer).
+    The stamp is taken when the bytes arrive, before anything is held back here:
+    only a line split across reads waits, for the read that completes it.
+
+    `data: [DONE]`, comments, `event:` lines and any non-JSON payload pass
+    through byte-for-byte; a chunk that already carries a `harmony` object keeps
+    its other keys. Unknown top-level fields are tolerated by the OpenAI-
+    compatible parsers our clients use (AI SDK `looseObject`, serde's default).
+    """
+
+    def __init__(self, t0: float, clock=time.monotonic):
+        self._t0 = t0
+        self._clock = clock
+        self._buf = b""
+
+    def feed(self, chunk: bytes) -> bytes:
+        t_ms = max(0, int((self._clock() - self._t0) * 1000))
+        data = self._buf + chunk
+        cut = data.rfind(b"\n") + 1
+        self._buf = data[cut:]
+        if not cut:
+            return b""
+        return b"".join(self._line(l, t_ms) for l in data[:cut].splitlines(keepends=True))
+
+    def flush(self) -> bytes:
+        rest, self._buf = self._buf, b""
+        return self._line(rest, max(0, int((self._clock() - self._t0) * 1000))) if rest else b""
+
+    @staticmethod
+    def _line(line: bytes, t_ms: int) -> bytes:
+        if not line.startswith(b"data:"):
+            return line
+        body = line[5:]
+        end = body[len(body.rstrip(b"\r\n")):]
+        payload = body[:len(body) - len(end)].strip()
+        if not payload.startswith(b"{"):
+            return line
+        try:
+            obj = json.loads(payload)
+        except ValueError:
+            return line
+        if not isinstance(obj, dict):
+            return line
+        prev = obj.get("harmony")
+        obj["harmony"] = {**(prev if isinstance(prev, dict) else {}), "t_ms": t_ms}
+        return b"data: " + json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode() + end
 
 
 async def _proxy_impl(path: str, request: Request, ctx: dict):
@@ -2704,6 +2758,18 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
                      if k.lower() not in {"content-length", "transfer-encoding", "connection", "keep-alive"}},
         )
 
+    # Stamp each streamed chunk with when this node got it from its ENGINE
+    # (`harmony.t_ms`, see SseStamper). Only when the upstream IS the engine: a
+    # node relaying another Harmony node (fleet-placed, or a same-kind peer that
+    # holds the unit) passes the serving node's stamp through, which is the one
+    # taken nearest the engine.
+    stamper = None
+    if not fleet_target and not elsewhere and resp.status_code < 400 \
+            and path.strip("/") == "chat/completions" \
+            and isinstance(parsed_body, dict) and parsed_body.get("stream") \
+            and not resp.headers.get("content-encoding"):
+        stamper = SseStamper(ctx.get("t0_mono") or time.monotonic())
+
     async def body_iter():
         # The request is in flight until the LAST byte has been streamed to the
         # caller, not until the upstream accepted it — a generation that is still
@@ -2712,7 +2778,16 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         try:
             async for chunk in resp.aiter_raw():
                 tail.feed(chunk)
-                yield chunk
+                if stamper is None:
+                    yield chunk
+                    continue
+                out = stamper.feed(chunk)
+                if out:
+                    yield out
+            if stamper is not None:
+                out = stamper.flush()
+                if out:
+                    yield out
         finally:
             await resp.aclose()
             await client.aclose()
