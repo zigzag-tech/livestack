@@ -422,12 +422,16 @@ def handle_rpc(view_fn: Callable[[], Mapping], msg: Mapping, *, revision: str = 
 
 
 def revision() -> str:
+    """The broker's code revision: git when it runs from a checkout, else the revision an archive
+    install declares (HARMONY_FLEETD_REV / HARMONY_ROUTER_REV, set by harmony-router-rollout.sh)."""
+    declared = os.environ.get("HARMONY_FLEETD_REV") or os.environ.get("HARMONY_ROUTER_REV")
     try:
         import subprocess
-        return subprocess.run(["git", "-C", str(Path(__file__).parent), "rev-parse", "--short=8", "HEAD"],
-                              capture_output=True, text=True, timeout=3).stdout.strip() or "unknown"
+        rev = subprocess.run(["git", "-C", str(Path(__file__).parent), "rev-parse", "--short=8", "HEAD"],
+                             capture_output=True, text=True, timeout=3).stdout.strip()
     except Exception:
-        return os.environ.get("HARMONY_ROUTER_REV", "unknown")[:8]
+        rev = ""
+    return rev or (declared or "unknown")[:8]
 
 
 class MergedView:
