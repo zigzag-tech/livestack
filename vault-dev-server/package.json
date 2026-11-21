@@ -12,19 +12,19 @@
     "@livestack/shared": "^0.0.32",
     "@livestack/vault-interface": "^0.0.32",
     "ajv": "^8.20.0",
-    "better-sqlite3": "^12.10.0",
-    "bullmq": "^5.76.10",
-    "dotenv": "^17.4.2",
+    "better-sqlite3": "^13.2.0",
+    "bullmq": "^6.7.8",
+    "dotenv": "^18.0.10",
     "get-port": "^7.2.0",
     "jsonschema": "^1.5.0",
-    "knex": "^3.2.10",
+    "knex": "^3.3.0",
     "lodash": "^4.18.1",
-    "nice-grpc": "^2.1.16",
-    "redis": "^5.12.1",
-    "uuid": "^14.0.0"
+    "nice-grpc": "^2.2.0",
+    "redis": "^6.3.1",
+    "uuid": "^14.0.3"
   },
   "devDependencies": {
-    "@preconstruct/cli": "^2.8.13",
+    "@preconstruct/cli": "^2.9.0",
     "@types/node": "^24",
     "ts-node": "^10.9.2",
     "typescript": "6.0.3"

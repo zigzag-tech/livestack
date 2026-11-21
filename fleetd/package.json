@@ -13,15 +13,13 @@
     "policy-revert": "tsx scripts/policy-approve.mts --revert",
     "policy-publish": "tsx scripts/policy-publish.mts"
   },
-  "dependencies": {
-    "jingway-framework": "*"
-  },
   "devDependencies": {
     "@types/node": "^24",
-    "tsx": "^4.19.2",
+    "tsx": "^4.23.15",
     "typescript": "6.0.3"
   },
   "peerDependencies": {
+    "jingway-framework": "*",
     "zod": "^4"
   }
 }
