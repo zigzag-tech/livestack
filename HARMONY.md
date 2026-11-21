@@ -1168,7 +1168,28 @@ read the server's pid alone — and was handed `None` — so the footprint was
 accident.
 
 **The rev is pinned**, in `<root>/STRATA_VERSION` (what `engine_rev` reports to
-the ledger record of every load). The runbook:
+the ledger record of every load).
+
+**Since Strata 0.2.17 (2026-11-21) the serve tree is `<checkout>/terminal`**
+(upstream moved `serve/` there; `strata_root` names that directory, so
+`<root>/serve/server.py` and `<root>/.venv` still hold) and the engine is
+upstream's signed prebuilt `strata-engine-<ver>-linux-x86_64-cuda-cuda12`
+tarball, unpacked to `~/strata/releases/<ver>` and named by the run config's
+`exe`/`lib_dirs`. Nothing is built on the node. The checkout is
+`zigzag-tech/Strata` `zz/v<ver>`: the upstream tag plus vLLM's
+`continue_final_message`, which Simple Jev needs (stock Strata ignores it, so
+the primed `{"answer": "` vanishes). Logprobs, also under `"parallel"`, are
+upstream. `strata_hidden` is NOT carried: it needs an engine change and no
+prebuilt engine since 0.1.56 has it, so a request that names a label head
+(`options.head`) fails with `HeadError` ("the served model returned no hidden
+state") until it is upstreamed. Upgrade = clone the branch, unpack and sha256-check the tarball
+against the release's `SHA256SUMS.txt`, build `terminal/.venv` from
+`terminal/requirements.txt`, rewrite the run config's paths, repoint the unit
+(`strata_root`, `strata_config`, `engine_source.rev`), restart `harmony-llm`.
+The old `~/strata/strata-jev` stays for rollback (restore the units-file backup).
+Record of the 0.1.56 -> 0.2.17 move: xc-setup `docs/decision-model-harmony.md`.
+
+The source-build runbook (pre-0.2.17, `~/strata/strata`):
 
 ```sh
 diskreap auto --force          # the install wants ~70 GB of disk; stop below 100 GB free
