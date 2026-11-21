@@ -38,6 +38,7 @@ class _Node:
 
     def __init__(self, stream_status=200):
         self.got, outer = [], self
+        self.extra_headers = []
 
         class H(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
@@ -48,7 +49,8 @@ class _Node:
             def do_POST(self):
                 n = int(self.headers.get("content-length") or 0)
                 raw = self.rfile.read(n)
-                outer.got.append({"raw": raw, "h": {k.lower(): v for k, v in self.headers.items()}})
+                outer.got.append({"raw": raw, "h": {k.lower(): v for k, v in self.headers.items()},
+                                  "peer": self.client_address})
                 if json.loads(raw or b"{}").get("stream"):
                     self.send_response(stream_status)
                     self.send_header("content-type", "text/event-stream")
@@ -63,6 +65,8 @@ class _Node:
                     self.send_response(200)
                     self.send_header("content-type", "application/json")
                     self.send_header("content-length", str(len(out)))
+                    for k, v in outer.extra_headers:
+                        self.send_header(k, v)
                     self.end_headers()
                     self.wfile.write(out)
 
@@ -124,6 +128,31 @@ def test_a_stream_is_relayed_chunk_for_chunk(wired):
         assert r.status_code == 200
         got = b"".join(r.iter_raw())
     assert got == b"".join(_Node.CHUNKS)
+
+
+def test_a_second_request_to_the_same_target_reuses_the_connection(router, wired):
+    """One pooled client per router: on a relayed link every new connection costs
+    round trips plus slow start before the body arrives, so a warm one is reused."""
+    _, node, _ = wired
+    from fastapi.testclient import TestClient
+    with TestClient(router.app) as client:        # one app lifetime, as in production
+        for _ in range(2):
+            with client.stream("POST", "/v1/chat/completions", json=_body(stream=True)) as r:
+                assert r.status_code == 200 and b"".join(r.iter_raw()) == b"".join(_Node.CHUNKS)
+        client.post("/v1/chat/completions", json=_body())
+    assert len(node.got) == 3
+    assert node.got[0]["peer"] == node.got[1]["peer"] == node.got[2]["peer"]
+
+
+def test_a_hop_by_hop_connection_header_is_not_relayed(router, wired):
+    """An engine's `connection: close` describes its own hop; relayed, it would
+    make the caller drop its keep-alive connection to the router too."""
+    _, node, _ = wired
+    node.extra_headers = [("connection", "close")]
+    from fastapi.testclient import TestClient
+    with TestClient(router.app) as client:
+        r = client.post("/v1/chat/completions", json=_body())
+    assert r.status_code == 200 and "close" not in r.headers.get("connection", "")
 
 
 def test_the_target_sees_the_contract_header_and_never_a_router_credential(wired, monkeypatch):

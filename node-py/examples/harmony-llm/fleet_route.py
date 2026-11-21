@@ -328,7 +328,8 @@ async def send_routed(*, first: "tuple[str, str]", rechoose: "Callable[[list], t
                       headers: dict, params: dict, timeout, attempts: list,
                       on_stale: "Callable[[str], None] | None" = None,
                       max_attempts: int = 2, retry_unavailable: bool = False,
-                      on_busy: "Callable[[str], None] | None" = None):
+                      on_busy: "Callable[[str], None] | None" = None,
+                      client: "httpx.AsyncClient | None" = None):
     """Forward to `first = (target base, expect)`; on a refusal that costs no
     caller-visible byte -- `409 route_stale`, a connection failure before the
     response, or `429` -- ask `rechoose(excluded targets)` once and try the one
@@ -344,7 +345,15 @@ async def send_routed(*, first: "tuple[str, str]", rechoose: "Callable[[list], t
     target is dropped from the cached view via `on_busy`. `RouteFailed.retry_after_s`
     is the shortest advertised busy window, for the caller's `Retry-After`.
 
-    `attempts` is appended in place: `{target, expect, result}` per try."""
+    `attempts` is appended in place: `{target, expect, result}` per try.
+
+    `client`: a long-lived pooled client to send on (the router's, so a warm
+    keep-alive connection is reused instead of paying a TCP handshake and slow
+    start per request on a relayed link). It is never closed here, and the one
+    returned is that same client: the caller closes only a client it did not
+    pass. Without one, each attempt gets its own client, closed on refusal and
+    handed back with the answer for the caller to close."""
+    owned = client is None
     tried: list = []
     retry_after_s: "float | None" = None
     target, expect = first
@@ -352,11 +361,12 @@ async def send_routed(*, first: "tuple[str, str]", rechoose: "Callable[[list], t
         tried.append(target)
         hdrs = {**headers, ROUTED_HEADER: format_routed(router_id, expect),
                 "x-request-id": request_id}
-        client = httpx.AsyncClient(timeout=timeout)
+        if owned:
+            client = httpx.AsyncClient(timeout=timeout)
         refused, status = None, 502
         try:
             req = client.build_request(method, f"{target}/v1/{path}", content=body,
-                                       headers=hdrs, params=params)
+                                       headers=hdrs, params=params, timeout=timeout)
             resp = await client.send(req, stream=True)
             # Queue admission refusal is final: do not turn a caller deadline
             # into a retry or a new model load on another host.
@@ -389,7 +399,8 @@ async def send_routed(*, first: "tuple[str, str]", rechoose: "Callable[[list], t
             await resp.aclose()
         except Exception as e:
             refused, status = f"{type(e).__name__}: {e or '(no message)'}", 502
-        await client.aclose()
+        if owned:
+            await client.aclose()
         attempts.append({"target": target, "expect": expect, "result": refused})
         if attempt == max_attempts - 1:
             break
@@ -408,16 +419,18 @@ async def send_routed(*, first: "tuple[str, str]", rechoose: "Callable[[list], t
         first_target = attempts[0]["target"]
         hdrs = {**headers, ROUTED_HEADER: format_routed(router_id, "cold"),
                 "x-request-id": request_id}
-        client = httpx.AsyncClient(timeout=timeout)
+        if owned:
+            client = httpx.AsyncClient(timeout=timeout)
         try:
             req = client.build_request(method, f"{first_target}/v1/{path}", content=body,
-                                       headers=hdrs, params=params)
+                                       headers=hdrs, params=params, timeout=timeout)
             resp = await client.send(req, stream=True)
             attempts.append({"target": first_target, "expect": "cold",
                              "result": "ok" if resp.status_code < 400 else str(resp.status_code)})
             return resp, client
         except Exception as e:
-            await client.aclose()
+            if owned:
+                await client.aclose()
             attempts.append({"target": first_target, "expect": "cold",
                              "result": f"{type(e).__name__}: {e or '(no message)'}"})
             status = 502

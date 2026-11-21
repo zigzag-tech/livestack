@@ -231,6 +231,27 @@ def test_a_stale_route_is_retried_once_on_the_next_target():
         a.close(), b.close()
 
 
+def test_a_passed_pooled_client_carries_the_retry_and_is_left_open():
+    import httpx
+    a, b = _Target([STALE]), _Target([("200", {"ok": 1})])
+    try:
+        async def go():
+            async with httpx.AsyncClient() as pooled:
+                attempts = []
+                resp, client = await _send((a.base, "warm"), lambda tried: (b.base, "warm"),
+                                           attempts, client=pooled)
+                body = await resp.aread()
+                await resp.aclose()
+                assert client is pooled and not pooled.is_closed
+                return json.loads(body), attempts
+        body, attempts = _run(go())
+        assert body == {"ok": 1}
+        assert [x["result"] for x in attempts] == ["route_stale/not_resident", "ok"]
+        assert b.got[0]["routed"] == "r1;expect=warm;v=1"
+    finally:
+        a.close(), b.close()
+
+
 def test_queue_refusal_is_final_without_cold_retry():
     a, b = _Target([("429", {"detail": {"error": "wait_budget_exceeded"}})]), _Target([("200", {"ok": 1})])
     try:
