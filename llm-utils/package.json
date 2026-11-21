@@ -13,16 +13,16 @@
         "dist"
     ],
     "dependencies": {
-        "jsonrepair": "^3.14.0",
-        "sharp": "^0.34.5",
-        "zod": "^4.4.3"
+        "jsonrepair": "^3.15.0",
+        "sharp": "^0.35.5",
+        "zod": "^4.6.7"
     },
     "devDependencies": {
-        "@babel/core": "^7.29.0",
-        "@babel/preset-env": "^7.29.5",
-        "@babel/preset-typescript": "^7.28.5",
-        "@preconstruct/cli": "^2.8.13",
-        "jsonrepair": "^3.14.0",
+        "@babel/core": "^7.29.13",
+        "@babel/preset-env": "^7.29.14",
+        "@babel/preset-typescript": "^7.29.7",
+        "@preconstruct/cli": "^2.9.0",
+        "jsonrepair": "^3.15.0",
         "typescript": "^6.0.3"
     },
     "peerDependencies": {

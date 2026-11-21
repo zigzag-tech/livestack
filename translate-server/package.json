@@ -7,13 +7,13 @@
     "@livestack/lab-internal-common": "^0.0.32",
     "@livestack/summarizer": "^0.0.32",
     "@zigzag-tech/llm-catalog": "file:../../llm-catalog",
-    "zod": "^4.4.3"
+    "zod": "^4.6.7"
   },
   "main": "src/index.ts",
   "devDependencies": {
-    "@babel/core": "^7.29.0",
-    "@babel/preset-env": "^7.29.5",
-    "@babel/preset-typescript": "^7.28.5",
+    "@babel/core": "^7.29.13",
+    "@babel/preset-env": "^7.29.14",
+    "@babel/preset-typescript": "^7.29.7",
     "@types/node": "^24",
     "ts-node": "^10.9.2",
     "typescript": "6.0.3"
