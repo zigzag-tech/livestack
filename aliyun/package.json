@@ -13,8 +13,9 @@
     "@livestack/core": "*"
   },
   "devDependencies": {
-    "@preconstruct/cli": "^2.8.13",
+    "@preconstruct/cli": "^2.9.0",
     "@types/node": "^24",
+    "tsx": "^4.23.15",
     "typescript": "6.0.3"
   },
   "main": "dist/livestack-aliyun.cjs.js",
