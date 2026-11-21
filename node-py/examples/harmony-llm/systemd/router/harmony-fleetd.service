@@ -1,7 +1,7 @@
 # A regional FLEET broker (observe-only), for a region whose routers should not
-# fetch `/fleet` across the ocean: `cn` on zz-tower2 (the `na` one is
+# fetch `/fleet` across the ocean: `cn` on zz-lh-relay (the `na` one is
 # livestack-fleetd on xc-tower-ubuntu). Same code as every other broker, run from
-# the router's pinned source and venv (scripts/harmony-router-rollout.sh --fleetd).
+# the router's pinned source and venv (scripts/harmony-router-rollout.sh, fleetd=1 column).
 #
 # OBSERVE ONLY, by LIVESTACK_DISPATCH=observe: it plans nothing and warms,
 # evicts and reclaims nothing -- a host broker is the only residency authority.

@@ -1425,7 +1425,7 @@ only (tokens + route hints); no audio or transcript is stored by it or by the ro
   `websockets`). Env `~/.config/harmony-speech-router/env`; holds no credential.
 - **Bind.** `HARMONY_ROUTER_HOST` is one address or a comma list (`127.0.0.1,100.64.0.12`): the second address lets a relay on another tailnet host (histo-one) use this router as its `harmony-asr` target. Name addresses; never `0.0.0.0`.
 - **Fleet view** from `http://100.64.0.18:8801` (the tower's fleetd), because the
-  zz-tower2 fleetd lists only 3 peers and no polyasr node. A refresher thread
+  cn fleetd (then on zz-tower2) listed only 3 peers and no polyasr node. A refresher thread
   (`HARMONY_ROUTER_VIEW_REFRESH_S=5`) keeps it fresh off the request path (the fetch
   takes 1-6 s over the mesh); a dead broker keeps the last view for `STALE_MAX_S` (300 s).
 - **Relay target** `harmony-asr=http://127.0.0.1:8189` appended to `speechRelayAsrTargets`
@@ -1616,7 +1616,10 @@ zz-tower0, zz-tower2, xc-win-1 WSL (cn; WSL2's mirrored loopback means the same
 router answers Windows-native callers); yy-1 (cn, macOS launchd agent, source archive, added
 2026-11-21 at `52345e05`). Regional fleet brokers: `na` is
 livestack-fleetd on xc-tower-ubuntu:8801; `cn` is `harmony-fleetd` on
-zz-tower2:8801 (installed by the same rollout; zz-tower0's `livestack-fleetd-cn` is a
+zz-lh-relay:8801 (`http://100.64.0.21:8801`; moved from zz-tower2 2026-11-21 so the
+broker sits on the small always-on Nanjing relay box rather than a working computer;
+installed by the same rollout, whose fleetd=0 rows retire a leftover copy; the relay
+row runs from xc-tower-ubuntu, see the script; zz-tower0's `livestack-fleetd-cn` is a
 separate token-rollout rehearsal). There is no cn LLM node yet, so cn routers rank na
 nodes cross-region, distance `unknown` (no measured cn link rows).
 
