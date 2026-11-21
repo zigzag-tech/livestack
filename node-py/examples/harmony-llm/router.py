@@ -179,6 +179,38 @@ async def _unhandled_error(request: Request, exc: Exception):
     return JSONResponse({"detail": "Internal Server Error"}, status_code=500)
 
 
+# ONE pooled client to the serving nodes per router process (per event loop, so a
+# test client's own loop gets its own). A new connection per request cost a TCP
+# handshake plus slow start before the body arrived, on relayed links measured at
+# 100-1,600 ms round trips. The pool idles a connection out BEFORE a serving
+# node's uvicorn does (timeout_keep_alive 5 s, counted from its side, which is a
+# one-way delay ahead of ours): reusing one the node has just closed fails the
+# request instead of saving a handshake.
+UPSTREAM_KEEPALIVE_S = float(os.environ.get("HARMONY_ROUTER_KEEPALIVE_S", "3"))
+_upstream_client: "tuple | None" = None   # (loop, httpx.AsyncClient)
+# Hop-by-hop headers describe one connection (RFC 9110 7.6.1); a node's
+# `connection: close` relayed to the caller would end ITS keep-alive too.
+HOP_HEADERS = {"connection", "keep-alive", "content-length", "transfer-encoding"}
+
+
+def _upstream() -> httpx.AsyncClient:
+    global _upstream_client
+    import asyncio
+    loop = asyncio.get_running_loop()
+    if _upstream_client is None or _upstream_client[0] is not loop or _upstream_client[1].is_closed:
+        _upstream_client = (loop, httpx.AsyncClient(limits=httpx.Limits(
+            max_connections=64, max_keepalive_connections=16, keepalive_expiry=UPSTREAM_KEEPALIVE_S)))
+    return _upstream_client[1]
+
+
+@app.on_event("shutdown")
+async def _close_upstream():
+    global _upstream_client
+    if _upstream_client is not None:
+        client, _upstream_client = _upstream_client[1], None
+        await client.aclose()
+
+
 @app.on_event("startup")
 async def _start_view_refresher():
     if VIEW_REFRESH_S > 0 and FLEET_URL:
@@ -529,8 +561,8 @@ async def _route_embeddings(request: Request, raw: bytes, body, requirement, ctx
     headers["x-request-id"] = ctx["request_id"]
     timeout = httpx.Timeout(float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300")))
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(f"{node['base']}/v1/embeddings", json=out, headers=headers)
+        resp = await _upstream().post(f"{node['base']}/v1/embeddings", json=out, headers=headers,
+                                      timeout=timeout)
     except Exception as e:
         raise HTTPException(status_code=502,
                             detail=f"embed node {node['base']} failed: {type(e).__name__}: {e or '(no message)'}")
@@ -587,7 +619,7 @@ async def _route(path: str, request: Request, raw: bytes, ctx: dict):
                if k.lower() not in {"host", "content-length", fr.ROUTED_HEADER}}
     timeout = httpx.Timeout(budget + float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300")))
     try:
-        resp, client = await fr.send_routed(
+        resp, _ = await fr.send_routed(
             first=(target, rec.get("expect") or "cold"), rechoose=rechoose,
             router_id=ROUTER_ID, request_id=ctx["request_id"], method=request.method,
             path=path, body=raw, headers=headers, params=dict(request.query_params),
@@ -596,7 +628,7 @@ async def _route(path: str, request: Request, raw: bytes, ctx: dict):
             on_busy=lambda t: fr.mark_busy(FLEET_URL, t),
             max_attempts=((SPEECH_ATTEMPTS if speech and SPEECH_ATTEMPTS > 0 else None)
                           or rec["placement"]["attempt_policy"]["max_attempts"]),
-            retry_unavailable=speech)
+            retry_unavailable=speech, client=_upstream())
     except fr.RouteFailed as e:
         placement.record_outcome(rec["placement"]["problem_id"], target=None, success=False,
                                  cause=(e.attempts[-1]["result"] if e.attempts else "no attempt")[:200],
@@ -618,8 +650,7 @@ async def _route(path: str, request: Request, raw: bytes, ctx: dict):
             async for chunk in resp.aiter_raw():
                 yield chunk
         finally:
-            await resp.aclose()
-            await client.aclose()
+            await resp.aclose()   # the pooled client stays open: never closed per request
             ROUTES.record(**fr.route_row(
                 ctx, ROUTER_ID, "ok" if resp.status_code < 400 else "refused", resp.status_code))
 
@@ -629,7 +660,6 @@ async def _route(path: str, request: Request, raw: bytes, ctx: dict):
             # logged and answered from the fixed vocabulary.
             detail = (await resp.aread())[:500].decode("utf-8", "replace")
             await resp.aclose()
-            await client.aclose()
             # The cause is a bounded token (status only), never the engine's text.
             ROUTES.record(**fr.route_row(ctx, ROUTER_ID, "refused", resp.status_code,
                                          cause=f"engine_refused_{int(resp.status_code):03d}"))
@@ -640,8 +670,7 @@ async def _route(path: str, request: Request, raw: bytes, ctx: dict):
 
     return StreamingResponse(
         relay(), status_code=resp.status_code,
-        headers={k: v for k, v in resp.headers.items()
-                 if k.lower() not in {"content-length", "transfer-encoding"}})
+        headers={k: v for k, v in resp.headers.items() if k.lower() not in HOP_HEADERS})
 
 
 # --- streaming ASR: /ws/transcribe ---------------------------------------------
