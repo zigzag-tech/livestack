@@ -3428,6 +3428,19 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@livestack/fleetd@workspace:fleetd":
+  version: 0.0.0-use.local
+  resolution: "@livestack/fleetd@workspace:fleetd"
+  dependencies:
+    "@types/node": "npm:^24"
+    tsx: "npm:^4.19.2"
+    typescript: "npm:6.0.3"
+  peerDependencies:
+    jingway-framework: "*"
+    zod: ^4
+  languageName: unknown
+  linkType: soft
+
 "@livestack/gateway@npm:*, @livestack/gateway@npm:^0.0.32, @livestack/gateway@workspace:gateway":
   version: 0.0.0-use.local
   resolution: "@livestack/gateway@workspace:gateway"
@@ -3590,7 +3603,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/shared@npm:*, @livestack/shared@npm:^0.0.32, @livestack/shared@workspace:shared":
+"@livestack/shared@npm:*, @livestack/shared@workspace:shared":
   version: 0.0.0-use.local
   resolution: "@livestack/shared@workspace:shared"
   dependencies:
@@ -3612,7 +3625,19 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/storage-cas@workspace:*, @livestack/storage-cas@workspace:storage-cas":
+"@livestack/shared@npm:^0.0.32":
+  version: 0.0.32
+  resolution: "@livestack/shared@npm:0.0.32"
+  dependencies:
+    graphology: "npm:^0.25.4"
+    graphology-types: "npm:^0.24.7"
+    lru-cache: "npm:^10.2.2"
+    zod: "npm:^3.22.4"
+  checksum: 10c0/428f674427f39651604044c67d8a534e7a716cc0c2f44f545c0b5bf7864bbf0c4ad127d35f40430852a5c7823696256471ea95c64a764e145d7eefa7c96659dc
+  languageName: node
+  linkType: hard
+
+"@livestack/storage-cas@npm:*, @livestack/storage-cas@workspace:storage-cas":
   version: 0.0.0-use.local
   resolution: "@livestack/storage-cas@workspace:storage-cas"
   dependencies:
@@ -3637,7 +3662,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@livestack/storage-oss@workspace:storage-oss"
   dependencies:
-    "@livestack/storage-cas": "workspace:*"
+    "@livestack/storage-cas": "npm:*"
     "@preconstruct/cli": "npm:^2.8.13"
     typescript: "npm:6.0.3"
   languageName: unknown
@@ -5665,7 +5690,7 @@ __metadata:
 
 "@zigzag-tech/llm-catalog@file:../../llm-catalog::locator=%40livestack%2Fsummarizer%40workspace%3Asummarizer":
   version: 0.1.0
-  resolution: "@zigzag-tech/llm-catalog@file:../../llm-catalog#../../llm-catalog::hash=69f70c&locator=%40livestack%2Fsummarizer%40workspace%3Asummarizer"
+  resolution: "@zigzag-tech/llm-catalog@file:../../llm-catalog#../../llm-catalog::hash=d9a3ed&locator=%40livestack%2Fsummarizer%40workspace%3Asummarizer"
   dependencies:
     jsonrepair: "npm:^3.14.0"
     zod: "npm:^4.3.6"
@@ -5674,13 +5699,13 @@ __metadata:
   peerDependenciesMeta:
     openai:
       optional: true
-  checksum: 10c0/2bfc11528edba127ea39d6083a6aa7a2f26cc2bc789d0cc1e5d364bc831b4f84a5c633641df5428d7aca8ec4294392eb14555e191005c7efdc22488a8c42dcb9
+  checksum: 10c0/b7aaf73c9b47a5a1b338bd218b6589a57f18961a5c2a1cfe302e8ad0b21742822e05d78cd5e6a419ed02a9bb39dd047c3b0bbb64b373fbfcedea443b1c85a085
   languageName: node
   linkType: hard
 
 "@zigzag-tech/llm-catalog@file:../../llm-catalog::locator=%40livestack%2Ftranslate-server%40workspace%3Atranslate-server":
   version: 0.1.0
-  resolution: "@zigzag-tech/llm-catalog@file:../../llm-catalog#../../llm-catalog::hash=69f70c&locator=%40livestack%2Ftranslate-server%40workspace%3Atranslate-server"
+  resolution: "@zigzag-tech/llm-catalog@file:../../llm-catalog#../../llm-catalog::hash=d9a3ed&locator=%40livestack%2Ftranslate-server%40workspace%3Atranslate-server"
   dependencies:
     jsonrepair: "npm:^3.14.0"
     zod: "npm:^4.3.6"
@@ -5689,7 +5714,7 @@ __metadata:
   peerDependenciesMeta:
     openai:
       optional: true
-  checksum: 10c0/2bfc11528edba127ea39d6083a6aa7a2f26cc2bc789d0cc1e5d364bc831b4f84a5c633641df5428d7aca8ec4294392eb14555e191005c7efdc22488a8c42dcb9
+  checksum: 10c0/b7aaf73c9b47a5a1b338bd218b6589a57f18961a5c2a1cfe302e8ad0b21742822e05d78cd5e6a419ed02a9bb39dd047c3b0bbb64b373fbfcedea443b1c85a085
   languageName: node
   linkType: hard
 
@@ -8076,6 +8101,25 @@ __metadata:
   languageName: node
   linkType: hard
 
+"graphology-types@npm:^0.24.7":
+  version: 0.24.8
+  resolution: "graphology-types@npm:0.24.8"
+  checksum: 10c0/2c829a739ed2554934489b994140130007ae5b2281cb818f90371cae5cbeb27d574b552597af462d22694044abfeddfe179c2b94c736c8cfb2a7a35e43a8f894
+  languageName: node
+  linkType: hard
+
+"graphology@npm:^0.25.4":
+  version: 0.25.4
+  resolution: "graphology@npm:0.25.4"
+  dependencies:
+    events: "npm:^3.3.0"
+    obliterator: "npm:^2.0.2"
+  peerDependencies:
+    graphology-types: ">=0.24.0"
+  checksum: 10c0/b650a43619ccd9201ab02bafcbbcca2e2c4de646b22659ff660ad0669b4a2df3a5afb2f38a9135b3753b748cf2e897acfe9a34f0f3324362d9cd522282d41937
+  languageName: node
+  linkType: hard
+
 "gtoken@npm:^7.0.0":
   version: 7.1.0
   resolution: "gtoken@npm:7.1.0"
@@ -9557,7 +9601,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"lru-cache@npm:^10.2.0":
+"lru-cache@npm:^10.2.0, lru-cache@npm:^10.2.2":
   version: 10.4.3
   resolution: "lru-cache@npm:10.4.3"
   checksum: 10c0/ebd04fbca961e6c1d6c0af3799adcc966a1babe798f685bb84e6599266599cd95d94630b10262f5424539bc4640107e8a33aa28585374abf561d30d16f4b39fb
@@ -10157,6 +10201,13 @@ __metadata:
   version: 1.13.4
   resolution: "object-inspect@npm:1.13.4"
   checksum: 10c0/d7f8711e803b96ea3191c745d6f8056ce1f2496e530e6a19a0e92d89b0fa3c76d910c31f0aa270432db6bd3b2f85500a376a83aaba849a8d518c8845b3211692
+  languageName: node
+  linkType: hard
+
+"obliterator@npm:^2.0.2":
+  version: 2.0.5
+  resolution: "obliterator@npm:2.0.5"
+  checksum: 10c0/36e67d88271c51aa6412a7d449d6c60ae6387176f94dbc557eea67456bf6ccedbcbcecdb1e56438aa4f4694f68f531b3bf2be87b019e2f69961b144bec124e70
   languageName: node
   linkType: hard
 
@@ -12205,6 +12256,21 @@ __metadata:
   languageName: node
   linkType: hard
 
+"tsx@npm:^4.19.2":
+  version: 4.23.15
+  resolution: "tsx@npm:4.23.15"
+  dependencies:
+    esbuild: "npm:~0.28.0"
+    fsevents: "npm:~2.3.3"
+  dependenciesMeta:
+    fsevents:
+      optional: true
+  bin:
+    tsx: dist/cli.mjs
+  checksum: 10c0/3c5fc53e578da87d3a63565286b1ecbb0e01b9bb646daec1957294ef890d14f22cc67bb4b09b5daffab0e7ce0217b1e7645393feb0f524b1ddf26ae9595d7e75
+  languageName: node
+  linkType: hard
+
 "tsx@npm:^4.22.3":
   version: 4.22.3
   resolution: "tsx@npm:4.22.3"
@@ -12954,7 +13020,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"zod@npm:^3.21.4":
+"zod@npm:^3.21.4, zod@npm:^3.22.4":
   version: 3.25.76
   resolution: "zod@npm:3.25.76"
   checksum: 10c0/5718ec35e3c40b600316c5b4c5e4976f7fee68151bc8f8d90ec18a469be9571f072e1bbaace10f1e85cf8892ea12d90821b200e980ab46916a6166a4260a983c
