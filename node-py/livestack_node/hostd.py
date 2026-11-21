@@ -308,6 +308,11 @@ def build_app(broker: HostBroker):
 
     admit_queue = AdmitQueue()
 
+    # Adding a model: the runbook, the vocabulary and a fit/match check, as MCP
+    # (POST /mcp) and plain HTTP. All reads over the fleet view; see fleet_mcp.py.
+    from . import fleet_mcp
+    fleet_mcp.mount(app, lambda: broker.fleet_view())
+
     @app.post("/admit")
     def admit(http_request: HTTPRequest, payload: dict = Body(...), authorization: str = Header(None)):
         def caller_gone() -> bool:
