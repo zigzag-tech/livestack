@@ -63,6 +63,7 @@ livestack_node = [
     "decisions/data/profiles/*",
     "decisions/data/fixtures/*",
     "perception/data/*",
+    "runbooks/*.md",
 ]
 
 [tool.pytest.ini_options]
