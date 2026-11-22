@@ -198,6 +198,9 @@ def _unit_specs() -> "list[dict]":
             # .gguf path), read by engines/strata.py and ignored elsewhere.
             "strata_root": str(spec.get("strata_root") or ""),
             "strata_model": str(spec.get("strata_model") or ""),
+            # A vLLM unit's own `vllm` executable (engines/vllm.py), for a model that
+            # needs a newer vLLM than the node's venv; empty = the node's.
+            "vllm_bin": str(spec.get("vllm_bin") or ""),
             "gpu_fraction": str(spec.get("gpu_fraction", GPU_FRACTION)),
             "max_model_len": str(spec.get("max_model_len", MAX_MODEL_LEN) or ""),
             "extra_args": shlex.split(spec.get("extra_args", "")) or EXTRA_ARGS,

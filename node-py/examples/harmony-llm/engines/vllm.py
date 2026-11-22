@@ -199,7 +199,9 @@ class VllmEngine(Engine):
                           f"{cap:.3f} (configured {fraction})", flush=True)
                     fraction = f"{cap:.3f}"
         cmd = [
-            vllm_bin(),
+            # A unit may name its own vLLM (a model only a nightly serves, beside
+            # units pinned to the node's release); otherwise the node's.
+            spec.get("vllm_bin") or vllm_bin(),
             "serve", spec["model"],
             "--port", str(spec["port"]),
             "--host", "127.0.0.1",

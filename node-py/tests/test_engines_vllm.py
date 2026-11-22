@@ -196,3 +196,14 @@ def test_a_grant_is_clamped_to_live_free_vram(monkeypatch):
     monkeypatch.setattr(mod, "device_free_bytes", lambda: 20.8 * (1 << 30))
     argv = VllmEngine().argv(_real_spec(), {"vram_bytes": 23 * (1 << 30)}, total_bytes=total)
     assert argv[argv.index("--gpu-memory-utilization") + 1] == f"{(20.8 * 0.94) / 24:.3f}"
+
+
+def test_a_unit_may_name_its_own_vllm_executable(monkeypatch):
+    """A model that needs a newer vLLM (Inkling 2 Mini: nightly only, 2026-11) is
+    served from its own venv beside units pinned to the node's release; the
+    unit's `vllm_bin` launches it, and a unit without one keeps the node's."""
+    monkeypatch.setattr("engines.vllm.device_free_bytes", lambda: 0.0)
+    own = dict(_MIN_SPEC, vllm_bin="/opt/vllm-nightly/bin/vllm")
+    assert VllmEngine().argv(own, None, total_bytes=24 * _GIB)[0] == "/opt/vllm-nightly/bin/vllm"
+    import engines.vllm as ev
+    assert VllmEngine().argv(_MIN_SPEC, None, total_bytes=24 * _GIB)[0] == ev.vllm_bin()
