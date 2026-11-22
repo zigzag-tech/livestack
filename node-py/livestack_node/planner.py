@@ -702,7 +702,9 @@ def _unit_satisfies(u: Unit, requires: Mapping[str, object]) -> bool:
 # (the contract derives `inpaint` from them) is inpainting work.
 # A unit may hold several specialist capabilities (FLUX.2 Fun Union does depth guidance and inpainting with one
 # controller): demand naming ANY of them may use it, demand naming none may not.
-_SPECIALIST_ONLY_ATTRS = ("ocr", "depth_guide", "inpaint")
+# `trial`: a unit under evaluation (a new model) answers only demand that names it,
+# so being resident never makes it the answer to production callers.
+_SPECIALIST_ONLY_ATTRS = ("ocr", "depth_guide", "inpaint", "trial")
 
 
 def _specialist_only(u: Unit, requires: Mapping[str, object]) -> bool:

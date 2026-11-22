@@ -789,6 +789,29 @@ def test_a_specialist_unit_is_not_a_candidate_for_generic_demand():
     assert g3 and g3[0].kind == "ocr", "naming the unit is still an explicit choice"
 
 
+def test_a_unit_on_trial_serves_only_demand_that_names_trial():
+    """A model under evaluation (Inkling 2 Mini, 2026-11-22: 26.4B, so it meets the
+    hub's `class=llm,params_b>=20` decision demand) must not start answering
+    production callers because it is resident. `trial: true` keeps it out of
+    generic demand; a test request names `trial`, or the unit, to reach it."""
+    units = dict(_catalogue())
+    units["candidate"] = Unit("candidate", {"vram": 9}, priority=20, residency=Residency.UNPINNED,
+                              reload_cost=30, spread_group="llm", min_residency_s=0,
+                              attributes={"class": "llm", "params_b": 26.4, "trial": True})
+    generic = WorldState(devices=(gpu("gpu0"),), units=units,
+                         requests=(Request("r1", "", created_at=1000,
+                                           requires={"class": "llm", "params_b>=": 20}),),
+                         now=1000)
+    assert not [l for l in plan(generic).of(Load) if l.kind == "candidate"]
+    assert all(g.kind != "candidate" for g in plan(generic).of(Grant))
+    asked = WorldState(devices=(gpu("gpu0"),), units=units,
+                       requests=(Request("r2", "", created_at=1000,
+                                         requires={"class": "llm", "trial": True}),),
+                       now=1000)
+    g = [x for x in plan(asked).of(Grant) if x.request_id == "r2"]
+    assert g and g[0].kind == "candidate"
+
+
 def test_a_unit_with_several_specialist_capabilities_serves_demand_naming_any_of_them():
     """FLUX.2 Fun Union does depth guidance and inpainting with one controller, so its unit declares both. Demand that
     names either may use it; generic image demand, naming neither, still never lands on it."""

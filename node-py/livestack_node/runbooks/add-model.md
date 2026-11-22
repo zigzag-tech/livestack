@@ -50,6 +50,11 @@ Choosing attributes:
   attribute. Only demand that names that attribute may reach it
   (`_SPECIALIST_ONLY_ATTRS` in `planner.py`; extend the list for a new
   specialist kind).
+- **A model under evaluation declares `trial: true`** (also specialist-only): its
+  honest attributes may meet production demand (a 26B LLM meets the hub's
+  `class=llm,params_b>=20`), and being resident must not make it the answer.
+  Test requests name `trial`, e.g. `require:class=llm,trial=true`. Remove the
+  attribute when callers should reach it.
 - **Thinking is two things.** `thinking: true` only if the engine separates
   reasoning (vLLM `--reasoning-parser`). Otherwise narration leaks into
   `content` (benchday `docs/livestack-harmony.md`).
