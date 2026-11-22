@@ -7,6 +7,7 @@ import socket
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 import httpx
 from fastapi.testclient import TestClient
@@ -543,6 +544,67 @@ uvicorn.run(app,host='127.0.0.1',port=int(sys.argv[1]),log_level='error')
         self.node.last_served=__import__('time').monotonic()
         await self.node.evict('asr')
         self.assertIsNone(self.node.process,'keep-warm is not a pin')
+
+
+
+class UnitsProbeTest(unittest.TestCase):
+    """node-g / node-h 2026-11-23: the node announced polytts engines whose model files were
+    absent (its `units` list is hand-kept), and the broker evicted live work to warm them."""
+
+    def cfg(self, code, **extra):
+        return dict(units=[{'kind':'voxcpm','footprint':{'vram_bytes':6}},
+                           {'kind':'dots','footprint':{'vram_bytes':7}}],
+                    default_unit='voxcpm', units_probe=[sys.executable, '-c', code], **{'env':{}, **extra})
+
+    def probe(self, cfg):
+        from livestack_node.process_node import probe_units
+        with self.assertLogs('livestack.process_node', 'WARNING') as logs:
+            return probe_units(cfg), '\n'.join(logs.output)
+
+    def test_a_declared_unit_the_probe_does_not_name_is_dropped_with_its_reason(self):
+        out, logs = self.probe(self.cfg(
+            "import sys;print('dots model missing',file=sys.stderr);print('[\"voxcpm\",\"qwen\"]')"))
+        self.assertEqual(out['units'], [{'kind':'voxcpm','footprint':{'vram_bytes':6}}])
+        self.assertEqual(out['default_unit'], 'voxcpm')
+        self.assertIn('unit dots not offered', logs)
+        self.assertIn('dots model missing', logs)
+        self.assertEqual(ProcessNode(dict(out, worker_port=1)).rows.keys(), {'voxcpm'})
+
+    def test_a_dropped_default_falls_to_the_first_surviving_row(self):
+        out, logs = self.probe(self.cfg("print('[\"dots\"]')"))
+        self.assertEqual([r['kind'] for r in out['units']], ['dots'])
+        self.assertEqual(out['default_unit'], 'dots')
+        self.assertIn('default_unit voxcpm dropped', logs)
+
+    def test_a_failed_timed_out_or_unreadable_probe_keeps_the_declared_units(self):
+        from livestack_node import process_node
+        for code in ["raise SystemExit(3)", "print('voxcpm')", "print('[1]')",
+                     "import time;time.sleep(5)"]:
+            with self.subTest(code=code), unittest.mock.patch.object(process_node, 'UNITS_PROBE_TIMEOUT_S', 1):
+                cfg = self.cfg(code)
+                out, logs = self.probe(cfg)
+                self.assertEqual(out, cfg)
+                self.assertIn('keeping the declared units', logs)
+        cfg = dict(self.cfg(''), units_probe=['/nonexistent/probe'])
+        self.assertEqual(self.probe(cfg)[0], cfg)
+
+    def test_a_probe_that_leaves_no_unit_refuses_to_start(self):
+        from livestack_node.process_node import probe_units
+        with self.assertRaises(RuntimeError), self.assertLogs('livestack.process_node', 'WARNING'):
+            probe_units(self.cfg("print('[]')"))
+
+    def test_no_probe_changes_nothing(self):
+        from livestack_node.process_node import probe_units
+        cfg = self.cfg('')
+        del cfg['units_probe']
+        self.assertIs(probe_units(cfg), cfg)
+
+    def test_the_probe_runs_with_the_workers_env_and_cwd(self):
+        with tempfile.TemporaryDirectory() as d:
+            code = ("import json,os;print(json.dumps([os.environ['PROBE_KIND']] if "
+                    "os.getcwd()==os.path.realpath(%r) else []))" % d)
+            out, _logs = self.probe(self.cfg(code, cwd=d, env={'PROBE_KIND':'dots'}))
+        self.assertEqual([r['kind'] for r in out['units']], ['dots'])
 
 
 if __name__ == '__main__': unittest.main()

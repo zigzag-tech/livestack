@@ -17,6 +17,7 @@ import logging
 import os
 from pathlib import Path
 import signal
+import subprocess
 import sys
 import time
 import uuid
@@ -59,6 +60,52 @@ def host_health_hold(path):
         return None
     reason = doc.get('reason') if isinstance(doc.get('reason'), str) else ''
     return ('host health held: ' + (reason or 'held (no reason given)'))[:240]
+
+
+UNITS_PROBE_TIMEOUT_S = 30
+
+
+def probe_units(config):
+    """`config` with its declared `units` cut to the ones the worker says can load here.
+
+    The worker is not running when the node announces (it starts lazily on a warm), so a declared
+    row can name a unit whose model files are absent, and a broker then evicts real work to warm a
+    load certain to fail. Optional `units_probe` is an argv, run once here with the worker's env and
+    cwd, that prints a JSON list of unit kinds that can load (polytts: `python engines.py`). Rows
+    it does not name are dropped and logged; footprints stay from the config. A probe that fails,
+    times out or prints something else changes nothing: the declared rows stand (logged), because
+    an unreadable probe is not evidence that a unit is absent. If `default_unit` is dropped, the
+    first surviving declared row becomes the default. If no row survives, the node refuses to
+    start: it has nothing it could serve."""
+    probe = config.get('units_probe')
+    if not probe:
+        return config
+    env = {**os.environ, **config.get('env', {})}
+    try:
+        done = subprocess.run(probe, env=env, cwd=config.get('cwd'), stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, timeout=UNITS_PROBE_TIMEOUT_S)
+        if done.returncode:
+            raise RuntimeError(f'exit {done.returncode}: {done.stderr.strip()[-300:]}')
+        present = json.loads(done.stdout)
+        if not isinstance(present, list) or not all(isinstance(kind, str) for kind in present):
+            raise ValueError('not a JSON list of unit kinds')
+    except Exception as error:
+        log.warning('units_probe failed (%s: %s); keeping the declared units',
+                    type(error).__name__, str(error)[:300])
+        return config
+    kept = [row for row in config['units'] if row['kind'] in present]
+    for row in config['units']:
+        if row not in kept:
+            log.warning('unit %s not offered: units_probe says it cannot load on this host (%s)',
+                        row['kind'], done.stderr.strip()[-300:] or 'no reason given')
+    if not kept:
+        raise RuntimeError('process_node_units_probe_left_no_unit')
+    result = {**config, 'units': kept}
+    if config.get('default_unit') not in present:
+        result['default_unit'] = kept[0]['kind']
+        log.warning('default_unit %s dropped; default is now %s',
+                    config.get('default_unit'), result['default_unit'])
+    return result
 
 
 class ProcessNode:
@@ -905,6 +952,7 @@ def main():
     # A serving facade must never inherit a CUDA package path from its worker.
     if 'torch' in sys.modules or 'mlx.core' in sys.modules:
         raise RuntimeError('process_node_cpu_interpreter_required')
+    config=probe_units(config)
     if config.get('listen_ports'):
         import socket
         sockets=[]
