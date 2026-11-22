@@ -132,6 +132,13 @@ class Engine:
         engine that serves none (or serves them without flags)."""
         return []
 
+    def prepare_request(self, spec: dict, path: str, body: bytes) -> bytes:
+        """The request body as THIS engine must receive it (``path`` is the
+        OpenAI route after ``/v1/``, e.g. ``chat/completions``). Callers speak
+        one dialect, vLLM's; an engine that spells a field differently, or
+        lacks one, translates here. The default sends the body unchanged."""
+        return body
+
     def context_refusal(self, status: int, body: bytes) -> Optional[str]:
         """Does this refusal mean "the prompt is too long"? Returns the
         vendor's text when it does (the router turns it into a routing fact);

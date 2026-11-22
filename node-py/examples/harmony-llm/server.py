@@ -2592,6 +2592,11 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         engine_body = json.loads(body)
         engine_body.pop("harmony_max_wait_s", None)
         body = json.dumps(engine_body).encode()
+    # The caller's dialect is vLLM's; this unit's engine translates what it must
+    # (llama.cpp: structured_outputs.choice -> a wider top_logprobs). Only for our
+    # own engine: a peer or fleet target translates for its own.
+    if not elsewhere and not fleet_target and unit in SPECS:
+        body = _engine_for(SPECS[unit]).prepare_request(SPECS[unit], path, body)
 
     headers = {k: v for k, v in request.headers.items()
                if k.lower() not in {"host", "content-length"}}

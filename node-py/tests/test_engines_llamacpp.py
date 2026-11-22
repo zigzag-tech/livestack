@@ -51,3 +51,47 @@ def test_thinking_and_tools_need_the_models_own_template():
     assert a["thinking"] is True and a["tools"] is True and a["context_len"] == 32768
     b = e.launch_attributes(dict(SPEC, extra_args="--flash-attn on"))
     assert b["thinking"] is False and b["tools"] is False
+
+
+def _body(**kw):
+    import json as _json
+    base = {"model": "inkling_mini", "messages": [{"role": "user", "content": "x"},
+                                                  {"role": "assistant", "content": '{"answer": "'}],
+            "continue_final_message": True, "max_tokens": 1, "logprobs": True, "top_logprobs": 20,
+            "structured_outputs": {"choice": ["A", "B", "C", "D", "E", "F"]}}
+    base.update(kw)
+    return _json.dumps(base).encode()
+
+
+def test_a_choice_widens_top_logprobs_so_every_label_is_scored():
+    """llama.cpp ignores vLLM's structured_outputs and reports top_logprobs from the
+    raw logits; at 20 the pane-status labels came back 2 of 6 (Simple Jev then refuses
+    the answer). Widening the top-k is the only lever, and it is cheap (~80 ms at 1000)."""
+    import json as _json
+    from engines.llamacpp import CHOICE_TOP_LOGPROBS
+    out = _json.loads(LlamaCppEngine().prepare_request(SPEC, "chat/completions", _body()))
+    assert out["top_logprobs"] == CHOICE_TOP_LOGPROBS >= 1000
+    assert "structured_outputs" not in out
+    assert out["continue_final_message"] is True and out["max_tokens"] == 1
+
+
+def test_a_larger_ask_and_requests_without_a_choice_pass_untouched():
+    import json as _json
+    e = LlamaCppEngine()
+    wide = _json.loads(e.prepare_request(SPEC, "chat/completions", _body(top_logprobs=5000)))
+    assert wide["top_logprobs"] == 5000
+    plain = _body()
+    plain_obj = _json.loads(plain); plain_obj.pop("structured_outputs")
+    raw = _json.dumps(plain_obj).encode()
+    assert e.prepare_request(SPEC, "chat/completions", raw) == raw
+    no_lp = _json.loads(_body(logprobs=False))
+    assert "top_logprobs" in no_lp and _json.loads(
+        e.prepare_request(SPEC, "chat/completions", _body(logprobs=False)))["top_logprobs"] == 20
+    assert e.prepare_request(SPEC, "embeddings", b"not json") == b"not json"
+
+
+def test_other_engines_send_the_body_as_it_is():
+    from engines.vllm import VllmEngine
+    from engines.strata import StrataEngine
+    for e in (VllmEngine(), StrataEngine()):
+        assert e.prepare_request({}, "chat/completions", _body()) == _body()

@@ -22,6 +22,7 @@ NVML reading of the process confirms or corrects it.
 """
 from __future__ import annotations
 
+import json
 import os
 import shlex
 from typing import Mapping, Optional
@@ -32,6 +33,15 @@ from . import Engine, terminate_and_wait
 from .strata import StrataEngine
 
 DEFAULT_MAX_CONCURRENT = 1
+
+# The top-k a scored choice is asked at. vLLM's `structured_outputs.choice` forces
+# every permitted label into the returned support; llama.cpp ignores it and reports
+# `top_logprobs` from the raw logits (a grammar, `logit_bias` or
+# `post_sampling_probs` does not change them). At 20 the pane-status labels came
+# back 2 of 6 on Inkling 2 Mini, which Simple Jev refuses; at 1000 all six were
+# there (lowest -20.6), at ~80 ms (llama-server has no top-20 cap). Measured on
+# node-h, 2026-11-23 (xc-setup docs/inkling-2-mini-harmony.md).
+CHOICE_TOP_LOGPROBS = 1000
 
 
 def _tokens(spec: dict) -> "list[str]":
@@ -112,6 +122,27 @@ class LlamaCppEngine(Engine):
         if spec.get("max_model_len"):
             attrs["context_len"] = int(spec["max_model_len"])
         return attrs
+
+    def prepare_request(self, spec: dict, path: str, body: bytes) -> bytes:
+        """`structured_outputs.choice` with `logprobs`: widen `top_logprobs` so the
+        labels are scored, and drop the field llama.cpp does not know. Anything
+        else passes byte for byte."""
+        if not path.endswith("completions"):
+            return body
+        try:
+            req = json.loads(body)
+        except ValueError:
+            return body
+        so = req.get("structured_outputs") if isinstance(req, dict) else None
+        if not (isinstance(so, dict) and so.get("choice") and req.get("logprobs")):
+            return body
+        req.pop("structured_outputs")
+        try:
+            asked = int(req.get("top_logprobs") or 0)
+        except (TypeError, ValueError):
+            asked = 0
+        req["top_logprobs"] = max(asked, CHOICE_TOP_LOGPROBS)
+        return json.dumps(req).encode()
 
     def stop(self, proc) -> None:
         terminate_and_wait(proc, "llama-server")
