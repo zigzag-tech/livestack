@@ -58,6 +58,11 @@ Choosing attributes:
 - **Thinking is two things.** `thinking: true` only if the engine separates
   reasoning (vLLM `--reasoning-parser`). Otherwise narration leaks into
   `content` (benchday `docs/livestack-harmony.md`).
+- **`priority`: a LOWER number is MORE important** (ASR 10, `flash_next` 110). A unit
+  may preempt only residents with a larger number. A trial or low-value unit needs a
+  number above every production unit on its card, or production demand is refused
+  "no device can fit even with preemption ... blocked by pins/priority" while it is
+  resident (node-h, 2026-11-23: Inkling at 60 blocked `flash_next` at 110).
 - **The footprint is weights plus peak activation, measured.** It is not the
   checkpoint size. Load the model once and read the peak.
 

@@ -812,6 +812,28 @@ def test_a_unit_on_trial_serves_only_demand_that_names_trial():
     assert g and g[0].kind == "candidate"
 
 
+def test_a_resident_trial_unit_yields_its_card_to_production_demand():
+    """node-h, 2026-11-23: a resident trial unit declared priority 60 (MORE
+    important than flash_next's 110, lower number wins) and production demand was
+    refused "blocked by pins/priority". Declared above production it is evicted."""
+    def world(trial_priority):
+        units = {
+            "prod": Unit("prod", {"vram": 19}, priority=110, residency=Residency.UNPINNED,
+                         reload_cost=120, min_residency_s=180, attributes={"class": "llm", "params_b": 125}),
+            "candidate": Unit("candidate", {"vram": 25.33}, priority=trial_priority,
+                              residency=Residency.UNPINNED, reload_cost=30, min_residency_s=60,
+                              attributes={"class": "llm", "params_b": 26.4, "trial": True}),
+        }
+        return WorldState(devices=(gpu("gpu0", cap=32, reserved=0.25),), units=units,
+                          placements=(Placement("candidate", "gpu0", loaded_at=0),),
+                          requests=(Request("r1", "", created_at=1000,
+                                            requires={"class": "llm", "params_b>=": 20}),), now=1000)
+    assert not plan(world(60)).of(Grant)
+    out = plan(world(200))
+    assert [g.kind for g in out.of(Grant)] == ["prod"]
+    assert [e.kind for e in out.of(Evict)] == ["candidate"]
+
+
 def test_a_unit_with_several_specialist_capabilities_serves_demand_naming_any_of_them():
     """FLUX.2 Fun Union does depth guidance and inpainting with one controller, so its unit declares both. Demand that
     names either may use it; generic image demand, naming neither, still never lands on it."""
