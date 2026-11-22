@@ -173,6 +173,8 @@ def engine_for(spec: Mapping) -> Engine:
 # the registry to exist yet.
 from . import strata as _strata        # noqa: E402
 from . import vllm as _vllm            # noqa: E402
+from . import llamacpp as _llamacpp    # noqa: E402
 
 register(_vllm.VllmEngine())
 register(_strata.StrataEngine())
+register(_llamacpp.LlamaCppEngine())

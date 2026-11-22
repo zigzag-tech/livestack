@@ -201,6 +201,11 @@ def _unit_specs() -> "list[dict]":
             # A vLLM unit's own `vllm` executable (engines/vllm.py), for a model that
             # needs a newer vLLM than the node's venv; empty = the node's.
             "vllm_bin": str(spec.get("vllm_bin") or ""),
+            # llama.cpp placement (engines/llamacpp.py): the server binary, the
+            # GGUF and an optional vision projector.
+            "llamacpp_bin": str(spec.get("llamacpp_bin") or ""),
+            "gguf": str(spec.get("gguf") or ""),
+            "mmproj": str(spec.get("mmproj") or ""),
             "gpu_fraction": str(spec.get("gpu_fraction", GPU_FRACTION)),
             "max_model_len": str(spec.get("max_model_len", MAX_MODEL_LEN) or ""),
             "extra_args": shlex.split(spec.get("extra_args", "")) or EXTRA_ARGS,
