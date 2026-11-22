@@ -58,6 +58,27 @@ no boot id and are released at the first start, so deploy while `GET /status` sh
 **Not yet deployed: node-a needs a hostd deploy** (only `device_leases.py` changed; cherry-pick onto the
 pinned release as above and run `tests/test_device_leases.py`).
 
+## Deployed: process-node `units_probe` on the polytts facades of node-g and node-h (64959424), 2026-11-23
+
+Both nodes announced only `voxcpm` by a hand-edited `units` list; nothing stopped a re-added row for an
+engine with no model files (cosyvoice, dots, qwen are absent on both). Now the facade runs polytts's
+`python engines.py` at start and drops what it does not name (`docs/process-node-units-probe.md`).
+Backported with `scripts/backport-process-node-units-probe.py`, each on its own base:
+
+| host / unit | base release | new release |
+|---|---|---|
+| node-g `polytts` | e2fb4bbace24e144 | a0b570feb264e6ab |
+| node-h `polytts` | e2fb4bbace24e144-holds-stale | f32cccd7f18b2b8e |
+
+- `~/polytts` on both moved to polytts b34c5b2 (detached, as before). `polytts.json` gained
+  `units_probe` (backup `polytts.json.bak-20261123-probe`); drop-in backup
+  `/etc/systemd/system/zz-harmony-process-node.conf.polytts.before-units-probe-20261123`. polyasr on the
+  same hosts stays on its old release. Restarted while idle (no polytts process on the GPU, `in_flight 0`).
+- After: `GET :8801/fleet` lists `voxcpm` alone for both `:8100` nodes. Positive test on node-g: a
+  `dots` row added to the config was dropped at start (`unit dots not offered: ... not in the local
+  Hugging Face cache`), then removed again.
+- Roll back one node: restore the drop-in backup, `daemon-reload`, restart `polytts`.
+
 ## Deployed: a door that said `started` keeps reading while it admits (PR #35), 2026-11-17
 
 Fault (2026-11-17 14:05 CST, owner dictation in Nanjing via `hto-histo-na`). The facade answered `started`,
