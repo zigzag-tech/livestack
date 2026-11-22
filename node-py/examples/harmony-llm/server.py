@@ -1453,7 +1453,10 @@ def _peer_at(device_id: str) -> "str | None":
 # request was answered by the OCR unit, which had stopped the resident 27B to
 # load. Stating the attribute in the requirement, or naming the unit, still
 # works — only generic selection is refused.
-_LOCAL_SPECIALIST_ONLY = ("ocr",)
+# The planner's own list, never a copy: a copy here stayed ("ocr",) while the
+# planner learned depth_guide, inpaint and trial, and on 2026-11-22 a `trial`
+# unit on node-g answered production `class=llm` demand through this path.
+from livestack_node.planner import _SPECIALIST_ONLY_ATTRS as _LOCAL_SPECIALIST_ONLY  # noqa: E402
 
 
 def _local_satisfies(name: str, requires: dict) -> bool:
