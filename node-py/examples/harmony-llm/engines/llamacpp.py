@@ -13,7 +13,12 @@ Units file fields (read here, ignored by the other engines):
   `vision` is true exactly when that file exists;
 * `max_model_len` -> `-c`, `attributes.max_concurrent` -> `-np` (llama.cpp
   splits `-c` across its slots, so the per-request window is `-c / -np`: the
-  adapter multiplies, so the declared `context_len` is what each request gets);
+  adapter multiplies, so the declared `context_len` is what each request gets).
+  With `--kv-unified` in `extra_args` the slots share ONE pool of `-c` and any
+  request may fill it, so `-c` is the declared window, not multiplied: two
+  slots at 131072 then cost what one does (Inkling 2 Mini Q4 on a 3090:
+  22.2 GB either way, 24.4 GB as two separate pools), and two requests whose
+  contexts together exceed the pool contend for it;
 * `extra_args` — anything else (`--flash-attn on`, `--cache-type-k q8_0`, ...).
 
 The weights are loaded up front at a fixed size (`-ngl 999`), so a planner
@@ -71,7 +76,8 @@ class LlamaCppEngine(Engine):
         cmd = [binary, "-m", gguf, "--host", "127.0.0.1", "--port", str(spec["port"]),
                "--alias", str(spec["name"]), "-ngl", "999", "-np", str(slots)]
         if spec.get("max_model_len"):
-            cmd += ["-c", str(int(spec["max_model_len"]) * slots)]
+            pool = 1 if "--kv-unified" in _tokens(spec) else slots
+            cmd += ["-c", str(int(spec["max_model_len"]) * pool)]
         mmproj = str(spec.get("mmproj") or "").strip()
         if mmproj:
             cmd += ["--mmproj", mmproj]

@@ -30,6 +30,15 @@ def test_the_launch_line_gives_each_slot_the_declared_window():
     assert argv[-3:] == ["--jinja", "--flash-attn", "on"] and "--mmproj" not in argv
 
 
+def test_a_unified_pool_is_the_declared_window_not_one_per_slot():
+    """--kv-unified: every slot may use the whole -c, so multiplying it would
+    allocate twice the KV the unit declared (and not fit the card)."""
+    argv = LlamaCppEngine().argv(dict(SPEC, extra_args="--jinja --kv-unified"))
+    assert argv[argv.index("-np") + 1] == "2"
+    assert argv[argv.index("-c") + 1] == "32768"
+    assert LlamaCppEngine().launch_attributes(dict(SPEC, extra_args="--kv-unified"))["context_len"] == 32768
+
+
 def test_a_unit_without_binary_or_model_is_refused():
     with pytest.raises(ValueError):
         LlamaCppEngine().argv(dict(SPEC, gguf=""))
