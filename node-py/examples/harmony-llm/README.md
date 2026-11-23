@@ -293,8 +293,26 @@ starved the 27B everything actually wanted ("What NOT to offer", above).
 Named for the SLOT, deliberately, not the model. `tools/title-bakeoff` in
 benchday rewrites this unit's `model` in place, so `qwen38_27b` would go stale
 the first time the weights changed — the same dishonesty one axis over. What the
-weights are belongs in `attributes` (`params_b`, `family`, `quant`, `context_len`),
-where a caller's requirement string can match on it.
+weights are belongs in `attributes` (`params_b`, `family`, `quant`, `context_len`,
+`aa_index`), where a caller's requirement string can match on it.
+
+**`aa_index` — how smart, as one number.** Every `class=llm` unit declares its model's
+[Artificial Analysis Intelligence Index](https://artificialanalysis.ai/) score, so a caller
+asks for capability instead of a size or a family: `require:class=llm,aa_index>=20`,
+`aa_index=[15,25)`. Size is a poor stand-in for capability: Inkling 2 Mini (26.4B total,
+5.4B active) ties Qwen3.8-27B (xhigh) on the index. The declaring rules:
+
+- **The published score of the model**, the one AA prints. It is not a measurement of our
+  quantization: our Q4 GGUF carries the vendor model's number.
+- **One number for a model with several reasoning levels:** take the level that ranks
+  highest (the first one in AA's ranking). The unit runs with reasoning on.
+- **Scores are only comparable within one index version.** Today's values are v5.0.1.
+  When AA moves to a new version, re-read every LLM unit's score at once, and update the
+  callers' thresholds at the same time.
+- **Not on AA:** leave `aa_index` out. An undeclared attribute never satisfies a
+  requirement, so a caller asking `aa_index>=…` will never land on an unscored model.
+
+Declared today (v5.0.1, read 2026-11-23): Inkling 2 Mini `20` (all `inkling_mini*` units).
 
 **Almost nothing named it, which is the point of the requirement grammar.** The
 benchday hub asks for
