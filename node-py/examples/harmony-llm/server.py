@@ -1854,6 +1854,9 @@ class _Retargeted:
     async def body(self) -> bytes:
         return self._body
 
+    async def is_disconnected(self) -> bool:
+        return await self._request.is_disconnected()
+
 
 _EMBED_VIEW = _EmbedView()
 
@@ -2042,6 +2045,54 @@ class SseStamper:
         prev = obj.get("harmony")
         obj["harmony"] = {**(prev if isinstance(prev, dict) else {}), "t_ms": t_ms}
         return b"data: " + json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode() + end
+
+
+# NO GENERATION WITHOUT A READER, AND NONE WITHOUT AN END (2026-11-24).
+#
+# Measured on node-a: a caller that gave up while its request waited in the queue was still sent to the
+# engine afterwards, and a caller that disconnected mid-generation left the engine generating — with no max_tokens,
+# llama.cpp's n_predict is -1, and two such orphans held both Inkling slots for over an hour (34k and 26k tokens)
+# while every other caller timed out behind them. Three bounds, each enough on its own for one of the paths:
+#   - every chat/completions request gets an output bound when it names none (HARMONY_LLM_DEFAULT_MAX_TOKENS);
+#   - a request whose caller left while it was queued is not sent;
+#   - while the engine works on a request (a non-streamed one sends nothing until it is done, so the response
+#     stream cannot notice the caller leaving), the caller is checked every second and the upstream request is
+#     cancelled when it has gone.
+_DEFAULT_MAX_TOKENS = int(os.environ.get("HARMONY_LLM_DEFAULT_MAX_TOKENS", "4096"))
+
+
+def _bound_output(path: str, parsed_body, body: bytes) -> bytes:
+    """The request with an output bound: unchanged when it names one, or is not a completion."""
+    if not isinstance(parsed_body, dict) or path.strip("/") not in ("chat/completions", "completions") \
+            or any(k in parsed_body for k in ("max_tokens", "max_completion_tokens", "n_predict")):
+        return body
+    bounded = json.loads(body)
+    bounded["max_tokens"] = _DEFAULT_MAX_TOKENS
+    return json.dumps(bounded).encode()
+
+
+class _CallerGone(Exception):
+    pass
+
+
+async def _caller_gone(request) -> bool:
+    check = getattr(request, "is_disconnected", None)
+    return bool(check and await check())
+
+
+async def _send_while_caller_waits(client, req, request):
+    task = asyncio.ensure_future(client.send(req, stream=True))
+    while True:
+        done, _ = await asyncio.wait({task}, timeout=1.0)
+        if done:
+            return task.result()
+        if await _caller_gone(request):
+            task.cancel()
+            try:
+                await task
+            except BaseException:
+                pass
+            raise _CallerGone()
 
 
 async def _proxy_impl(path: str, request: Request, ctx: dict):
@@ -2592,6 +2643,8 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         engine_body = json.loads(body)
         engine_body.pop("harmony_max_wait_s", None)
         body = json.dumps(engine_body).encode()
+    if not elsewhere and not fleet_target:
+        body = _bound_output(path, parsed_body, body)
     # The caller's dialect is vLLM's; this unit's engine translates what it must
     # (llama.cpp: structured_outputs.choice -> a wider top_logprobs). Only for our
     # own engine: a peer or fleet target translates for its own.
@@ -2641,8 +2694,16 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         try:
             req = client.build_request(request.method, url, content=body, headers=headers,
                                        params=dict(request.query_params))
+            if await _caller_gone(request):
+                raise _CallerGone()
             ctx["sent_at"] = time.time()          # first-token time starts here, not at the queue
-            resp = await client.send(req, stream=True)
+            resp = await _send_while_caller_waits(client, req, request)
+        except _CallerGone:
+            await client.aclose()
+            _busy.release()
+            _release_slot(ctx)
+            print(f"[harmony-llm] {ctx.get('request_id')}: the caller went away; not served", flush=True)
+            raise HTTPException(status_code=499, detail="the caller went away")
         except Exception as e:
             await client.aclose()
             _busy.release()
