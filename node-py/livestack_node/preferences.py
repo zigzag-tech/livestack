@@ -27,6 +27,9 @@ METRICS = {
     # nobody measured is "no observation" and orders nothing — silence is not a
     # zero and not an opinion.
     "llm.params_b": "max",
+    # Declared, like params_b: the Artificial Analysis Intelligence Index
+    # (harmony-llm README, `aa_index`).
+    "llm.aa_index": "max",
     "llm.context_len": "max",
     "llm.decode_tok_s": "max",
     "llm.first_token_ms": "min",

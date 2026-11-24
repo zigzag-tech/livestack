@@ -347,7 +347,7 @@ TOOLS = [
          "exclusive_device": {"type": "boolean"},
          "caller_need": {"type": "string", "description": "the require: string callers will send"}}}},
     {"name": "harmony_match_need",
-     "description": ("Which declared units a caller's need selects (`require:class=llm,params_b=[20,]` or a "
+     "description": ("Which declared units a caller's need selects (`require:class=llm,aa_index>=20` or a "
                      "harmony_requires object), why the others do not, and whether any clause is "
                      "inexpressible. Use after deploying to prove the new unit is reachable."),
      "inputSchema": {"type": "object", "required": ["need"], "properties": {

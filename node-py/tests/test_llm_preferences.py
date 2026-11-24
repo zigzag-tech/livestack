@@ -197,3 +197,13 @@ def test_the_inventory_publishes_what_it_measured_with_sample_counts():
     # A metric nobody measured is ABSENT — silence is not a zero.
     assert "first_token_ms" not in inv["llm"]
     assert unit_inventory({}, fitted=None) == {}
+
+
+def test_the_inventory_publishes_the_declared_aa_index_so_prefer_can_max_it():
+    # `aa_index` (Artificial Analysis Intelligence Index, harmony-llm README) is
+    # declared like params_b, so `prefer llm.aa_index: max` picks the smarter unit.
+    from livestack_node.preferences import METRICS
+    assert METRICS["llm.aa_index"] == "max"
+    inv = unit_inventory({"params_b": 26.4, "aa_index": 20})
+    assert inv["llm"]["aa_index"]["value"] == 20.0
+    assert "aa_index" not in unit_inventory({"params_b": 27}).get("llm", {})

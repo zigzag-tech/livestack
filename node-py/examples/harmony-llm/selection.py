@@ -7,7 +7,7 @@ and `preferences.observation()` reads absence as "no opinion" — silence is not
 a zero.
 
 What one unit publishes here is what its launch line says (`params_b`, served
-`context_len`) plus what its engine MEASURED (`decode_tok_s`,
+`context_len`, the declared `aa_index`) plus what its engine MEASURED (`decode_tok_s`,
 `first_token_ms`) — carried from harmony-llm's fitted cost rows with their
 sample counts, exactly like the `asr.*` metrics. The `model_revision` is what
 makes the numbers comparable across units: the composition hash a measurement
@@ -32,7 +32,7 @@ def unit_inventory(attrs: Mapping, fitted: "Optional[Mapping]" = None,
     opinion"), never a zero."""
     now = time.time()
     llm: dict = {}
-    for key in ("params_b", "context_len"):
+    for key in ("params_b", "aa_index", "context_len"):
         v = attrs.get(key)
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             llm[key] = {"value": float(v), "sample_count": 1,
