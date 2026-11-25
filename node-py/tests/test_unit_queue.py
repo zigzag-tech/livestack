@@ -296,6 +296,16 @@ def _fleet_node(base, resident, queue=None, load_s=None):
             "inventory": {"units": {"llm_serial": unit}}}
 
 
+def _priced_self(srv, monkeypatch):
+    """A real serving unit has a measured decode rate; without one it is unpriced
+    and the old warm-first rule keeps it (by design)."""
+    orig = srv._inventory_for
+    obs = {"value": 50.0, "sample_count": 5, "measured_at": time.time(), "ttl_s": 86400.0,
+           "model_revision": "measured:test"}
+    monkeypatch.setattr(srv, "_inventory_for",
+                        lambda n: {**orig(n), "llm": {**(orig(n).get("llm") or {}), "decode_tok_s": obs}})
+
+
 def test_a_full_resident_unit_asks_the_fleet_and_an_idle_copy_wins(srv, upstream, monkeypatch):
     """2026-11-25: a resident unit counted as ready however full it was, so the
     busy node never asked the fleet and every request queued behind it. Full now
@@ -312,13 +322,14 @@ def test_a_full_resident_unit_asks_the_fleet_and_an_idle_copy_wins(srv, upstream
                                               "estimated_wait_s": 60.0})]},
         "idle": {"nodes": [_fleet_node(idle, False, load_s=4.0)]}}}
     monkeypatch.setattr(srv, "_fleet_view", lambda url, *a, **k: view)
+    _priced_self(srv, monkeypatch)
     body = {"model": "require:class=llm", "max_tokens": 1,
             "messages": [{"role": "user", "content": "x"}]}
 
     free = TestClient(srv.app).post("/harmony/route", json=body).json()
     assert free["fleet"]["decision"] == "not routed"
 
-    held = srv._QUEUES.acquire("llm_serial", 1, service_s=0.1)
+    held = srv._QUEUES.acquire("llm_serial", 1, service_s=60.0)
     try:
         full = TestClient(srv.app).post("/harmony/route", json=body).json()
     finally:
@@ -326,3 +337,41 @@ def test_a_full_resident_unit_asks_the_fleet_and_an_idle_copy_wins(srv, upstream
     assert full["fleet"]["trigger"] == "saturated"
     assert full["fleet"]["chosen"] == idle
     assert full["fleet"]["expect"] == "cold"
+
+
+def test_the_node_ranks_itself_on_its_live_state_not_the_snapshot(srv, upstream, monkeypatch):
+    """2026-11-25: right after a restart the broker's row for node-g still said
+    nothing was resident while its slots were full, so no finish time could be
+    compared and the overflow went by distance. The node overlays its own row."""
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(srv, "_QUEUES", Queues())
+    monkeypatch.setattr(type(srv.manager), "resident", property(lambda self: {"llm_serial"}))
+    monkeypatch.setattr(srv, "FLEET_URL", "http://fleet.test")
+    near, far = "http://100.64.0.98:8188", "http://100.64.0.99:8188"
+    slow = _fleet_node(near, False, load_s=40.0)
+    fast = _fleet_node(far, False, load_s=4.0)
+    fast["probe_ms"] = 250.0
+    stale_self = _fleet_node(srv.SELF_BASE, False)          # the snapshot: not resident
+    view = {"generated_at": time.time(), "hosts": {
+        "self": {"nodes": [stale_self]}, "near": {"nodes": [slow]}, "far": {"nodes": [fast]}}}
+    monkeypatch.setattr(srv, "_fleet_view", lambda url, *a, **k: view)
+    _priced_self(srv, monkeypatch)
+    body = {"model": "require:class=llm", "max_tokens": 1,
+            "messages": [{"role": "user", "content": "x"}]}
+    held = srv._QUEUES.acquire("llm_serial", 1, service_s=60.0)
+    waiting = []
+    t = threading.Thread(target=lambda: waiting.append(srv._QUEUES.acquire("llm_serial", 1, service_s=60.0)))
+    t.start()
+    try:
+        deadline = time.monotonic() + 2
+        while not srv._QUEUES.status("llm_serial", 1)["waiting"] and time.monotonic() < deadline:
+            time.sleep(0.001)
+        out = TestClient(srv.app).post("/harmony/route", json=body).json()
+    finally:
+        held.release()
+        t.join(5)
+        for w in waiting:
+            w.release()
+    assert out["fleet"]["trigger"] == "saturated"
+    # Priced: the 4 s load wins over the nearer 40 s one; by distance it would not.
+    assert out["fleet"]["chosen"] == far

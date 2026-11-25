@@ -1079,6 +1079,33 @@ manager, residence = attach(
 )
 
 
+def _view_with_self(view):
+    """The fleet view with THIS node's row as it is now: which units are resident
+    and each unit's live queue, from this process rather than the broker's last
+    snapshot of it. The node is the authority on itself, and the snapshot lags:
+    2026-11-25, right after a restart node-g's row still said nothing was
+    resident while its 2 slots were full with 4 waiting, so every target was
+    "cold, the only llm", no finish time could be compared, and the overflow went
+    by distance to an 18 s load on the tower over a 4 s one on node-h."""
+    if not isinstance(view, dict) or not isinstance(view.get("hosts"), dict):
+        return view
+    resident = {n for n in getattr(manager, "resident", ()) if n in SPECS and _vllm_up(name=n)}
+    hosts = {}
+    for hid, host in view["hosts"].items():
+        nodes = []
+        for n in (host or {}).get("nodes") or []:
+            peer = str(n.get("peer") or "")
+            if peer.endswith("/livestack") and peer[: -len("/livestack")].rstrip("/") == SELF_BASE.rstrip("/"):
+                n = {**n, "ready": bool(resident),
+                     "detail": "resident" if resident else "no unit resident",
+                     "inventory": _fleet_inventory(),
+                     "units": [{**u, "resident": u.get("kind") in resident} if isinstance(u, dict) else u
+                               for u in n.get("units") or []]}
+            nodes.append(n)
+        hosts[hid] = {**host, "nodes": nodes}
+    return {**view, "hosts": hosts}
+
+
 @app.post("/harmony/route")
 async def route_explain(request: Request):
     """DRY RUN: where would this chat request be served, and why — computed by
@@ -1127,7 +1154,7 @@ async def route_explain(request: Request):
                            and not _local_ready(requirement, prefer, unit, regions)),
             saturated=named is None and _local_saturated(requirement, prefer, unit, regions))
     if trigger:
-        view = _fleet_view(FLEET_URL)
+        view = _view_with_self(_fleet_view(FLEET_URL))
         if view is None:
             out["fleet"] = {"decision": "no fleet view", "fleet": FLEET_URL}
         else:
@@ -2304,7 +2331,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     route_require = requirement if named_route is None else _identity_of(named_route)
     route_kind = {"kind": named_route} if named_route is not None else {}
     if trigger:
-        view = await _off_loop(lambda: _fleet_view(FLEET_URL))
+        view = await _off_loop(lambda: _view_with_self(_fleet_view(FLEET_URL)))
         if view is None:
             ctx["fleet_route"] = {"decision": "no fleet view", "fleet": FLEET_URL,
                                   "trigger": trigger, "request_id": ctx["request_id"]}

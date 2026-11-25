@@ -14,6 +14,13 @@
 - [x] 2.2 `_unit_evidence` returns per-unit inventory without `prefer`; equal preference
       picks the resident unit. Covered by 2.1.
 
+## 2b. The node ranks itself on its live state
+
+- [x] 2b.1 `_view_with_self` replaces this node's row in the fleet view with its live
+      residency and per-unit queue before ranking (the broker's snapshot lagged a restart
+      and priced nothing). Test: `tests/test_unit_queue.py::test_the_node_ranks_itself_on_its_live_state_not_the_snapshot`
+      (fails without the overlay). Ledger: unchanged.
+
 ## 3. Rollout
 
 - [ ] 3.1 Deploy to node-g, node-h and node-a as a layer over each node's
