@@ -23,6 +23,12 @@
 
 ## 3. Rollout
 
-- [ ] 3.1 Deploy to node-g, node-h and node-a as a layer over each node's
-      current release; read a live `/harmony/route` dry run naming `saturated`.
-- [ ] 3.2 Observe a saturated period spill to a second copy and the copy unload when idle.
+- [x] 3.1 Deployed 2026-11-25 to node-g, node-h and node-a as a layer
+      (`<running layer>-saturated-selfview`, drop-in `zzzzzzz-saturated.conf`; delete it to
+      roll back). Live dry run on node-g with 2 in flight and 34.8 s of queue:
+      `forward saturated`, every target priced by `finish_s`.
+- [x] 3.2 Observed: 4 long requests on node-g spilled to the tower's second card, which
+      loaded Inkling in ~20 s, served (Jev 46.6 s cold, then 2.4 s and 0.1 s), unloaded at
+      06:52 when idle and loaded again on the next overflow at 06:56. Caveat seen: for the
+      first minutes after a node restarts, the broker's view has no load/decode figures for
+      it, so it is unpriced and skipped until it reports them.
