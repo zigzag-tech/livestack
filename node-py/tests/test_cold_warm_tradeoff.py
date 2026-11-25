@@ -158,3 +158,64 @@ def test_inventory_publishes_a_measured_load_over_the_declared_one():
     assert inv["llm"]["load_s"]["value"] == 120.0
     assert inv["llm"]["load_s"]["model_revision"] == "declared"
     assert "load_s" not in unit_inventory({"params_b": 125}, {}).get("llm", {})
+
+
+# -- a full warm unit is priced without a speed clause (2026-11-25) ---------------
+
+LEAKY = "http://100.64.251.1:8188"
+
+
+def _with_queue(node, in_flight, waiting, wait_s, cap=2):
+    unit = node["inventory"]["units"]["flash_next"]
+    unit["queue"] = {"in_flight": in_flight, "waiting": waiting, "max_concurrent": cap,
+                     "estimated_wait_s": wait_s}
+    return node
+
+
+def _indifferent(view, tokens=1):
+    """What the hub's Jev and the Overlord send: a class and nothing else."""
+    r = rank(view, "llm", now=NOW, require={"class": "llm"}, prefer=[], expected_tokens=tokens)
+    return r, r["targets"][0]["target_id"]
+
+
+def test_a_full_warm_unit_sends_an_indifferent_request_to_a_cold_copy_that_finishes_sooner():
+    # The case measured live: node-g's 2 slots full and 45 s of queue, the same
+    # model unloaded on node-h with a measured 4 s load. A one-token Jev decision
+    # finishes in ~4 s there against ~45 s here.
+    view = _view(_with_queue(_node(NODE_G, True, decode=50), 2, 3, 45.0),
+                 _node(LEAKY, False, decode=55, load=4))
+    r, first = _indifferent(view)
+    assert first == LEAKY
+    assert "its load pays for itself" in r["targets"][0]["reason"]
+
+
+def test_a_full_warm_unit_keeps_the_request_when_its_wait_is_shorter_than_a_load():
+    view = _view(_with_queue(_node(NODE_G, True, decode=50), 2, 0, 1.5),
+                 _node(LEAKY, False, decode=55, load=4))
+    _, first = _indifferent(view)
+    assert first == NODE_G
+
+
+def test_a_warm_unit_with_a_free_slot_is_not_priced():
+    # Not full: the old warm-first rule, whatever the cold one would cost.
+    view = _view(_with_queue(_node(NODE_G, True, decode=50), 1, 0, 0.0),
+                 _node(LEAKY, False, decode=55, load=4))
+    r, first = _indifferent(view)
+    assert first == NODE_G
+    assert r["targets"][0]["finish_s"] is None
+
+
+def test_a_full_warm_unit_stays_when_the_cold_copy_is_unpriced():
+    # A cold node that never measured its load is not "faster than" anything.
+    view = _view(_with_queue(_node(NODE_G, True, decode=50), 2, 3, 45.0),
+                 _node(LEAKY, False, decode=55))
+    _, first = _indifferent(view)
+    assert first == NODE_G
+
+
+def test_two_warm_copies_order_by_finish_when_one_is_full():
+    # Once the second copy is warm, a full first copy no longer wins on distance.
+    view = _view(_with_queue(_node(NODE_G, True, decode=50, probe_ms=1.0), 2, 3, 45.0),
+                 _with_queue(_node(LEAKY, True, decode=55, probe_ms=250.0), 0, 0, 0.0))
+    _, first = _indifferent(view)
+    assert first == LEAKY

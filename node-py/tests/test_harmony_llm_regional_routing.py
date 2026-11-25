@@ -122,6 +122,8 @@ def test_wants_fleet_route_names_its_trigger():
     assert fleet_route.wants_fleet_route(speed, {}) == "speed"
     assert fleet_route.wants_fleet_route([], {}) is None
     assert fleet_route.wants_fleet_route([], {}, no_warm_local=True) == "no_warm_local"
+    assert fleet_route.wants_fleet_route([], {}, no_warm_local=True, saturated=True) == "saturated"
+    assert fleet_route.wants_fleet_route([], {fleet_route.ROUTED_HEADER: "x"}, saturated=True) is None
     assert fleet_route.wants_fleet_route(speed, {fleet_route.ROUTED_HEADER: "x"}) is None
 
 

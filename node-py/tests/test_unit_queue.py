@@ -281,3 +281,48 @@ def test_warm_routed_request_queues_on_resident_batch_slot(srv, upstream, monkey
     assert "harmony_max_wait_s" not in _Sleepy.seen[0]
     assert srv._QUEUES.status("llm_serial", 1)["in_flight"] == 0
     assert "queue" in srv._fleet_inventory()["units"]["llm_serial"]
+
+
+def _fleet_node(base, resident, queue=None, load_s=None):
+    llm = {"decode_tok_s": {"value": 50.0, "sample_count": 5, "measured_at": time.time(),
+                            "ttl_s": 86400.0, "model_revision": "measured:test"}}
+    if load_s is not None:
+        llm["load_s"] = {**llm["decode_tok_s"], "value": load_s}
+    unit = {"llm": llm, **({"queue": queue} if queue else {})}
+    return {"peer": f"{base}/livestack", "state": "fresh", "ready": resident, "kinds": ["llm"],
+            "detail": "resident" if resident else "no unit resident", "probe_ms": 2.0,
+            "units": [{"kind": "llm_serial", "resident": resident,
+                       "attributes": {"class": "llm", "params_b": 1}}],
+            "inventory": {"units": {"llm_serial": unit}}}
+
+
+def test_a_full_resident_unit_asks_the_fleet_and_an_idle_copy_wins(srv, upstream, monkeypatch):
+    """2026-11-25: a resident unit counted as ready however full it was, so the
+    busy node never asked the fleet and every request queued behind it. Full now
+    means `saturated`: the request is ranked, and a cold copy that finishes
+    sooner (measured load included) is chosen. With a free slot nothing changes."""
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(srv, "_QUEUES", Queues())
+    monkeypatch.setattr(type(srv.manager), "resident", property(lambda self: {"llm_serial"}))
+    monkeypatch.setattr(srv, "FLEET_URL", "http://fleet.test")
+    idle = "http://100.64.0.99:8188"
+    view = {"generated_at": time.time(), "hosts": {
+        "self": {"nodes": [_fleet_node(srv.SELF_BASE, True,
+                                       queue={"in_flight": 1, "waiting": 4, "max_concurrent": 1,
+                                              "estimated_wait_s": 60.0})]},
+        "idle": {"nodes": [_fleet_node(idle, False, load_s=4.0)]}}}
+    monkeypatch.setattr(srv, "_fleet_view", lambda url, *a, **k: view)
+    body = {"model": "require:class=llm", "max_tokens": 1,
+            "messages": [{"role": "user", "content": "x"}]}
+
+    free = TestClient(srv.app).post("/harmony/route", json=body).json()
+    assert free["fleet"]["decision"] == "not routed"
+
+    held = srv._QUEUES.acquire("llm_serial", 1, service_s=0.1)
+    try:
+        full = TestClient(srv.app).post("/harmony/route", json=body).json()
+    finally:
+        held.release()
+    assert full["fleet"]["trigger"] == "saturated"
+    assert full["fleet"]["chosen"] == idle
+    assert full["fleet"]["expect"] == "cold"

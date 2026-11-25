@@ -104,16 +104,20 @@ def new_request_id() -> str:
     return uuid.uuid4().hex
 
 
-def wants_fleet_route(prefer, headers, *, no_warm_local: bool = False) -> "str | None":
+def wants_fleet_route(prefer, headers, *, no_warm_local: bool = False,
+                      saturated: bool = False) -> "str | None":
     """Why this request should be ranked over the fleet, or None to serve as
-    before: a speed clause in `prefer` ("speed"), or no resident, unsaturated,
-    in-policy local unit can serve it ("no_warm_local"). Never for a request that
-    was already routed -- two nodes with different views could bounce it."""
+    before: a speed clause in `prefer` ("speed"), a local unit that is resident
+    but full ("saturated"), or no resident, unsaturated, in-policy local unit can
+    serve it ("no_warm_local"). Never for a request that was already routed --
+    two nodes with different views could bounce it."""
     if headers.get(ROUTED_HEADER):
         return None
     if any(isinstance(c, dict) and c.get("metric") in SPEED_METRICS
            for c in (prefer or [])):
         return "speed"
+    if saturated:
+        return "saturated"
     return "no_warm_local" if no_warm_local else None
 
 

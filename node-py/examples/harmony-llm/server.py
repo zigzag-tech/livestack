@@ -1124,7 +1124,8 @@ async def route_explain(request: Request):
         trigger = _wants_fleet_route(
             prefer, request.headers,
             no_warm_local=(named is None
-                           and not _local_ready(requirement, prefer, unit, regions)))
+                           and not _local_ready(requirement, prefer, unit, regions)),
+            saturated=named is None and _local_saturated(requirement, prefer, unit, regions))
     if trigger:
         view = _fleet_view(FLEET_URL)
         if view is None:
@@ -1965,15 +1966,36 @@ def _git_revision() -> str:
 _REVISION = _git_revision()
 
 
-def _local_ready(requirement, prefer, unit, regions) -> bool:
-    """Can THIS node offer resident service, including its bounded queue: a
-    resident, running unit that meets the requirement, in a region
-    the request allows. False sends the request to be ranked over the fleet."""
+def _local_resident(requirement, prefer, unit, regions) -> list:
+    """The resident, running units here that meet the requirement, in a region
+    the request allows."""
     if regions and NODE_REGION not in regions:
-        return False
+        return []
     cands = ([n for n in _ordered(prefer) if _local_satisfies(n, requirement)]
              if requirement is not None else [unit])
-    return any(n in getattr(manager, "resident", ()) and _vllm_up(name=n) for n in cands)
+    return [n for n in cands if n in getattr(manager, "resident", ()) and _vllm_up(name=n)]
+
+
+def _local_ready(requirement, prefer, unit, regions) -> bool:
+    """Can THIS node offer resident, UNSATURATED service: a resident, running
+    unit that meets the requirement, in a region the request allows, with a free
+    slot. False sends the request to be ranked over the fleet.
+
+    A full unit is not ready. Until 2026-11-25 this said yes to a resident unit
+    whatever its queue, so the busy node never asked the fleet: every llm request
+    queued behind node-g's 2 slots (one held a ~60 s reasoning call) while the
+    same model sat unloaded on node-h (measured load 4 s) and the tower's second
+    card. The ranking decides; a full unit still wins when nothing finishes sooner,
+    and the request then queues here exactly as before."""
+    return any(_QUEUES.has_capacity(n, _max_concurrent(n))
+               for n in _local_resident(requirement, prefer, unit, regions))
+
+
+def _local_saturated(requirement, prefer, unit, regions) -> bool:
+    """Resident here, but every satisfying unit is full: the trigger is named
+    `saturated` rather than `no_warm_local`, so a route record says which."""
+    resident = _local_resident(requirement, prefer, unit, regions)
+    return bool(resident) and not any(_QUEUES.has_capacity(n, _max_concurrent(n)) for n in resident)
 
 
 def _stale_response(ctx: dict, reason: str, detail: str = ""):
@@ -2274,10 +2296,11 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # unit loads here exactly as before.
     named_route = _named_route(named, requirement)
     if FLEET_URL and not warm_only:
+        routable = named is None or requirement is not None or named_route is not None
         trigger = _wants_fleet_route(
             prefer, request.headers,
-            no_warm_local=((named is None or requirement is not None or named_route is not None)
-                           and not _local_ready(requirement, prefer, unit, regions)))
+            no_warm_local=routable and not _local_ready(requirement, prefer, unit, regions),
+            saturated=routable and _local_saturated(requirement, prefer, unit, regions))
     route_require = requirement if named_route is None else _identity_of(named_route)
     route_kind = {"kind": named_route} if named_route is not None else {}
     if trigger:

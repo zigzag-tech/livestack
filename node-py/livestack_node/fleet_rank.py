@@ -295,7 +295,9 @@ def _unit_evidence(node: dict, require: Optional[Dict[str, Any]],
     to the node-level inventory (a node that predates per-unit evidence)."""
     inv = node.get("inventory") if isinstance(node.get("inventory"), dict) else None
     per_unit = (inv or {}).get("units")
-    if not isinstance(per_unit, dict) or not prefer:
+    # Also without a `prefer`: the finish-time rule prices a full warm unit
+    # against a cold one from these per-unit figures (queue, load, decode).
+    if not isinstance(per_unit, dict):
         return inv
     best = None
     for u in node.get("units") or []:
@@ -307,7 +309,9 @@ def _unit_evidence(node: dict, require: Optional[Dict[str, Any]],
         unit_inv = per_unit.get(u.get("kind"))
         if not isinstance(unit_inv, dict):
             continue
-        key, _ = preference_key(unit_inv, prefer, now)
+        key, _ = preference_key(unit_inv, prefer or [], now)
+        # Equal preference: the resident unit is the one the node would serve.
+        key = (key, 0 if u.get("resident") else 1)
         if best is None or key < best[0]:
             best = (key, unit_inv)
     return best[1] if best else inv
@@ -364,6 +368,14 @@ def _measured(inventory: Optional[Dict[str, Any]], metric: str,
               now: float) -> Optional[float]:
     value, _ = observation(inventory, {"metric": metric, "min_samples": 1}, now)
     return value
+
+
+def _saturated(inventory: Optional[Dict[str, Any]]) -> bool:
+    """No free slot: every slot in flight, or anything waiting. Unknown is not full."""
+    q = (inventory or {}).get("queue") or {}
+    cap = q.get("max_concurrent")
+    return bool(q.get("waiting")) or (isinstance(cap, int) and cap > 0
+                                      and (q.get("in_flight") or 0) >= cap)
 
 
 def finish_estimate(inventory: Optional[Dict[str, Any]], tokens: int, cold: bool,
@@ -540,9 +552,20 @@ def rank(view: dict, kind: str, vantage: str = "direct",
     # "faster than something we cannot price" is not a finding. This prices
     # ONE answer: it does not count the requests that follow onto the loaded
     # unit, nor what an eviction there costs its other users.
-    speed = (expected_tokens and expected_tokens > 0
-             and any(isinstance(c, dict) and c.get("metric") in _SPEED_METRICS
-                     for c in (prefer or [])))
+    #
+    # A FULL WARM TARGET IS PRICED TOO (2026-11-25). Without a speed clause the
+    # rule above never ran, so a saturated unit kept every indifferent request
+    # in its queue while the same model sat unloaded elsewhere: node-g's 2
+    # slots held the fleet's whole llm and Jev traffic, one of them a ~60 s
+    # reasoning call, beside a node-h that loads the model in a measured 4 s.
+    # When any warm candidate has no free slot, every target is priced and
+    # ordered by finish time, waits included, so a request goes where it
+    # finishes first. Unpriced still means the old rule.
+    saturated = [t.target_id for t in eligible if _saturated(t.inventory)]
+    speed = bool(expected_tokens and expected_tokens > 0
+                 and (saturated
+                      or any(isinstance(c, dict) and c.get("metric") in _SPEED_METRICS
+                             for c in (prefer or []))))
     finish: Dict[str, Optional[Dict[str, float]]] = {}
     if speed:
         for t in eligible:
@@ -586,7 +609,7 @@ def rank(view: dict, kind: str, vantage: str = "direct",
     # Once a cold target is in the running, the order IS the finish time: the
     # preference key compares decode rates and would ignore the load it pays.
     # Unpriced targets sort after priced ones.
-    by_finish = bool(speed and cold_ids)
+    by_finish = bool(speed and (cold_ids or saturated))
 
     def key(t: RankedTarget):
         v = lv[t.target_id]
