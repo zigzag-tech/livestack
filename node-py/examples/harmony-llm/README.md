@@ -445,10 +445,9 @@ measured numbers: `HARMONY.md`, "Speed as evidence".
 ## Changing the classifier principal table: reload, don't restart
 
 `/v1/classifier` authenticates against the principal file named by
-`LIVESTACK_FLEET_TOKENS_FILE` (`/etc/harmony/classifier-principals.json`, set by the
-`60-classifier-auth.conf` drop-in, mode 0600, owned by the service user). node-a,
-node-g and node-h hold the same table (node_g and leaky since 2026-11-25); a
-principal added on one must be copied to all three, then `systemctl reload` on each. It used to be read once at import, so
+`LIVESTACK_FLEET_TOKENS_FILE` (mode 0600, owned by the service user). Every node that
+serves `/v1/classifier` to the same callers needs the same table: a principal added on one
+node must be copied to the others, then `systemctl reload harmony-llm` on each. It used to be read once at import, so
 adding a principal meant a restart, which kills in-flight requests and drops the
 vLLM units. Now:
 
