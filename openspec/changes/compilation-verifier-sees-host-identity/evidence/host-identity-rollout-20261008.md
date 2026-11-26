@@ -2,8 +2,8 @@
 
 Date: 2026-10-08
 
-Livestack release `86c38445` (source commit
-`86c384450d07cbb85bdbddfdf409c315527177f5`, verified tree SHA-256
+Livestack release `7a31647c` (source commit
+`7a31647cdbeee9d7f2a65a0d3a33e4e2104c7b49`, verified tree SHA-256
 `a1e4ee974e89eb7cfdaddf1514adaf2965567135c006188d8bb451140865e0ad`) was
 rolled one worker at a time to the claim-enabled Linux compilation workers
 `node-f-e2e-1` through `node-f-e2e-4`. Before each restart, the worker had no

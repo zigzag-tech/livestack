@@ -1,7 +1,7 @@
 ## 1. Activate the lifecycle (operator)
 
 - [x] 1.0 **Ship the lifecycle to the fleet broker WITHOUT pools.** Done 2026-09-22
-      02:36 CST on `node-a:8801`. livestack `6de47145` cut to
+      02:36 CST on `node-a:8801`. livestack `31f67086` cut to
       `~/.local/share/livestack-releases/fleet-provisioning-6de47145/`, pinned by
       `livestack-fleetd.service.d/70-fleet-provisioning.conf`. A release directory
       rather than a pull, per the convention in `_plans/fleet-caller-identity.md` R.4 —

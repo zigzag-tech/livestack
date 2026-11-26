@@ -89,8 +89,8 @@ required under tasks 3–5. No development abort API or unbounded Responses stor
 was enabled. The genuine 32-row development surface is privately captured with
 its recorded SHA; the sealed final surface remains unopened.
 
-Protected execution source subsequently landed in `88cc5ad6`, `76389598`,
-`ed9c102a` and `da2a5ef2`: transport loss retains all reservations, frontend
+Protected execution source subsequently landed in `d8408994`, `36b6de43`,
+`fa8efc0b` and `68fd673a`: transport loss retains all reservations, frontend
 cancellation precedes the supported GPU barrier, the opt-in private endpoint
 enforces authentication/loopback/body/deadline policy, and the facade verifies
 correlated completion/stop receipts. Thirty-five targeted HTTP/facade controls
@@ -112,9 +112,9 @@ resident-service restarts. The service's Python environment now registers the
 opt-in endpoint plugin, and its private loopback credential/configuration and
 synchronous single-worker extension are installed. No Responses store was
 enabled. Startup exposed a real alias bug: ModelConfig retains only the first
-served name. Fix `36d228a0` uses the native base-model registry, which accepts
+served name. Fix `e459590d` uses the native base-model registry, which accepts
 the configured base aliases and rejects LoRA/unknown names. Diagnostic unit
-`5535d54c` names the fixed prerequisite phase without logging request data or
+`760ad21a` names the fixed prerequisite phase without logging request data or
 credentials. Twelve targeted endpoint/controller controls pass.
 
 The deployed private control rejects unauthenticated input with 401 and
@@ -140,7 +140,7 @@ The model revision/tokenizer identity are not yet verified, the surface lacks
 negative/input-kind coverage, and the sealed final remains unopened. This
 does not qualify the profile or authorize promotion. Tasks 3–5 remain open.
 
-A development-only prompt candidate (`311b114b`, instruction SHA-256
+A development-only prompt candidate (`f77f06d3`, instruction SHA-256
 `485139449baeaf25ac2bf9d331f84a05e119e2f438db78a93aff502c61c17524`)
 clarified kinds and requested shorter output. On the same 32 source rows and
 eight-second budget it produced only 12 strict successes, 14 schema-valid
@@ -150,7 +150,7 @@ grounded asks and 16 deadline refusals, all with confirmed cessation. Receipt:
 A subsequent native metrics read observed four other running requests and five
 queued requests; load was not controlled, so the difference is not attributed
 solely to the prompt. The evidence does not support adoption. Forward revert
-`612eb49f` restores the preceding instructions; the candidate was never enabled
+`625664f1` restores the preceding instructions; the candidate was never enabled
 through a qualified public runtime. Both private measurements remain retained,
 and the sealed final is still unopened.
 

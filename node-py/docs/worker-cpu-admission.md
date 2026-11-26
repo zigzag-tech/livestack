@@ -44,7 +44,7 @@ slice for agent runs) or raise `reserve_cpu`.
 Prerequisites: none beyond stock `python3`. The `cpu_admission` block is judged by plain
 Python (`livestack_node/workloads/cpu_admission.py`), so the worker needs no third-party
 package for it (pydantic is the authority's dependency, not the worker's). An earlier
-revision (70a11344) imported pydantic and crash-looped hosts without it; releases built from
+revision (5df876e4) imported pydantic and crash-looped hosts without it; releases built from
 a later commit do not. `tests/test_workload_worker.py::test_worker_startup_path_needs_no_pydantic`
 holds that line: do not import a third-party package on the worker startup path.
 

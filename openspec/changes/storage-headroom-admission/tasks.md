@@ -50,7 +50,7 @@ and its ledger obligation. Do not edit `authority.json` retention values or Benc
   added in a separate reviewed commit with `/retention/plan` output attached; workers next.
 
 Rollout record 2026-10-08: authority release livestack-8923e025 deployed (backup release-20261008T230506Z; a first
-attempt with 80cf377b rolled back automatically because the live config already used the newer `rollout` role).
+attempt with e6852a3a rolled back automatically because the live config already used the newer `rollout` role).
 Config added to authority.json (backup authority.json.bak-measured-storage-sections-20261008T230541Z):
 `storage_bounds` (capacity 0.5, 40 GiB floor; the 10% fraction was NOT applied: ~183 GiB floor > ~130 GiB free
 would refuse all uploads) and `retention_tiers` (succeeded 3 d, failed 14 d, release refs keep 10 / 14 d).
@@ -59,10 +59,10 @@ receipt and report disk_unavailable/cpu_signal only after their release moves); 
 
 Rollout record 2026-10-12 (authority half of 6.1): the hand-built overlay
 `livestack-cpu-6e0dc516+roster-verdict-beeb0bdd+platform-skip-fbcd96f2` was replaced by a clean release built
-from origin/main 3e23602f (`livestack-3e23602f`, `tools/deploy-authority-release.sh`; backup
+from origin/main 4655b21b (`livestack-3e23602f`, `tools/deploy-authority-release.sh`; backup
 `release-20261012T115609Z`). Every deployed file of the overlay was attributed to a commit on origin/main
 (`build-worker-release.py verify --commit origin/main`: no HAND-EDIT outside vendored `_deps`); each overlay commit
-(1a2b97ac, 8af82266, 6e0dc516, fd17f036, beeb0bdd, fbcd96f2, 4ea822cd) is contained in origin/main.
+(1cc8d690, 4fe943e3, 39aadbd1, 0f68ceb5, d47231a0, 9eca5e5e, b27b40b7) is contained in origin/main.
 `authority.json` unchanged (same sha256 before/after; `limits` and `retention_tiers` carried; the live release-reference
 rule is `benchday-owner` / `benchday.release.` keep 10 + ttl 3 d, set by the retention owner, tighter than the 14 d
 proposed here, so left alone). `/retention/plan` before and after the deploy: 0 references and 0 blobs to expire (the

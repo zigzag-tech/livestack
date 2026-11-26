@@ -2,7 +2,7 @@
 
 ## Worker rollout
 
-Worker source commit `377bb4e4a567a43b65b114078cadf643952231f8` was built as
+Worker source commit `1f3d0d40a92791e48dd6a327d396352317fb3ea5` was built as
 an immutable 246-file candidate with content hash
 `7cf90d52f10d4e68e9442aa493c8f8f67d0ec2a6c66526893017f9dd0d05d2c2` and
 installed on `node-f-e2e-2`. The worker had been drained while idle. Its

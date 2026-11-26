@@ -82,11 +82,11 @@ was attempted.
 
 ## Candidate freshness
 
-Livestack `origin/main` advanced to `24c34f8d` (`Expose bounded workload
+Livestack `origin/main` advanced to `7519dd71` (`Expose bounded workload
 outcome manifests`) during this recheck. It changes
 `node-py/livestack_node/workloads/http.py` and adds `result_manifest.py`;
 staged release `livestack-486cf6e5` predates that source. Do not promote
-`486cf6e5` as-is. Refresh the candidate from the current main tree and rerun
+`ca7481d0` as-is. Refresh the candidate from the current main tree and rerun
 `tools/check-authority-release.py` before the fenced deploy.
 
 ## Live recheck — 2026-10-10 04:51 UTC
@@ -96,9 +96,9 @@ Read-only checks using the configured workload client and ZZOPS human config:
 - The authority on `100.64.215.1` is active at
   `/home/ubuntu/.local/share/livestack-workload-releases/livestack-d55c4c13/node-py`.
 - `rollout status` remains `mode=observe`, `spec_generation=2`, with
-  `applied=[]`. The desired unit is `unit-f38a7baa`, built from `be1d8a42` /
-  `be1d8a424684` with release `livestack-be1d8a42`; current Livestack
-  `origin/main` is `a435ea20`, so that candidate is stale. The latest report
+  `applied=[]`. The desired unit is `unit-f38a7baa`, built from `e99dea8d` /
+  `e99dea8de9ae` with release `livestack-be1d8a42`; current Livestack
+  `origin/main` is `3a58f5ec`, so that candidate is stale. The latest report
   says worker 1 is `behind` and workers 2–5 are `unknown`.
 - The live roster advertises `benchday.e2e.task.v1` only on workers 1 and 2;
   workers 3–5 lack it, and worker 5 is draining. Worker 1 was running an image
@@ -125,7 +125,7 @@ the candidate is refreshed and the normal fenced rollout/readback succeeds.
 ## Current-main candidate validation — 2026-10-10 04:59 UTC
 
 Built a local-only authority candidate from exact `origin/main`
-`a435ea207a5b7fe0b12df84991e5f008ee4e14c8`, then copied the immutable `_deps`
+`3a58f5ec9c8f5de0e6b630669c0a1a743f90dbad`, then copied the immutable `_deps`
 directory from the active `livestack-d55c4c13` release. The candidate is at
 `/tmp/livestack-taskenv-candidate-20261010-0451`. On `node-l`,
 `python3 tools/check-authority-release.py` passed all stages: static, boot,
@@ -140,7 +140,7 @@ worker states permit it.
 ## Live recheck and current-main candidate — 2026-10-10 09:43:33 UTC
 
 The remote Livestack main tip is now
-`92cdbf5ecb9c1e74a7476a4f4f2dfefd48960e4c`. A fresh candidate was assembled
+`4364a006100ee162801010f38e1f1d7b881f8182`. A fresh candidate was assembled
 from that exact commit, using only the immutable `_deps` tree from the active
 `livestack-d55c4c13` release. The current-main
 `tools/check-authority-release.py` passed all four stages: static, boot,
@@ -152,7 +152,7 @@ Flutter, Rust, and task-E2E handlers are allowed, while full E2E and all
 release/publishing handlers are forbidden. Rust generation 18 and Flutter
 generation 13 remain parked with their retained caches. Rollout remains
 `mode=observe`, `spec_generation=2`, with `applied=[]`; the selected
-`unit-f38a7baa` is still built from `be1d8a42`. The reconciler reports
+`unit-f38a7baa` is still built from `e99dea8d`. The reconciler reports
 worker 1 as behind and workers 2–5 as unknown; task-E2E is advertised only by
 workers 1 and 2.
 
@@ -166,7 +166,7 @@ was performed during this recheck.
 ## Focused current-main source/cache and worker recheck — 2026-10-10 09:56 UTC
 
 Ran six targeted tests against Livestack `origin/main`
-`92cdbf5ecb9c1e74a7476a4f4f2dfefd48960e4c` using Python 3.13.15 and pytest
+`4364a006100ee162801010f38e1f1d7b881f8182` using Python 3.13.15 and pytest
 9.1.1 on `node-l`; all six passed. The cases cover incremental
 source reconciliation and lockfile invalidation, toolchain-probe refresh,
 symlink/source-integrity reconstruction, captured-source cache aliases,
@@ -190,7 +190,7 @@ default-selection, full-E2E, or publishing operation was performed.
 ## Current-main focused rerun — 2026-10-10 10:12 UTC
 
 Fast-forwarded this task worktree to Livestack `origin/main`
-`92cdbf5ecb9c1e74a7476a4f4f2dfefd48960e4c` and reran the same six targeted
+`4364a006100ee162801010f38e1f1d7b881f8182` and reran the same six targeted
 cases on `node-l` with Python 3.13.15 and pytest 9.1.1. All six
 passed, including the corrected restart-receipt reason expectation. The run
 used a home-directory pytest base directory so systemd `PrivateTmp` could see
@@ -198,7 +198,7 @@ fixture paths. This is local fixture evidence only; admitted Dart/native and
 ABI invalidation, cross-worker reuse, and live rollout/rollback remain open.
 
 The stale restart-test reason expectation was corrected and pushed separately
-to Livestack `main` as `45a44cca` after the six-test rerun passed. The commit
+to Livestack `main` as `4d3a9095` after the six-test rerun passed. The commit
 changes only the expected receipt reason from
 `local_state_untrusted` to `authority_replica_unconfirmed`; it does not close
 the remaining admitted-invalidation or rollout requirements.
@@ -209,7 +209,7 @@ the ledger update.
 ## Receipt and cleanup fixture recheck — 2026-10-10 10:15 UTC
 
 Six targeted tests passed on `node-l` against Livestack commit
-`45a44cca`:
+`4d3a9095`:
 running-job cancellation kills the child before capacity is advertised again,
 scope closure cancels queued and running work while holding its worker through
 cleanup, parked storage eviction reports deletion, profile mismatch rebuilds
@@ -222,7 +222,7 @@ installed-handler receipt and canceled-descendant acceptance remain open.
 
 Added and ran `test_scope_close_cancels_task_environment_descendants_after_cleanup`
 against the worker fixture: 1 passed. The test is now on LiveStack `main` as
-`ddaa830e` (based on `45a44cca`). It closes a
+`5f274683` (based on `4d3a9095`). It closes a
 scope with one environment-backed child process running and a second job queued,
 then verifies both jobs are cancelled, the child cgroup is empty, the worker has
 no cleanup attempt left, and the interrupted environment is marked for rebuild.

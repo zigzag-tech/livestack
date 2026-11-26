@@ -1,7 +1,7 @@
 {
   "change": "add-image-depth-guidance",
   "state": "completed",
-  "codeRevision": "b5abf81940dbc3f84975c748326ef2f6c64941b1",
+  "codeRevision": "a6e06e86f6daedf3849f7b710cab88e29a3bf067",
   "sourceManifestSha256": "582c3300a544892c917e8831f4d52dd9e938b1d583970857e9e9a0de254f6323",
   "baseline": {"passed": 13, "failed": 0},
   "validation": {"passed": 174, "failed": 0},

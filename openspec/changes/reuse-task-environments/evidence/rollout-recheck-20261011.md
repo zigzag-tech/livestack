@@ -5,7 +5,7 @@ authority/worker views.
 
 ## Candidate checks
 
-Livestack `origin/main` is `0246f0e3008ada29b7725177a9573b54b01c9183`; that
+Livestack `origin/main` is `b7640461b12415513fd5334e8118f6ce68c44abd`; that
 commit changes only this change's task ledger after the last package build.
 The current worker package was rebuilt from it: 258 files, content hash
 `93fcb848aed039930378494811f662a694800e4da2af476c00cd88dee73e2f54`. It is

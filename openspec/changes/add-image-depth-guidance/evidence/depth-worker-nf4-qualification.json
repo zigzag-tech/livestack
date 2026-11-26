@@ -27,7 +27,7 @@
     "weight_sha256": "d51dca0073366a675108d5b83c3b7ef941cf2214c9a1c95c23f1e9a228ddbdb0",
     "weight_bytes": 3536027816
   },
-  "code_revision": "b5abf81940dbc3f84975c748326ef2f6c64941b1",
+  "code_revision": "a6e06e86f6daedf3849f7b710cab88e29a3bf067",
   "source_manifest_sha256": "582c3300a544892c917e8831f4d52dd9e938b1d583970857e9e9a0de254f6323",
   "run_root": "/home/ubuntu/harmony-image/depth-qualification-runs",
   "wrapper": "/home/ubuntu/harmony-image/depth-qualification-owner-wrapper.py",

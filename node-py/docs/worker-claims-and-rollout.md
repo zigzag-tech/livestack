@@ -73,10 +73,10 @@ shows the PrivateTmp class when it runs inside the worker's own sandbox (`wrap`:
 
 - **Authority** (node-a, `livestack-workload-authority`) now runs `livestack-c295e76a` =
   `livestack-c76585e7` + this change (branch `agent/declarative-rollout-authority`; main carries the same
-  commits as `ff05d50a`, `8923e025`). Drop-in: `zzzzzzzzzzzzzzzz-release-current.conf`. Rollback: restore
+  commits as `578f5c30`, `169548f4`). Drop-in: `zzzzzzzzzzzzzzzz-release-current.conf`. Rollback: restore
   `~/.local/state/livestack-workloads/backups/claims-rollout-20261008T225736Z/zzzzzzzzzzzzzzzz-release-current.conf.previous`,
   `daemon-reload`, restart. The DB change is additive (`worker_claims`, `rollout_state`).
-- **Trap: a release older than `ff05d50a` crash-loops on this authority.json**, because it holds a
+- **Trap: a release older than `578f5c30` crash-loops on this authority.json**, because it holds a
   principal with `role: "rollout"` (`rollout-reconciler`) that older code rejects ("known role"). Seen
   2026-10-08 19:02 when a release built from main before this change was rolled: 9 restarts until the
   release was put back. Any authority release must be built from a commit that contains `rollout_routes.py`.
@@ -95,12 +95,12 @@ shows the PrivateTmp class when it runs inside the worker's own sandbox (`wrap`:
   (task 4.3) reports it.
 - **First live run of the probes found a bug the fixtures could not**: `node --check` rejects
   `--input-type=module`, so every `.mjs` handler failed `handler_import`; and scanning a bundle's
-  `node_modules` made one package 500 files. Fixed (`ea7953ef`); on the canary's real bundle (20 packages,
+  `node_modules` made one package 500 files. Fixed (`ee5466f8`); on the canary's real bundle (20 packages,
   478 source files) `handler_import` passes in ~13 s (one `node` per JS file), `handler_integrity` in 0.1 s.
 - **Skew seen on first observation** (node-f-e2e): `benchday.e2e.task.v1` only on `-2`;
   `benchday.compilation.rust-check.v1` has an extra release on `-2`; `benchday_image_handler_release` differs
-  (`-1/-3/-4` vs `-2/-5`); `android_*` labels missing on `-1`; `-5` runs worker release `925a02fa`, the others
-  `86c38445`; the release workers run `70a11344`.
+  (`-1/-3/-4` vs `-2/-5`); `android_*` labels missing on `-1`; `-5` runs worker release `cd26668a`, the others
+  `7a31647c`; the release workers run `5df876e4`.
 
 ## Priority classes and holds (`limits.handler_priority`)
 
@@ -184,12 +184,12 @@ the soak, authority restarts (those stay with `tools/deploy-authority-release.sh
 
 - Reconciler on `livestack-89165c16` (built from main), `enforce` block live on node-a; declared unit
   `unit-cb4617d2` = release `livestack-5370c7b7` (content hash `3c1a652c...`, handlers copied from `unit-f38a7baa`, which was
-  built from `be1d8a42` and 45 runtime commits behind main).
+  built from `e99dea8d` and 45 runtime commits behind main).
 - Canary `node-f-e2e-3`: `livestack-4ea822cd` -> `livestack-5370c7b7`. Drain, idle, switch (2.4 s), smoke (restart_clean,
   handler_import, handler_integrity, release_import: pass, 50 s), enable, 300 s soak, done.
-- Rollback drill on the same worker: `livestack-badbad01` (5370c7b7 plus one function using an undefined name). It started
+- Rollback drill on the same worker: `livestack-badbad01` (debc8064 plus one function using an undefined name). It started
   and passed the restart check; `release_import` failed it (`undefined_name ... an_undefined_name_for_the_rollback_drill`),
-  the executor rolled the worker back to 5370c7b7, rejected the release for that worker, re-enabled it. The drill's failure
+  the executor rolled the worker back to debc8064, rejected the release for that worker, re-enabled it. The drill's failure
   count was cleared by hand afterwards. It waited 94 s for a running job before the switch: no job was interrupted.
 - `node-f-e2e-4` was drained and waiting for a 40+ minute flutter-check job when this was written; the idle wait is bounded
   (`idle_timeout_seconds`, 1 h) and the drain is renewed while it lasts.
@@ -245,8 +245,8 @@ reuses an existing directory of the right commit. Until 2026-10-15 the authority
 refuse the staged tree (`stage:staged_content_hash_mismatch`, `livestack-fc8b905a`, 2026-10-13: four workers, two tries
 each, nothing drained, attempts capped in `rollout-executor.json`). Now both scripts record `host_release.content_hash`,
 and the auto-build refuses a reused directory whose recorded hash is not the tree's
-(`build:release_dir_exists_with_a_different_content_hash`). Older authority-built releases (`2a2f3ee6`, `123818dd`,
-`fc8b905a`) still carry the old hash: never name one in a unit; build the worker release with
+(`build:release_dir_exists_with_a_different_content_hash`). Older authority-built releases (`903f652c`, `5b61db9f`,
+`2509f1ed`) still carry the old hash: never name one in a unit; build the worker release with
 `build-worker-release.py` under a different directory, or rebuild. A capped (worker, release) pair clears only by
 removing its keys from `attempts`/`capped` in `rollout-executor.json` while the executor is idle, or by declaring a new release.
 

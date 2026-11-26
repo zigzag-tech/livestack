@@ -8,11 +8,11 @@ After the owner-authorized ZZOPS coordinator restarts, reattached `zzops train w
 
 ## Current live diagnosis and prepared release
 
-The shared Livestack authority on 100.64.215.1 still runs release `46a4bd3eab2d3a4bdea4274ebb81dbfb20e71d65` (content hash `703816761ba0b3b9cb85988ed78c88c3ed7d4e8db0ebfb76611a6946c9bfa2b0`). Worker 2 on node-f runs `9ab36aebeb66bf764d8f4c21f8b2edf9faccc2b3` (content hash `294e5e6d169bc51c2ae3f827cb63a33289bafcf8f63b51a0f0e10faf3eea1f68`) and advertises the Flutter, Rust, and task-E2E profiles. The active Flutter, Rust, and task-E2E handler manifests include their required source-link/integrity helpers; Flutter also includes the toolchain contract file.
+The shared Livestack authority on 100.64.215.1 still runs release `d8f587a203d47a11dcb11915b174dd0069f19a4c` (content hash `703816761ba0b3b9cb85988ed78c88c3ed7d4e8db0ebfb76611a6946c9bfa2b0`). Worker 2 on node-f runs `ad4a531f4e2e3fab80240af8ea2c39c9db815379` (content hash `294e5e6d169bc51c2ae3f827cb63a33289bafcf8f63b51a0f0e10faf3eea1f68`) and advertises the Flutter, Rust, and task-E2E profiles. The active Flutter, Rust, and task-E2E handler manifests include their required source-link/integrity helpers; Flutter also includes the toolchain contract file.
 
-Read-only authority DB and worker-log reads show why repeated jobs rebuilt: prior assignments arrived with no authority replicas, and the worker removed superseded local generations before evaluating same-host reuse. The current task-environment rows include parked Flutter generation 10, Rust generation 4, and task-E2E generation 32 replicas on node-f. The same-host preservation fix is already landed at Livestack commit `d55c4c13fcef241231f012b2578d224e1545ac27`.
+Read-only authority DB and worker-log reads show why repeated jobs rebuilt: prior assignments arrived with no authority replicas, and the worker removed superseded local generations before evaluating same-host reuse. The current task-environment rows include parked Flutter generation 10, Rust generation 4, and task-E2E generation 32 replicas on node-f. The same-host preservation fix is already landed at Livestack commit `05020fab1104be1686a6535dc0acb1c11a1ebc2f`.
 
-Built the 245-file authority candidate from `d55c4c13`; content hash `87bd2b9156d2d2e06444b3119c40a8256954639a4b1fa082c8a9de0084cb79e6`. The disposable authority release check passed static analysis, boot, worker registration, and a job round-trip on the authority host. The immutable candidate is staged at `/home/ubuntu/.local/share/livestack-workload-releases/livestack-d55c4c13`; the release verifier reports `IDENTICAL`. No live pointer, config, or process has changed.
+Built the 245-file authority candidate from `05020fab`; content hash `87bd2b9156d2d2e06444b3119c40a8256954639a4b1fa082c8a9de0084cb79e6`. The disposable authority release check passed static analysis, boot, worker registration, and a job round-trip on the authority host. The immutable candidate is staged at `/home/ubuntu/.local/share/livestack-workload-releases/livestack-d55c4c13`; the release verifier reports `IDENTICAL`. No live pointer, config, or process has changed.
 
 ## Drain state
 
@@ -22,7 +22,7 @@ No task-specific E2E, full/coalesced E2E, or app publish was started for this re
 
 ## Admitted same-source Rust repeat — 2026-10-09 05:34 UTC
 
-Benchday `rust-remote.sh` submitted two successful `check cli` jobs on `node-f-e2e-2` using the same environment and identical source digest. Each worker receipt said `rebuilt`, `authority_replica_unconfirmed`, with both `cargo-home` and `cargo-target` newly created; generations advanced 5→6. Compile phases were 28.09 s and 28.73 s. Authority readback after completion shows the generation-6 replica parked on `node-f` and zero cleanup attempts. This is direct evidence of the current no-reuse failure. The `d55c4c13` authority candidate remains staged but inactive because the full-suite train still owns an attempt on `node-f-e2e-1`; no authority pointer, config, or process changed.
+Benchday `rust-remote.sh` submitted two successful `check cli` jobs on `node-f-e2e-2` using the same environment and identical source digest. Each worker receipt said `rebuilt`, `authority_replica_unconfirmed`, with both `cargo-home` and `cargo-target` newly created; generations advanced 5→6. Compile phases were 28.09 s and 28.73 s. Authority readback after completion shows the generation-6 replica parked on `node-f` and zero cleanup attempts. This is direct evidence of the current no-reuse failure. The `05020fab` authority candidate remains staged but inactive because the full-suite train still owns an attempt on `node-f-e2e-1`; no authority pointer, config, or process changed.
 
 ## ZZOPS restart and authority readback — 2026-10-09 05:53 UTC
 
@@ -42,7 +42,7 @@ After the two owner-authorized ZZOPS coordinator restarts, reattached `zzops tra
 
 Read-only authority checks show that `livestack-46a4bd3e` is still selected, handler registry generation is 54, and the current config maps Flutter, Rust and task-E2E to their intended development/task profiles while full-E2E and publishing handlers map to forbidden profiles. Worker 2 advertises all three task profiles; worker 5 advertises Flutter and Rust. Twenty-two of 27 workers are ready. The authority database has exactly one running attempt—the unrelated full-suite job `cd80695a0e444be6993e738a4799cf98` / attempt `8d61bff5d18b42f9ad1d8da10f78be75`—and no running cleanup jobs. Its heartbeat was 7.7 seconds old and lease had 117.8 seconds remaining; no progress sample is recorded, which is expected for this Benchday handler.
 
-The ZZOPS deploy fence currently reads open. The `d55c4c13` same-host preservation candidate remains staged and verified, but no fence is held and no authority or worker pointer, config or process changed. The old fence was not reused. Because the sole attempt is live and the rollout procedure requires a zero-attempt/zero-cleanup window, it was not canceled. No task-specific E2E, full/coalesced E2E or publishing was initiated for this recheck; post-fix reuse, invalidation and timing evidence remain open.
+The ZZOPS deploy fence currently reads open. The `05020fab` same-host preservation candidate remains staged and verified, but no fence is held and no authority or worker pointer, config or process changed. The old fence was not reused. Because the sole attempt is live and the rollout procedure requires a zero-attempt/zero-cleanup window, it was not canceled. No task-specific E2E, full/coalesced E2E or publishing was initiated for this recheck; post-fix reuse, invalidation and timing evidence remain open.
 
 At 06:14 UTC, rechecked the installed `/opt/zzops/current/node_modules/.bin/zzops-admin fence-status /etc/zzops/service.json` through the canonical `sudo -u zzops` invocation after the coordinator restarts. It still fails with `EACCES` when spawning that release's bundled `esbuild`; no fence was acquired and no alternate launch path or permission change was used.
 
@@ -94,13 +94,13 @@ ZZOPS reports the pre-existing full-product completion train `tt_bf33eee1-043c-4
 
 ## Current authority and worker readback — 2026-10-09 18:31 UTC
 
-This supersedes earlier statements that the d55c4c13 authority release was
+This supersedes earlier statements that the 05020fab authority release was
 staged but inactive. Read-only systemd status on 100.64.215.1 reports the
 livestack-workload-authority service active, NeedDaemonReload=no, with its
 process started at 2026-10-09 14:40:21 UTC and PYTHONPATH selecting
 /home/ubuntu/.local/share/livestack-workload-releases/livestack-d55c4c13.
 The remote node-py/RELEASE.json and locally built candidate both record commit
-d55c4c13fcef241231f012b2578d224e1545ac27, content hash
+05020fab1104be1686a6535dc0acb1c11a1ebc2f, content hash
 87bd2b9156d2d2e06444b3119c40a8256954639a4b1fa082c8a9de0084cb79e6, and
 245 files. The verifier reports all 245 source files match, plus 151 deployed
 vendored _deps files; it reports zero changed and zero only-built files, so
@@ -115,7 +115,7 @@ not restart the authority.
 
 Worker 1 was drained by the documented rollout principal at claim generation
 5, then re-enabled at generation 7 after updating its profile config and
-service. It runs worker release 377bb4e4 (content hash
+service. It runs worker release 1f3d0d40 (content hash
 7cf90d52f10d4e68e9442aa493c8f8f67d0ec2a6c66526893017f9dd0d05d2c2), with
 task-E2E handler label 909844c7b71167b5dfa7ca5193d37cf41184cd28. Read-only
 authority state reports workers 1 and 2 ready with Flutter, Rust, and

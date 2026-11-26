@@ -1,8 +1,8 @@
 # Final-tree evidence
 
-Tested source commit: `66a8ced3450db0d090d40e87d9c3123ff0657a23`.
+Tested source commit: `4f632f1b9cda5ea5ec76f014b4200ea7bca754fd`.
 Git tree: `053ac986023628c4926b554aa3074a53a388c8a2`.
-Base: `5431a0554c42d6be5a1168a02134465ab8a132a3` (`origin/main` on 2026-10-17).
+Base: `4a8860d4fde276ecb702f59882f269258ae0d34f` (`origin/main` on 2026-10-17).
 
 ## Focused integration
 

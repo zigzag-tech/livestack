@@ -17,10 +17,10 @@ Read-only systemd inspection on `node-f` found both `livestack-workload-worker`
 and `livestack-workload-worker-2` using
 `~/.local/share/livestack-workload-releases/livestack-377bb4e4/node-py`.
 Building the worker release from current Livestack main
-`4f282ce0b8ecfac36ee2e6d08a5f6f1b2165508f` produced 258 files and content
+`e7fef0a09587ca47649e07430663b1ccf2a9ad5f` produced 258 files and content
 hash `8917b440ac5c11055a46f396ed75d290df5e12de2c508faa5bb5ab83534cbba3`.
 
-Read-only release verification against the deployed `377bb4e4` directory
+Read-only release verification against the deployed `1f3d0d40` directory
 reported content hash
 `7cf90d52f10d4e68e9442aa493c8f8f67d0ec2a6c66526893017f9dd0d05d2c2` across
 246 files: 12 files occur only in the current candidate, none only in the

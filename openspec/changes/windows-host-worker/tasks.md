@@ -28,7 +28,7 @@ on the job (`jobs.reason`), which these tasks keep.
 ## Deployment record (2026-10-02)
 
 - node-c (Windows 11 Pro 26200): CPython 3.12.10 machine-wide (winget); release
-  `C:\harmony\releases\livestack-dba3fc37` (merge `dba3fc37`); service
+  `C:\harmony\releases\livestack-dba3fc37` (merge `0bf364eb`); service
   `LivestackWorkloadWorker` as `.\harmony-worker` via `node-py/deploy/windows/install-worker.ps1`;
   workspace VHDX 100 GB at `C:\harmony\work\node-c-native`.
 - Principal `node-c-native` (host `node-c`, claim_enabled) added by SIGHUP reload 08:0x UTC;

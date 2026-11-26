@@ -33,7 +33,7 @@ Owner confirmed 2026-10-08 (fixed cause list with retry advice and cgroup/system
 ## 4. Docs and deploy
 
 - [x] 4.1 `_plans/durable-workloads.md` (breach rule, causes table) and `HARMONY.md` (cause kinds, blockers).
-- [ ] 4.2 (authority half DONE, livestack a3a6a47f deployed 2026-10-08; worker release for `unit_result` evidence pending, any worker roll after 8923e025 carries it) Authority release first (causes appear for authority-derived kinds), then worker release per worker class; mixed fleets are valid
+- [ ] 4.2 (authority half DONE, livestack b895932a deployed 2026-10-08; worker release for `unit_result` evidence pending, any worker roll after 169548f4 carries it) Authority release first (causes appear for authority-derived kinds), then worker release per worker class; mixed fleets are valid
   (old workers produce `unknown`/`infrastructure` with `cause: null`-free coercion, never a rejected result).
 
 ## Record (2026-10-08)
@@ -50,7 +50,7 @@ Remaining before archive: the worker release (2.2/4.2).
 
 Worker half verified on origin/main (`resource_usage.py` reports `unit_result`/`exec_main_status`; `causes.py` consumes them). No separate
 worker change remains: the next worker release built from main carries it, so it is batched with the pending cores-claim worker roll
-(`fd17f036`), one worker at a idle gap. Until a worker runs it, a unit killed by systemd shows `cause=unknown` without `unit_result`.
+(`0f68ceb5`), one worker at a idle gap. Until a worker runs it, a unit killed by systemd shows `cause=unknown` without `unit_result`.
 ZZOPS now prints `job.cause` (kind, retry, evidence) in the Harmony terminal failure text, or `cause: none recorded` (zzops 772e371).
 
 ## Record (2026-10-14)

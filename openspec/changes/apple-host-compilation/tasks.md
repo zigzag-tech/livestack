@@ -42,7 +42,7 @@ on the job (`jobs.reason`), which these tasks keep.
 ## Deployment record (2026-10-02)
 
 - Authority (node-a) restarted 05:34 UTC on the running release plus exactly the `CLASSES`
-  line and the `74745b1f` renewal comparison; parsed policy v2 first; all four running e2e attempts renewed.
+  line and the `74e8f2ff` renewal comparison; parsed policy v2 first; all four running e2e attempts renewed.
 - Policy `benchday-compilation-20261002-v3` (05:35 UTC): v2 plus `apple` on node-b only; running
   attempts kept their v2 receipts (widening-tolerant renewal live).
 - node-b host worker `node-b-apple` (LaunchAgent, `/usr/bin/python3`, release

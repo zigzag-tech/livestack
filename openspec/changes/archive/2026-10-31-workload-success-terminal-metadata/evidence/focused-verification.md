@@ -2,7 +2,7 @@
 
 Tested source tree: `c12829f6cbd2bd35183d0485b7efdb355d312ff4`
 
-Base commit: `3ea2476ffa3b9373c998d3f48c0872119176b2be`
+Base commit: `71d7bde28c191d664c90a51adea1edbcc1723dac`
 
 Contract validation: `openspec validate workload-success-terminal-metadata` passed.
 

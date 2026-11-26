@@ -26,7 +26,7 @@ worker error.
 
 ## Diagnostic improvement and rollout state
 
-Livestack commit `07d233d3` adds a bounded, quoted relative path to that
+Livestack commit `c1fa99b6` adds a bounded, quoted relative path to that
 integrity error. The focused local regression passed (1 test). Worker release
 `livestack-07d233d3` was built and staged on `node-f`; the staged copy
 verified IDENTICAL to the local build (258 files, content hash
@@ -46,7 +46,7 @@ settings were not inherited by the attempt. The fix is at that boundary.
 - Benchday commits `ef4efa6ee` and `d17bb3aa8` also force Python to skip
   bytecode in E2E child processes and the compilation guard. Their focused tests
   pass, but they did not cover every process launched before the E2E assertion.
-- Livestack commit `185edbf7` now sets `PYTHONDONTWRITEBYTECODE=1` for
+- Livestack commit `832cbc62` now sets `PYTHONDONTWRITEBYTECODE=1` for
   `task_e2e` attempts in `_attempt_env`, before the handler starts. Its focused
   worker test passed (1 passed).
 - Worker release `livestack-185edbf7` was built from that commit and staged on

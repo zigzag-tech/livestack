@@ -1,9 +1,9 @@
-"""Apply the process-node half of livestack 6f5f19fe (stale-resident grants) to an older facade release that
+"""Apply the process-node half of livestack 2087f9aa (stale-resident grants) to an older facade release that
 already carries the hold-token backport (backport-process-node-holds.py):
 `python3 backport-process-node-stale-resident.py <release>/process_node.py` edits it in place and refuses
 (AssertionError) if the file does not have a shape this was written for.
 
-- the residence report says `residence_authority: owner`, so a host broker carrying 6f5f19fe stops
+- the residence report says `residence_authority: owner`, so a host broker carrying 2087f9aa stops
   remembering a unit this facade stopped as resident at once, instead of granting without a warm for 90 s;
 - `begin()` warms under a grant that reaches it while the unit is not resident, instead of answering
   503 "Harmony grant did not warm this provider".
@@ -66,7 +66,7 @@ rep("""            if not self._alive() or unit not in self.resident:
                 raise HTTPException(503,'Harmony grant did not warm this provider')
 ""","""            if not self._alive() or unit not in self.resident:
                 # The broker granted without a warm because it still believed the unit
-                # resident (livestack 6f5f19fe). The grant stands: load it under it.
+                # resident (livestack 2087f9aa). The grant stands: load it under it.
                 try: await self._warm_locked(unit)
                 except Exception:
                     raise HTTPException(503,'Harmony grant did not warm this provider') from None

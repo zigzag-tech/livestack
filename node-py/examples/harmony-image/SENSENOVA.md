@@ -66,7 +66,7 @@ host memory. Do not advertise only VRAM or assume an 8B LLM-sized footprint:
 this MoT has separate understanding and generation parameter streams.
 
 Both the fleet broker and the selected host broker need Livestack's engine-unit
-host-memory admission support (present in `16575876`). Updating a checkout does
+host-memory admission support (present in `e9fc3ce7`). Updating a checkout does
 not update a systemd service whose `PYTHONPATH` points to an older release.
 Use a pinned release and a final ordered drop-in, preserving existing auth,
 observe-only fleet mode and device reserve settings.

@@ -27,9 +27,9 @@ and with `--commit REF` names the commit on REF that holds each deployed copy, o
 Result of the first run (2026-10-06): the deployed node-f release
 `native-route-bbf4d538+hostledger224dce34+keepalivead4f0a45+transfer8g+handlerregistrycc8597a7+toolarge9c89f222`
 is NOT main HEAD. It is an older mainline tree (every other file equals an ancestor commit on
-origin/main; 7e951ad4 is the base; bbf4d538, 224dce34, ad4f0a45, 9c89f222 are ancestors of main;
-cc8597a7 is the pre-rebase copy of main's b432e8bf). Only `workloads/worker.py`, `model.py` and `client.py`
-were hand-assembled (9c89f222's hunks and `transfer_byte_limit()` laid over an older base).
+origin/main; 5a17385e is the base; 2c818fb3, a7e284ce, ed644165, 6aa65db5 are ancestors of main;
+cc8597a7 is the pre-rebase copy of main's a13853a0). Only `workloads/worker.py`, `model.py` and `client.py`
+were hand-assembled (6aa65db5's hunks and `transfer_byte_limit()` laid over an older base).
 Main now carries everything functional in them, including `transfer_max_bytes` (same key and the same
 log line `object transfer ceiling is N bytes`), so a release built from main is a superset. Main also has
 platform (macOS/Windows) and task-environment code the deployed release lacks.
@@ -73,7 +73,7 @@ rollback (point the unit back, restart).
   lines, they are overridden anyway); `systemctl --user daemon-reload && systemctl --user restart <unit>`.
 - node-f-release (`livestack-workload-worker-release.service`, still `...+transfer8g`): same, but ONLY
   after draining as above; it carries publishes. Verify the stage is idle first.
-- node-c-wsl (lacks transfer8g and 9c89f222): same as node-f on the WSL unit; add
+- node-c-wsl (lacks transfer8g and 6aa65db5): same as node-f on the WSL unit; add
   `transfer_max_bytes` to its worker.json first. The native Windows worker follows `windows-worker.md`
   (stage under `C:\harmony\releases\livestack-<sha8>`, never in place).
 - node-a-stager: same as node-f for its unit; add `transfer_max_bytes` if it moves images.
@@ -128,8 +128,8 @@ Exit 1 names the modules that differ: build a new SDK from the release (same lay
 root-owned, 755/644), install it as `verifier-sdk-<newhash8>`, point the drop-ins at it, `daemon-reload`, and
 restart each verifier at idle (never while an attempt of that slot is running). Rollback is the drop-in.
 
-Measured 2026-10-12: release `livestack-fd17f036` (4ea822cd) against `verifier-sdk-8923e025` is CURRENT
-(contract modules unchanged since 8923e025); `livestack-1220da12` against the same SDK DRIFTS in
+Measured 2026-10-12: release `livestack-fd17f036` (b27b40b7) against `verifier-sdk-8923e025` is CURRENT
+(contract modules unchanged since 169548f4); `livestack-1220da12` against the same SDK DRIFTS in
 `launch_verifier`/`launch_guard`/one more. So the 2026-10-11 CPU-peak roll did not strand the verifier.
 
 Diagnosing a launch refusal: the guard's `compilation_launch_refused ... reason=` line now carries the

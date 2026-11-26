@@ -222,7 +222,7 @@ def test_the_gate_tree_carries_repo_root_tools(world, tmp_path):
 
 
 def test_a_prebuilt_release_dir_whose_recorded_hash_is_not_the_trees_is_refused(world):
-    # fc8b905a: tools/build-authority-release.sh had already made the directory with its own hash scheme; the unit
+    # 2509f1ed: tools/build-authority-release.sh had already made the directory with its own hash scheme; the unit
     # copied that hash and every worker refused the staged tree (staged_content_hash_mismatch).
     sha = runtime_commit(world)
     rel = world['source'] / f'livestack-{sha[:8]}'

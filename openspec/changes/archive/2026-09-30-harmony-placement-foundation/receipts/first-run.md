@@ -2,7 +2,7 @@
 
 ## Deploy (tasks 2.3, 3.3)
 
-- `harmony-llm` restarted at 04:58 UTC on livestack `main` `f19ccaf3`, with drop-in
+- `harmony-llm` restarted at 04:58 UTC on livestack `main` `aff32b6c`, with drop-in
   `85-composition.conf` (`HARMONY_DEMAND_LOG_AGE_DAYS=21`, `HARMONY_KV_DTYPES=auto,fp8`)
   and `lora_base: Qwen/Qwen3.8-27B` added to `llm_general` (backup
   `/etc/harmony/llm-units.json.bak-20260928T045723Z-pre-lora-base`). Ready in 160 s.
@@ -32,7 +32,7 @@ That leaves two measured rows on this host.
 | decision | outcome | note |
 |---|---|---|
 | `01M3K65FS7Z49M835XV9NX7BKV` | keep | 1 measured row: 45/48 candidates `unknown:no_measured_basis` |
-| `01M3K65X9C5PSC2JFFR4G87XDP` | keep | **bug:** capacity from nvidia-smi (24.0 GiB), not the engine's 23.56; bf16 two-adapter rated feasible at 28,133 tokens. Fixed in `59ba52f6` |
+| `01M3K65X9C5PSC2JFFR4G87XDP` | keep | **bug:** capacity from nvidia-smi (24.0 GiB), not the engine's 23.56; bf16 two-adapter rated feasible at 28,133 tokens. Fixed in `69b118bc` |
 | `01M3K67295PW3FQQFZ0VH5NX6Z` | keep | capacity fixed (bf16 two-adapter 22,480 tokens, infeasible); **bug:** record over 32 KiB, live row shed by the writer |
 | `01M3K69CF69E7TF5EVW49YSCFX` | keep | clean: not truncated, live row kept, 2 rows omitted for size (counted), `--replay` reproduced |
 
@@ -51,15 +51,15 @@ The two earlier records with bugs stay in the ledger as they were written.
 
 ## Measured cost drives admission (task 2.2, design §8c)
 
-- Fix on `main` `b9d7fc9b`. The host broker was released as `df4a0154` on branch
-  `release/hostd-measured-admission`: the pinned `978cfa1e` plus only this fix (the
-  planner taken whole from main, where the only changes since `978cfa1e` are this
+- Fix on `main` `358d717a`. The host broker was released as `2402fcd0` on branch
+  `release/hostd-measured-admission`: the pinned `bbcd5c36` plus only this fix (the
+  planner taken whole from main, where the only changes since `bbcd5c36` are this
   fix; hostbroker got just the `RestPeer` hunk). Installed at
   `~/.local/share/livestack-releases/measured-admission-df4a0154`, selected by
   `/etc/systemd/system/livestack-hostd.service.d/70-measured-admission.conf`.
   Rollback: delete that drop-in, `daemon-reload`, restart.
 - Tests on the release: 998 passed and the same 2 pre-existing failures as
-  `978cfa1e` (991 passed); the 7 new tests pass.
+  `bbcd5c36` (991 passed); the 7 new tests pass.
 - Dry run before the switch: the release's planner on the live `/status`
   snapshots gave an empty idle plan under both old and new code. After a simulated
   eviction, both reload `llm_general` onto `a46c4c2e`; the new code admits on the

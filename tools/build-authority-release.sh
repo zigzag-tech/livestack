@@ -13,7 +13,7 @@
 #                      __pycache__, *.pyc and symlinks). A release built here can therefore also be staged
 #                      on workers and named in a deployment unit; with the former scheme (_deps excluded)
 #                      the executor refused it as staged_content_hash_mismatch (livestack-fc8b905a, 2026-10-13).
-# (Releases built before 2026-10-15, e.g. 2a2f3ee6, 123818dd and fc8b905a, carry the older hash in RELEASE.json
+# (Releases built before 2026-10-15, e.g. 903f652c, 5b61db9f and 2509f1ed, carry the older hash in RELEASE.json
 # and are not worker-compatible: rebuild with build-worker-release.py before naming them in a unit.)
 # Output: ~/.local/share/livestack-workload-releases/livestack-<8-char commit>. Refuses to overwrite.
 # Then: python3 tools/check-authority-release.py <dir>; tools/deploy-authority-release.sh <dir>

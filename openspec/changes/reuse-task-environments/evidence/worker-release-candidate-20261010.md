@@ -1,7 +1,7 @@
 # Current worker release candidate — 2026-10-10
 
 Built the worker package from current `origin/main`, commit
-`e498c8284f77848f1a0c97c6228e585b5266d6e0`, with
+`378c12d96e4e03fec1e885160f69590540f6b202`, with
 `node-py/scripts/build-worker-release.py`. The candidate is
 `/tmp/livestack-worker-reuse-task-environments-e498c828`; its content hash is
 `8917b440ac5c11055a46f396ed75d290df5e12de2c508faa5bb5ab83534cbba3` across
@@ -22,7 +22,7 @@ candidate and the required idle, fenced rollout window before deployment.
 
 ## Follow-up: retained task-E2E source fix
 
-Livestack commit `185edbf7` added `PYTHONDONTWRITEBYTECODE=1` to the
+Livestack commit `832cbc62` added `PYTHONDONTWRITEBYTECODE=1` to the
 per-attempt environment for `task_e2e` jobs. Its release was built at
 `/tmp/livestack-185edbf7` and staged at
 `~/.local/share/livestack-workload-releases/livestack-185edbf7` on `node-f`.

@@ -1,6 +1,6 @@
 # Native producer source qualification — 2026-11-12
 
-Fresh baseline: Livestack origin/main 1272b7e6. The implementation aligns to
+Fresh baseline: Livestack origin/main ecf8b09a. The implementation aligns to
 Benchday catalog commit b480f0a7d2 and consumer commit 75e1630417, whose typed
 branch verdicts remain separate. The source uses harmony.fleet.rank/1 and pair
 subjects, 32 configured pairs, one vantage per pair, strict typed preferences,

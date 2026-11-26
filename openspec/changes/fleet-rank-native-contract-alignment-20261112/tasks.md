@@ -14,7 +14,7 @@
 - [ ] 2.4 Record final-tree receipts, integrate source through the repository's normal gate, sync and archive.
 
       Current-main integration candidate (2026-11-14): merge origin/main
-      b46ec73d with the existing native candidate, preserving both histories.
+      cc3bfa51 with the existing native candidate, preserving both histories.
       All65 stream controls and strict change validation pass; real authority,
       final matching-consumer qualification and source landing remain open.
       Evidence: `evidence/current-main-integration-20261114.md`.

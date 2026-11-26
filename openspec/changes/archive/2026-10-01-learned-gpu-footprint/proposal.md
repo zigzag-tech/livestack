@@ -28,7 +28,7 @@ repository.
 measured weights + peak activation ... measure on first real run and cache it").
 **Stale in it:** its header says `measure.py` implements weights + activation
 measurement; it measured activation only, against declared weights. Same rules as the
-host-memory ledger (`host-memory-ledger`, livestack `224dce34`): learned, persisted,
+host-memory ledger (`host-memory-ledger`, livestack `a7e284ce`): learned, persisted,
 bounded, raised only by evidence, failure distinct from absence.
 
 ## What Changes

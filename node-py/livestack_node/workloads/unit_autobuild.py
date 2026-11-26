@@ -231,7 +231,7 @@ def build_release(cfg, commit, source):
             raise Stop('build', f'release_dir_exists_for_another_commit:{name}')
         # The unit carries RELEASE.json's hash and the host checks the pushed tree against it with this same
         # algorithm. A directory built by another tool (an authority release records a different hash) would stage
-        # as staged_content_hash_mismatch on every worker (fc8b905a, 2026-10-13): refuse it here, by name.
+        # as staged_content_hash_mismatch on every worker (2509f1ed, 2026-10-13): refuse it here, by name.
         if meta.get('content_hash') != tree_content_hash(out):
             raise Stop('build', f'release_dir_exists_with_a_different_content_hash:{name}')
         return name, out

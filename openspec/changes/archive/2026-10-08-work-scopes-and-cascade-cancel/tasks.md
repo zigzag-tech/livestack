@@ -33,7 +33,7 @@ Owner confirmed 2026-10-08 (lease default 30 min bounded 5..240 renewed by ZZOPS
 
 ## Record (2026-10-08)
 
-Implemented in livestack `a3a6a47f` (main). Deviations from the design: the lease is mandatory with a default (owner decision), bounds
+Implemented in livestack `b895932a` (main). Deviations from the design: the lease is mandatory with a default (owner decision), bounds
 300..14400 s (`scope_lease_min_seconds`/`max`), so "no lease means no expiry" no longer applies; scope keys exclude `/` (path segment);
 `scope_close` is a logged line (WARNING `scope_closed ...`) plus the scope row's `close_reason/closed_by/close_result`, NOT a decision-ledger record
 (the ledger schema has no such decision kind; add one if "who killed my job" must outlive scope pruning); a refusal raised after an expiry cascade commits

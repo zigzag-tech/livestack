@@ -34,9 +34,9 @@ certify a full suite or a release.
 
 Read-only authority state reports worker 1 and worker 2 ready with Flutter,
 Rust, and task-E2E profiles. Worker 1 was drained at generation 5, updated on
-release 377bb4e4, and re-enabled at generation 7. The observe report remains
+release 1f3d0d40, and re-enabled at generation 7. The observe report remains
 at spec generation 2 with no waiting reason. Automatic selection remains
-disabled. The authority process is active on release d55c4c13; the exact
+disabled. The authority process is active on release 05020fab; the exact
 source-bundle match and deployed dependency difference are recorded in
 rollout-recheck-20261009.md. No rollout promotion or rollback was performed.
 

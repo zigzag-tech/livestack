@@ -1,6 +1,6 @@
 ## Context
 
-Fresh source baseline is origin/main 1272b7e6. Older candidates disagree on
+Fresh source baseline is origin/main ecf8b09a. Older candidates disagree on
 contract spelling, pair/triple keys, state tombstones and reason bounds. They
 are reference material, not current truth. This proposal aligns the producer
 with the exact bounded catalog proposed in Benchday; it must not be activated

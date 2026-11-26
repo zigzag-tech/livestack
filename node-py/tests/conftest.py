@@ -34,7 +34,7 @@ os.environ.setdefault("LIVESTACK_HOST_HEALTH_FILE", os.path.join(
 # And for hostd's ledger dir (decision ledgers and the exclusive-device lease
 # store, device-exclusivity.sqlite3): seven test files build the hostd app
 # without setting it, so on a production host they opened the LIVE lease store.
-# With the boot-id store (96d0943e) that open releases every active lease as
+# With the boot-id store (007ad651) that open releases every active lease as
 # `previous_boot`, and a test broker's reconcile can drive the live rows too.
 # Observed 2026-11-04 on node-a: an agent's `pytest tests` killed the
 # history-scroll chain's FLUX leases at 10:27 and 10:31. Tests that need a

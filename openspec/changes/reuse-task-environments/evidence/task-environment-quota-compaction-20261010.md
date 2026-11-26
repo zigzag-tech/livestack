@@ -1,7 +1,7 @@
 # Live task-environment quota compaction
 
 Observed 2026-10-10 on the admitted node-f workers running Livestack
-`23419ff00ffb1f8bcd5ec829a45b5706a25d6f29`.
+`ee63be2bb24a6c8b97688b53b0085158cd156bcf`.
 
 The real worker flow expands an idle environment for a job and compacts its
 project quota after cleanup. Rust handle

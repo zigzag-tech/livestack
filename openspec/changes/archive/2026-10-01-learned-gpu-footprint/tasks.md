@@ -9,7 +9,7 @@ with `~/harmony-embed/venv/bin/python -m pytest` under `nice`.
 - [x] 1.1 `measure.py`: `record_resident`, reserved-aware `end`, `measure_load`,
   bounded store with quarantine and `store_error`. `manager.py`: measure real loads.
   Tests: `tests/test_learned_gpu_footprint.py` (real HTTP, real store files),
-  `tests/test_measure.py`. Positive control: all 10 new tests fail on `e8d76d70`.
+  `tests/test_measure.py`. Positive control: all 10 new tests fail on `5ed63c5b`.
   Ledger: none.
 
 ## 2. Report and plan
@@ -31,7 +31,7 @@ with `~/harmony-embed/venv/bin/python -m pytest` under `nice`.
   `examples/harmony-image/README.md` ("FLUX.2-klein on node-f").
 - [ ] 4.2 node-f host broker (`livestack-hostd`) still runs release
   `klein-host-scheduling-20261001`, which predates `"allocator"` in
-  `MEASURED_SOURCES` and the `aggregate_units` source fix (37182d6b). It already plans
+  `MEASURED_SOURCES` and the `aggregate_units` source fix (c9475dff). It already plans
   klein on the measured bytes (it takes the node's `footprint`); until upgraded it keeps
   the 0.25 GB reserve on top and its ledger labels the merged klein unit "declared".
   NOT DONE: that release is far behind main; upgrading it is its own rollout.

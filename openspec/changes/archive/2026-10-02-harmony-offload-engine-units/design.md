@@ -32,7 +32,7 @@ stop and correct this file in the same commit.
    unmeasured RAM footprint is `unknown`, never 0; a refused placement names the rule
    and the tenant that refused it.
 
-## 1. What exists today (verified 2026-10-02 against origin/main `e14ff6ca`)
+## 1. What exists today (verified 2026-10-02 against origin/main `262cb5e3`)
 
 ### The request path for an LLM
 

@@ -6,7 +6,7 @@
 #   node-py/scripts/setup-venv.sh dev        # extras to install, comma-separated
 #
 # The venv is machine-local and gitignored. It was once committed by accident
-# (54b5c6b5) and untracked with a plain `git rm` (b0c2b78f), which DELETED
+# (e9bff226) and untracked with a plain `git rm` (e24996e2), which DELETED
 # bin/ and pyvenv.cfg from every checkout that pulled it; node-e's
 # livestack-buildd kept running on the open interpreter until its next restart
 # (2026-09-29), then crash-looped on 203/EXEC for days. This script is the one

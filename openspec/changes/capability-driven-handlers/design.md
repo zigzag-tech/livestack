@@ -9,7 +9,7 @@ Where durable state lives today, and who owns it:
 | Host classes, enrolment aliases | operator policy file (`compilation_policy`, read per decision) | typed, per **physical host** |
 | Release catalogue, defaults, generations | authority SQLite (`HandlerReleaseRegistry`) | staged by operator CLI |
 | Which handlers a worker serves | worker `worker*.json` `handlers` (with argv, backend, `max_seconds`, `max_tasks`, exit codes) | typed, per worker |
-| Runtimes | worker `handler_runtimes`, now overridden by discovery (7637d681) | discovered |
+| Runtimes | worker `handler_runtimes`, now overridden by discovery (be60e6f0) | discovered |
 | Labels (`android_sdk`, `android_signer_sha256`, `region`, `rust_target`...) | worker config `labels` | typed, unverified |
 | Compilation launch fence | root unit + `verifier.json` + registry entry, **per worker id** | staged by `zzops/scripts/stage_compilation_verifier.py` |
 
@@ -139,7 +139,7 @@ Per worker x handler: `assigned -> downloading -> installed (existing digest-ver
 
 ### D5. Roster and diagnostics
 
-`roster.py` already names disagreements; it gains the matrix, one row per worker x registry-or-listed handler, states: `serving`, `eligible_not_installed` (will be offered), `installing`, `selftest_pending`, `quarantined`, `ineligible`, `withheld`, `override_serving` (listed by hand but the evaluator says it should not: observe-mode finding), `facts_unavailable`. `reason` is a code plus a human sentence with the numbers (`memory_below: needs 9.0 GiB, has 6.0 GiB`). Closed reason vocabulary (`os_mismatch`, `arch_mismatch`, `backend_unsupported`, `runtime_missing:<id>`, `tool_missing:<tool> (<probe reason>)`, `memory_below`, `disk_below`, `cpu_below`, `label_missing:<k>`, `host_not_enrolled:<class>`, `verifier_missing`, `verifier_unreachable`, `signer_not_attested`, `denied_by_worker`, `denied_by_operator`, `worker_package_capacity`, `assignment_rate_limited`, `facts_unavailable`, `facts_stale`). `GET handlers/<h>/capacity` (3429815e) additionally returns `eligible_not_installed` and a top-reasons histogram so a caller sizing work learns why capacity is low, not only how much there is. CLI: `workload handlers matrix [--handler H] [--worker W]`.
+`roster.py` already names disagreements; it gains the matrix, one row per worker x registry-or-listed handler, states: `serving`, `eligible_not_installed` (will be offered), `installing`, `selftest_pending`, `quarantined`, `ineligible`, `withheld`, `override_serving` (listed by hand but the evaluator says it should not: observe-mode finding), `facts_unavailable`. `reason` is a code plus a human sentence with the numbers (`memory_below: needs 9.0 GiB, has 6.0 GiB`). Closed reason vocabulary (`os_mismatch`, `arch_mismatch`, `backend_unsupported`, `runtime_missing:<id>`, `tool_missing:<tool> (<probe reason>)`, `memory_below`, `disk_below`, `cpu_below`, `label_missing:<k>`, `host_not_enrolled:<class>`, `verifier_missing`, `verifier_unreachable`, `signer_not_attested`, `denied_by_worker`, `denied_by_operator`, `worker_package_capacity`, `assignment_rate_limited`, `facts_unavailable`, `facts_stale`). `GET handlers/<h>/capacity` (cf583a41) additionally returns `eligible_not_installed` and a top-reasons histogram so a caller sizing work learns why capacity is low, not only how much there is. CLI: `workload handlers matrix [--handler H] [--worker W]`.
 
 ### D6. Migration of the explicit lists
 

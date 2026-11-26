@@ -286,7 +286,7 @@ configured Windows backing filesystems and their free-space reserve.
 
 ## Enrollment deployment (2026-09-08)
 
-Livestack main is shipped through `2da5f8fb4ccc155cfc559351044bb3a19233d6b2`.
+Livestack main is shipped through `9b7a1ea203656ffd859180729e2456da3248e55f`.
 The authority runs as the enabled user service `livestack-workload-authority`
 on node-a, bound only to `100.64.215.1:8810`, with a 32 GiB object cap.
 Win One runs the enabled user service `livestack-workload-worker`; user lingering
@@ -350,7 +350,7 @@ The host Docker socket's copy-up alias is also removed from the private namespac
 ## Live dependency workload (2026-09-08)
 
 The authority and Win One worker now load immutable release
-`cbf8c1f744e580016f02e4925fd90af522363560`, superseding the probe-only
+`7b15ee715b8ad1fd6e04bcd1e60fd7658db9b815`, superseding the probe-only
 rollout described above. The generic CLI captures, uploads, submits, reads
 status and downloads artifacts using the existing authenticated APIs. It
 requires no build tools on the submitting machine.
@@ -396,9 +396,9 @@ A real 12-task test proves refusal, kernel evidence, cleanup, retained artifact
 and the existing bounded infrastructure retry path. Benchday separately treats
 unclean harness teardown as infrastructure, irrespective of the assertion phase.
 
-Deployment update: worker runtime `7564ee8cd08c9221466e0dd1a5550efa288cb1b7`
+Deployment update: worker runtime `c6062ddaca34cb5225ff679fa750c10cc670d26d`
 is enabled on Win One after 22 real supervisor/worker/Docker checks passed in
-66.44 s. The authority still runs `cbf8c1f744e580016f02e4925fd90af522363560`;
+66.44 s. The authority still runs `7b15ee715b8ad1fd6e04bcd1e60fd7658db9b815`;
 its protocol and store did not change. Full handler release
 `23f0f8fccfe881737f2384e7008683a898d9fc37` uses `max_tasks: 2048` and retains
 `preparation.json` and `e2e-result.json` even on infrastructure failure.
@@ -450,7 +450,7 @@ All 17 worker checks pass on Win One (24.19 s). This establishes the race and
 its correction; the old runtime omitted exception detail, so the original
 full attempt's exact exception cause cannot be conclusively attributed.
 
-Runtime `6fb69e3c8de45ace7645af7af1d23bbea84b49fc` is deployed on Win One,
+Runtime `87ab8774f63f9d7a86f3eae6e8966357044274bc` is deployed on Win One,
 with the source cache enabled at 8 GiB / 32 entries / 14-day retention. The
 authority and installed product handlers are unchanged. Deployment occurred
 after the cancelled full retry's cleanup and an empty worker journal.
@@ -478,7 +478,7 @@ errors. All 26 real supervision/worker checks pass on Win One in 27.19 s.
 This reproduces a failure matching the warm probe's exception class, although
 the old log did not retain enough detail to prove its exact command.
 
-Cleanup fix runtime `d2f6d4898e7adee583eac16784741c73052efcc3` is deployed
+Cleanup fix runtime `9ccf62b3b4daae27faebf48d541958dbc69aa5e5` is deployed
 on Win One. Cached probe `b9f710dcb8d14bf2bc20d3954435bffb` completed in
 7.632 s on exactly one attempt (`26081cac35034fc49fddb4ef015bd2de`). The
 downloaded SHA-256-verified receipt matches that attempt, 0.1 CPU / 128 MiB
@@ -516,7 +516,7 @@ still awaits product rollout. That publisher must coordinate
 its hub publication and pending/current references before it can safely release
 superseded source inputs.
 
-Named-reference authority runtime `d87579ea72e92ec17632e66c120039e3d0c13758`
+Named-reference authority runtime `77875bcffe4a8bb84c0fa660fed123027a66516c`
 was deployed on node-a at 2026-09-08 20:20:44 EDT. The authority
 restarted as PID 46130 with zero service restarts; Win One re-registered ready
 with a heartbeat age of 2.7 seconds. All eight existing jobs remained terminal
@@ -564,7 +564,7 @@ cleanup removes partial files on failure. Deployment remains pending.
 
 ### Resume runtime deployment — 2026-09-08 21:17 EDT
 
-Runtime `341ad4e29f81a6c7f5c0b8254572e4b88feeca6f` is merged/pushed to
+Runtime `2e8546f228c1a06474d5a20e786054337a151ecd` is merged/pushed to
 Livestack main and installed on the tower authority and Win One WSL worker.
 The authority was stopped before checking its durable attempt table; zero
 unfinished attempts allowed the worker upgrade. Referenced runtime releases
@@ -710,7 +710,7 @@ Deployed 2026-10-02 ~02:35–02:50 UTC:
   terminal-result changes, so main's file was not copied). The 3 store tests that fail
   on it (`*_terminal_reason`, `cleanup_flip_*`) fail identically on the previous release.
 - node-f workers `node-f-e2e-1`/`-2`: release `native-route-bbf4d538+hostledger59d121d3`
-  (workers do not run placement, so 49882a86's change does not apply to them),
+  (workers do not run placement, so f5e4dfa4's change does not apply to them),
   drop-ins `40-host-ledger.conf`; configs (backups `*.bak-hostledger-20261002T*`) lost
   `capacity` and the 4 GiB `memory_reserve_bytes` and gained `host_services` (klein-0/1,
   harmony-image, polyasr, polytts, harmony-embed-cpu). Rolled through the authority's
@@ -725,7 +725,7 @@ What the first live decisions said (02:45 UTC, no e2e attempt running on node-f)
 - The e2e claim is 10 GiB: the last 20 succeeded `benchday.e2e.full.v1` attempts peak
   at 5.6–10.0 GiB (the 10.0s are the cgroup cap). The last 20 attempts of ANY outcome
   peaked at 2.5–7.8 GiB because most died in preparation, which is why only successes
-  teach (49882a86).
+  teach (f5e4dfa4).
 - The 14 GiB is `harmony-klein-0`'s load transient (`memory.peak` 16.0 GB, current
   0.9 GB). klein is `ResidencyPolicy.UNPINNED` with `idle_seconds` 900, so it is evicted
   between bursts and every burst after an idle period reloads it through host RAM
@@ -745,10 +745,10 @@ host), make klein's load stream to the GPU instead of materialising ~16 GB in ho
 or move klein. Not done here: the GPU planner does not yet consult the host view before
 a model load (design §6), and no worker other than node-f's sends `host`.
 
-### Corrections deployed 2026-10-02 ~02:58–03:00 UTC (livestack 224dce34)
+### Corrections deployed 2026-10-02 ~02:58–03:00 UTC (livestack a7e284ce)
 
 - Authority: `…+placement5dd5992+hostledger224dce34` (overlay of `hostview.py`,
-  `workloads/{placement,model}.py` on the 49882a86 release; same 3 pre-existing store
+  `workloads/{placement,model}.py` on the f5e4dfa4 release; same 3 pre-existing store
   test failures as before).
 - node-f workers: `native-route-bbf4d538+hostledger224dce34`; restarted idle by a
   transient `hostledger-roll-<worker>` unit that waited for `active.json` to vanish.

@@ -1,4 +1,4 @@
-"""Apply livestack 91b49f4b (hold tokens, synchronous finish, holds bounded by their request task) to an older
+"""Apply livestack 1224ba7a (hold tokens, synchronous finish, holds bounded by their request task) to an older
 process-node facade release: `python3 backport-process-node-holds.py <release>/process_node.py` edits it in place
 and refuses (AssertionError) if the file does not have a shape this was written for. Used on node-a
 2026-11-03 for releases e2fb4bbace24e144, 3e4360c1bbc9b020, depth-lease, image-wait and admit-wait
@@ -9,7 +9,7 @@ def rep(a,b,count=1):
     global s
     n=s.count(a);assert n==count,(a,n);s=s.replace(a,b)
 FINISH_NOTE="""        # Synchronous on purpose: it runs in `finally` blocks that may already
-        # be cancelled, where awaiting self.lock is cancelled before it returns (livestack 91b49f4b).
+        # be cancelled, where awaiting self.lock is cancelled before it returns (livestack 1224ba7a).
 """
 rep("""        self.active = 0
 ""","""        # One entry per admitted request, keyed by token, valued by the task
@@ -21,7 +21,7 @@ rep("""    def _protected(self):""","""    @property
         \"\"\"Requests in flight: what makes every unit of this worker busy.
 
         A hold lives no longer than the request task that took it (livestack
-        91b49f4b): cleanup that never ran would otherwise keep the device busy
+        1224ba7a): cleanup that never ran would otherwise keep the device busy
         until the facade restarts.
         \"\"\"
         for token, owner in list(self.holds.items()):

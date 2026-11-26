@@ -32,7 +32,7 @@ client (`download_into`); uploads are one request, restart from 0.
 
 ## Decisions
 
-1. **Plain Python, no new dependency.** pydantic is absent on some worker hosts (7b2e338e).
+1. **Plain Python, no new dependency.** pydantic is absent on some worker hosts (17823435).
    Validation is explicit code in `RouteDescriptor.from_config` / `RoutePolicy.from_config`;
    unknown fields refuse.
 2. **Ordering = operator intent first, evidence second.** Sort key: not degraded, then

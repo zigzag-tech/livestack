@@ -9,7 +9,7 @@ The authority on `100.64.215.1` is active on
 with `_deps` on its Python path. The host reports Python 3.14.4.
 
 Built a disposable candidate from `origin/main` at commit
-`b7f3151e19289dc9a4bd9e2e77efd78d401dcae8` using
+`29d09cb64d15d05033fe9d089bc3f5df6b93a231` using
 `node-py/scripts/build-worker-release.py`. Its code manifest is 258 files with
 content hash
 `2f77218e7eb169e971eea4ea623e32601c2a3575012ac005f29528128ccfb564`. Copied
@@ -36,7 +36,7 @@ capability and cleanup readback, a representative canary, and rollback proof.
 ## Current-origin recheck — 2026-10-10 22:58 UTC
 
 Refreshed the candidate from Livestack `origin/main` at
-`23419ff00ffb1f8bcd5ec829a45b5706a25d6f29`. Its code manifest contains 258
+`ee63be2bb24a6c8b97688b53b0085158cd156bcf`. Its code manifest contains 258
 files with content hash
 `93fcb848aed039930378494811f662a694800e4da2af476c00cd88dee73e2f54`. The
 active authority dependency directory was copied into the candidate on
@@ -54,7 +54,7 @@ window, followed by live readback, canary, and rollback proof.
 ## After the evidence landing — 2026-10-10 23:01 UTC
 
 The previous candidate was rebuilt from the new `origin/main` tip after the
-quota evidence landing: commit `c2930611666a02a6db74877ec841fc113df4b52b`.
+quota evidence landing: commit `93a9f599d592c0e85a82c96886d8bfba5b18c1b1`.
 The 258-file code hash remains
 `93fcb848aed039930378494811f662a694800e4da2af476c00cd88dee73e2f54`; the
 local and staged dependency-inclusive trees match at 409 files and hash

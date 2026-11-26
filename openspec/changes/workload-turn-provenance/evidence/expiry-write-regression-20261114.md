@@ -1,6 +1,6 @@
 # Expiry write regression — 2026-11-14
 
-Exact predecessor: af73be76661dec8ba2d009391b64be8875f74df9.
+Exact predecessor: 10a6fe33c780293c4d33f8336bbb4875bc2d8981.
 Changed runtime SHA256: 3fe8a9894296fc74512238d1520f505adfc6ce4d2891e6661ad4ae4a9686edd5.
 Tracked-source archive SHA256: 6d58dcb5ceaf2c45398fa336eaf0c5318cf18cbc732a35fbefb09df8388702e4.
 Tests ran niced on node-f, in a separate private source copy; the existing full

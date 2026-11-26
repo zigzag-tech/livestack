@@ -1,7 +1,7 @@
 # Final-tree verification
 
 The implementation and task ledger were checked at base commit
-`77412b67645f72b3ad8446c603bad5474ea69731` (`origin/main`) with staged tree
+`40fef36a1d4b77d0f26f6d30157eaa522dd5e142` (`origin/main`) with staged tree
 `928750ee904f269ad2fdfeadd169d58e9f54bd9f`.
 
 ## Results

@@ -46,10 +46,10 @@
     "text_encoder": "CPU FP32",
     "true_cfg_scale": 4.0
   },
-  "livestack_code_revision": "b5abf81940dbc3f84975c748326ef2f6c64941b1",
+  "livestack_code_revision": "a6e06e86f6daedf3849f7b710cab88e29a3bf067",
   "owner_host": "node-a",
   "owner_variant": {
-    "code_revision": "b5abf81940dbc3f84975c748326ef2f6c64941b1",
+    "code_revision": "a6e06e86f6daedf3849f7b710cab88e29a3bf067",
     "cpu_threads": 12,
     "depth_guide": {
       "config_sha256": "6d80a5e2ab3abeb773b06f917b54a72f60c35ce91091f59f79243fb0f5d3d4bd",

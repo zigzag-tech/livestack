@@ -1,8 +1,8 @@
 # Current-main producer integration candidate
 
 Fresh worktree starts from origin/main
-`b46ec73d85e688a1526408e40f1b9fbb131c61f8`. The existing clean native producer
-candidate `0d6c27a707ea4a8afa6e4cf4688349429c0b4cb4` merged without conflicts;
+`cc3bfa51720e8d83529f40a910c29a5493654dd5`. The existing clean native producer
+candidate `4320e6d918758c3a1181c0f4bbfd21a6ecd8b3fb` merged without conflicts;
 the existing candidate and its pinned Benchday captures remain unchanged.
 Pre-evidence staged tree `d8e862274a776ce4e46cce4e3d46cd67bb2b0dec`.
 

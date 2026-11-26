@@ -146,7 +146,7 @@ def _device_leases(profile, token, wait_deadline, cancel=None):
 
 WORKER_IDLE_POLL_S = 2.0
 # How long a cut request may keep its devices exclusive. The facade cuts the worker's
-# call when the caller hangs up (bd05436d), so a worker that is really generating stops
+# call when the caller hangs up (9ddd9cfe), so a worker that is really generating stops
 # within seconds; this only bounds a worker that never says idle.
 CUT_HOLD_MAX_S = 120.0
 

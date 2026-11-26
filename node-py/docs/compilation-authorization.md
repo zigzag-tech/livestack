@@ -95,7 +95,7 @@ regressions 5 passed; compilation-policy selection 11 passed. These tests do
 not certify operational deployment.
 
 The multi-worker placement control exposed that gap in the initial drain
-implementation: it failed against captured SDK `fa886b7` and passes after the
+implementation: it failed against captured SDK `badedab` and passes after the
 placement intersection. The companion infrastructure-retry control also passes.
 Principal/policy selection: 35 passed before adding the retry case; both final
 focused cases passed (2026-10-01, node-f). Operational rollout must select this

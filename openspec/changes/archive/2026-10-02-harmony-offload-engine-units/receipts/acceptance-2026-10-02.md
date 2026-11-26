@@ -57,7 +57,7 @@ The eviction here was the node's manager honouring the unit's OWN
 facade blocks while it serves — so the request took the named
 `broker temporarily forgot` fallback). Both paths are Harmony; the fallback's
 room-making is `coordinator.acquire`'s exclusive-override-coload (landed
-36a4d929) after the acceptance caught it loading onto a full card (399 MiB
+58fd9731) after the acceptance caught it loading onto a full card (399 MiB
 free, cudaMalloc failed).
 
 ## (d) `model: "local"` reaches the 27B, never Flash-Next — PASS (after fix)
@@ -91,16 +91,16 @@ point. Reasoning is returned SEPARATELY (`reasoning_content`) and tools work
 ## What the acceptance broke and the fixes it forced (all landed)
 
 1. `serve._footprint_signature` int()-crashed on a vector footprint — the node
-   would not boot (36a4d929 preceded it: `c4a120c1`).
+   would not boot (58fd9731 preceded it: `bda8aada`).
 2. A list clause (`context_len=[131072,]`) satisfied NOTHING — neither matcher
-   implemented "a value in this list" (`1e076011`).
+   implemented "a value in this list" (`1cafabec`).
 3. `HARMONY_LLM_COLOAD=0` (single-model era) made every `ensure()` evict the
    node's siblings, stopping a just-loaded Flash-Next mid-request (disabled in
    the service; `80-coload.conf.disabled-20261002`).
 4. The local fallback's room-making was coload's job — with multi-unit coload
    it loaded onto a full card. `exclusive_device` now overrides coload
-   (`36a4d929`).
-5. `model: "local"` was "no opinion" and lost to the reuse shortcut (`e4a94948`
+   (`58fd9731`).
+5. `model: "local"` was "no opinion" and lost to the reuse shortcut (`109d895e`
    lineage; see (d)).
 6. The 502 carried an empty message; it now names the exception type.
 
@@ -131,7 +131,7 @@ point. Reasoning is returned SEPARATELY (`reasoning_content`) and tools work
   131,072): the engine refused and — the acceptance's second dialect finding —
   the refusal fell through as a raw 400 because the block matched only vLLM's
   "context length" words. Fixed (Engine.context_refusal + both number
-  spellings, landed `2d1f3380`); re-shot with a ~26k-token prompt in run 2.
+  spellings, landed `473aa0d4`); re-shot with a ~26k-token prompt in run 2.
 - **(e)** — the first attempt sent `vision=[true,]` and the parser refused it
   ("bad requirement 'vision': not a number: 'true'") — a 400, correctly, and
   naming the rule; re-shot as a 503 case in run 2.
@@ -163,17 +163,17 @@ Run 2 results are appended below by the follow-up capture.
 
 | # | Found by | Fix | landed |
 |---|---|---|---|
-| 1 | node would not boot | `serve._footprint_signature` speaks the vector | `c4a120c1` |
-| 2 | scenario (a) 503 | list clause = "a value in this list" (both matchers) | `1e076011` |
+| 1 | node would not boot | `serve._footprint_signature` speaks the vector | `bda8aada` |
+| 2 | scenario (a) 503 | list clause = "a value in this list" (both matchers) | `1cafabec` |
 | 3 | flash_next stopped mid-request | `HARMONY_LLM_COLOAD=0` disabled (multi-unit coload) | service drop-in |
-| 4 | cudaMalloc failed (399 MiB free) | exclusive claim overrides coload | `36a4d929` |
-| 5 | `local` answered by flash_next | the alias is a CHOICE (`_model_choice`) | `e4a94948`+ |
-| 6 | node wedged (`residence:000`) | the queue waits OFF the event loop | `80e257cb` |
-| 7 | raw 400 instead of the 413 | context dialect via `Engine.context_refusal` | `2d1f3380` |
-| 8 | 503 said "nothing satisfies" for a floor | the 503 carries `defer_reason` | `2dc6fb33` |
-| 9 | shed loop (`relieve measured over-budget pressure`) | the exclusive claim is symmetric | `07f04731` |
-| 10 | stale world 503 on a locally-known unit | "no unit satisfies" from a stale world = did-not-know | `7692d966` |
-| 11 | ReadError stream cut | busy tenants are never evicted mid-work | `c9d3bed6` |
+| 4 | cudaMalloc failed (399 MiB free) | exclusive claim overrides coload | `58fd9731` |
+| 5 | `local` answered by flash_next | the alias is a CHOICE (`_model_choice`) | `109d895e`+ |
+| 6 | node wedged (`residence:000`) | the queue waits OFF the event loop | `3f7033b6` |
+| 7 | raw 400 instead of the 413 | context dialect via `Engine.context_refusal` | `473aa0d4` |
+| 8 | 503 said "nothing satisfies" for a floor | the 503 carries `defer_reason` | `a76a3677` |
+| 9 | shed loop (`relieve measured over-budget pressure`) | the exclusive claim is symmetric | `a382d25e` |
+| 10 | stale world 503 on a locally-known unit | "no unit satisfies" from a stale world = did-not-know | `6d1ec718` |
+| 11 | ReadError stream cut | busy tenants are never evicted mid-work | `6277d46f` |
 
 What remains TRUE and unfixed is in `_plans/harmony-engine-units.md`
 "What the queue and the re-route do NOT fix" — including the model bounce

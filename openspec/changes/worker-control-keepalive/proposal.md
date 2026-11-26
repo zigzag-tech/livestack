@@ -38,7 +38,7 @@ host-independent half.
   `Content-Length` on every response) when the request body was fully
   consumed and the client did not ask to close; anything else still closes.
   Object streams still close. The existing 15 s per-connection socket timeout
-  is the idle bound. The existing connection bound (32, livestack 06be1c0c)
+  is the idle bound. The existing connection bound (32, livestack 63f60c4a)
   becomes `32 + 2 x worker principals` (each worker keeps at most two
   connections), recomputed on principal reload; at the bound the longest-idle
   kept connection is closed to admit a newcomer, so idle workers can never

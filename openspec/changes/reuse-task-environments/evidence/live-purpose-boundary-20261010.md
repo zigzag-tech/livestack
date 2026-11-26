@@ -89,7 +89,7 @@ capacity or produced a live canary result.
 ## Local control rerun — 2026-10-10 22:05 UTC
 
 The quota compaction source is now on `origin/main` at
-`73ec01d90fd8a31fe43f4837a30e09974bcf7d50`; the 21:25 note above predates
+`53a8feafee3fc9878192c8f85adab2a9d1043e46`; the 21:25 note above predates
 that landing. Focused current-source tests passed: the toolchain-replacement
 probe and legacy parked-quota compaction/preservation controls passed 2/2 in
 6.32 seconds. The compaction fixture verifies four legacy 32 GiB reservations

@@ -2,7 +2,7 @@
 
 Worker `node-f-e2e-3` was idle before the update. Its service now uses the
 Livestack release built from current `origin/main`
-`1cfdc69b0ca545e11d871bc8d0a6f603dfbd86f6`, content hash
+`40110b6000e870121b00bb5b43fc2bc9386cd4d6`, content hash
 `8917b440ac5c11055a46f396ed75d290df5e12de2c508faa5bb5ab83534cbba3` (258
 files). The installed release verified identical to the staged candidate.
 Only worker 3 was restarted; the authority and other workers were untouched.

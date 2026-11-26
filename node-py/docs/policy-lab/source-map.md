@@ -25,7 +25,7 @@ the Rust residency binding.
 
 ## Rules and checkout state
 
-- Livestack: clean `main` at `b0c2b78f` before this change; no local
+- Livestack: clean `main` at `e24996e2` before this change; no local
   `AGENTS.md`. Only the additive policy-lab package/tests/docs are now untracked.
 - Consumer adapters live in separately governed repositories. Their local rules and
   pre-existing work must be inspected and preserved before changes.

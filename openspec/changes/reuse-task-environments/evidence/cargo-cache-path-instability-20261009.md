@@ -58,7 +58,7 @@ run demonstrates that unchanged native dependencies are not recompiled.
 ## Landed worker candidate and host prerequisite
 
 The stable-path implementation landed on Livestack `main` as commit
-`377bb4e4a567a43b65b114078cadf643952231f8`. A worker release candidate built
+`1f3d0d40a92791e48dd6a327d396352317fb3ea5`. A worker release candidate built
 from that commit contains 246 files and has content hash
 `7cf90d52f10d4e68e9442aa493c8f8f67d0ec2a6c66526893017f9dd0d05d2c2`; the
 independent release `hash` command returned the same value. The candidate is

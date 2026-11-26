@@ -106,15 +106,15 @@ that may fail) must not live in a cached layer: use `--no-cache-filter` for that
 
 ## Rollout record and measurements (2026-10-08)
 
-Release `livestack-925a02fa` (code of main 925a02fa), drop-in `95-docker-cache.conf` per worker (rollback: delete
+Release `livestack-925a02fa` (code of main cd26668a), drop-in `95-docker-cache.conf` per worker (rollback: delete
 it, `daemon-reload`, restart when idle; and set `docker_cache.enabled` false or restore `worker*.json.bak-dockercache-*`).
 Cache dir `~/.cache/livestack-docker-cache/<worker>`, bound 40 GiB per namespace (WSL 30 GiB), `canary_every` 20
 (node-f-e2e-3: 3). Drain/enable with the atomic `claim_enabled` edit in `worker-release-rollout.md`.
 
 Enabled slots (2026-10-08): node-f-e2e-1, -2, -3, -4 and -5 (cache dir named for the worker; e2e-5 configured by a
 separate rollout), node-c-wsl and node-c-wsl-2 (each its own `<worker>` dir, 30 GiB). node-f-e2e-2 runs the
-taskenv release (livestack-2151b9d4, same `docker_cache.py`/`docker_command.py` as 925a02fa) so it needs no
-PYTHONPATH change; node-c-wsl-2 got the `zzz-docker-cache.conf` drop-in (925a02fa). Backups:
+taskenv release (livestack-2151b9d4, same `docker_cache.py`/`docker_command.py` as cd26668a) so it needs no
+PYTHONPATH change; node-c-wsl-2 got the `zzz-docker-cache.conf` drop-in (cd26668a). Backups:
 `worker-2.json.bak-dockercache-*`.
 
 node-f, Benchday E2E attempts of 2026-10-08 (command.log `Built benchday/e2e-node:<fp> in Ns`, authority DB):
@@ -128,6 +128,6 @@ node-f, Benchday E2E attempts of 2026-10-08 (command.log `Built benchday/e2e-nod
 A hit with a NEW source tree (one-crate bump) measured in isolation: 241 s vs 582 s cold. Root size 22.9 GB per
 slot after the first build.
 
-Incident during rollout (fixed in 925a02fa): the first release compared job verdicts in the canary and purged a good
+Incident during rollout (fixed in cd26668a): the first release compared job verdicts in the canary and purged a good
 root, and the native frontend killed the attempt process 5 s after dockerd stopped, before the outcome was written.
 Both failed closed (next attempt wiped and ran cold).

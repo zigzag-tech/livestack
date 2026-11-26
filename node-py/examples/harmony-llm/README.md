@@ -22,7 +22,7 @@ already been versioning — and it forked the deployed copy away for a month.
 Five commits of real work landed in a repo with no remote, on one machine's
 disk, absent from node-d and node-e: the requirement grammar, the
 resident-unit fix, `context_len` describing what a unit serves, two-sided
-tool-calling derivation, and the 413 context refusal. `1d434b6` among them is
+tool-calling derivation, and the 413 context refusal. `8a98b1e` among them is
 the hash `benchday/docs/livestack-harmony.md` cites as the fix that made the
 request language usable — a citation that resolved nowhere shared.
 
